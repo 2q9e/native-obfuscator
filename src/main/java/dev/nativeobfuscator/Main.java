@@ -36,7 +36,7 @@ public final class Main {
                 --config PATH         Read options from a JSON file instead of command-line options.
                 --profile PROFILE     compatibility, balanced, aggressive or maximum.
                 --seed UNSIGNED        Reproducible LLVM build seed (default 0).
-                --max-growth PERCENT  Reject libraries above this growth relative to LLVM baseline.
+                --max-growth PERCENT  Cap executable code growth relative to the LLVM baseline.
                 --emit-c              Write generated C to --output for inspection.
                 --clang PATH          Clang executable for optional LLVM processing.
                 --llvm-opt PATH       Matching opt executable.

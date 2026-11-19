@@ -43,7 +43,7 @@ enum NativeTarget {
         throw new IllegalArgumentException("Unsupported host OS, specify --target");
     }
 
-    Path compile(Path workspace, Path source, Protector.Config config) throws IOException, InterruptedException {
+    byte[] compile(Path workspace, Path source, Protector.Config config) throws IOException, InterruptedException {
         Path output = Files.createDirectory(workspace.resolve(key)).resolve(file);
         Path headers = Path.of(System.getProperty("java.home"), "include");
         if (!Files.isRegularFile(headers.resolve("jni.h")))
@@ -73,6 +73,7 @@ enum NativeTarget {
         String machine = key.substring(0, key.indexOf('-'));
         boolean linux = key.endsWith("-linux");
         String clangTriple = machine + (linux ? "-unknown-linux-gnu" : "-w64-windows-gnu");
+        Path baseline = null;
         if (config.llvmPlugin() != null) {
             var frontend = new ArrayList<String>();
             frontend.add(config.clang());
@@ -101,13 +102,8 @@ enum NativeTarget {
                 "LLVM protection for " + key);
             lower(config, transformed, output, clangTriple, linux);
             if (config.maxGrowth() >= 0) {
-                Path baseline = output.resolveSibling("baseline-" + file);
+                baseline = output.resolveSibling("baseline-" + file);
                 lower(config, optimized, baseline, clangTriple, linux);
-                long baselineBytes = Files.size(baseline);
-                long protectedBytes = Files.size(output);
-                System.err.printf(Locale.ROOT, "%s baseline=%d protected=%d bytes%n", key, baselineBytes, protectedBytes);
-                if (protectedBytes * 100 > baselineBytes * (100L + config.maxGrowth()))
-                    throw new IOException("Native code growth limit exceeded for " + key);
             }
         } else {
             var command = compiler(config);
@@ -118,12 +114,27 @@ enum NativeTarget {
             if (linux) command.add("-lm");
             execute(command, "Native compilation for " + key);
         }
-        if (!Files.isRegularFile(output))
+        byte[] binary = readLibrary(output);
+        long protectedCode = NativeImage.executableBytes(binary, this);
+        if (baseline != null) {
+            byte[] unprotected = readLibrary(baseline);
+            long baselineCode = NativeImage.executableBytes(unprotected, this);
+            System.err.printf(Locale.ROOT,
+                "%s executable bytes %d -> %d, library bytes %d -> %d%n",
+                key, baselineCode, protectedCode, unprotected.length, binary.length);
+            if (protectedCode * 100 > baselineCode * (100L + config.maxGrowth()))
+                throw new IOException("Native code growth limit exceeded for " + key);
+        }
+        return binary;
+    }
+
+    private byte[] readLibrary(Path path) throws IOException {
+        if (!Files.isRegularFile(path))
             throw new IOException("Compiler did not write the library for " + key);
-        long size = Files.size(output);
+        long size = Files.size(path);
         if (size == 0 || size > 128L * 1024 * 1024)
             throw new IOException("Invalid native library size for " + key + ": " + size);
-        return output;
+        return Files.readAllBytes(path);
     }
 
     private ArrayList<String> compiler(Protector.Config config) throws IOException {

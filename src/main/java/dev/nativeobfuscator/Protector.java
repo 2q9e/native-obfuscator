@@ -128,7 +128,7 @@ final class Protector {
             files.putAll(outputs);
             files.put(loader + ".class", runtime(loader));
             for (NativeTarget target : config.targets) {
-                byte[] binary = Files.readAllBytes(target.compile(workspace, c, config));
+                byte[] binary = target.compile(workspace, c, config);
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
                 files.put(base, binary);
                 files.put(base + ".sha256", HexFormat.of().formatHex(Archive.sha256().digest(binary))
