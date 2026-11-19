@@ -1,0 +1,98 @@
+name: Verify native translation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['21', '25']
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - run: ./gradlew --no-daemon installDist
+      - run: bash src/test/integration.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
+        env:
+          JAVA_RELEASE: ${{ matrix.java }}
+      - run: bash src/test/modern/verify.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
+        env:
+          JAVA_RELEASE: ${{ matrix.java }}
+
+  cross-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - run: ./gradlew --no-daemon installDist
+      - name: Cross-compile the arithmetic fixture
+        shell: bash
+        run: |
+          zig_archive=zig-x86_64-linux-0.15.2.tar.xz
+          curl --fail --location --silent --show-error "https://ziglang.org/download/0.15.2/$zig_archive" -o "$zig_archive"
+          printf '%s  %s\n' 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239 "$zig_archive" | sha256sum --check
+          tar -xJf "$zig_archive"
+          mkdir -p fixture/classes
+          javac --release 25 -d fixture/classes src/test/fixtures/Arithmetic.java
+          jar --create --file fixture/original.jar --main-class Arithmetic -C fixture/classes .
+          build/install/native-obfuscator/bin/native-obfuscator protect \
+            --input fixture/original.jar --output fixture/protected.jar --include 'Arithmetic#calc*' \
+            --unsupported retain --target all --zig "$PWD/zig-x86_64-linux-0.15.2/zig"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cross-built-fixture
+          path: fixture/*.jar
+          if-no-files-found: error
+          retention-days: 3
+
+  runtime:
+    needs: cross-build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+          - runner: windows-2025
+            arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+    steps:
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          architecture: ${{ matrix.arch }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cross-built-fixture
+          path: fixture
+      - name: Run protected code on the target
+        shell: bash
+        run: |
+          java -Xverify:all -jar fixture/original.jar > original.txt
+          java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED -jar fixture/protected.jar > protected.txt
+          cmp original.txt protected.txt
