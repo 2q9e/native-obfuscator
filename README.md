@@ -4,7 +4,10 @@ Native Obfuscator converts explicitly selected JVM methods in an existing JAR to
 
 ## Build and use
 
-Use JDK 21 or 25, Gradle 9.3.1, and a Linux C11 compiler for a host build. Use Zig 0.15.2 for the four bundled targets.
+Use JDK 21 or 25, an installed Gradle 9.3.1, and a Linux C11 compiler for a host build. Use Zig 0.15.2 for the four bundled targets.
+
+The build scripts use Gradle from `GRADLE_HOME` or `PATH`. The installed CLI uses
+Java from `JAVA_HOME` or `PATH` and accepts JVM options through `JDK_JAVA_OPTIONS`.
 
 ```sh
 ./gradlew installDist
@@ -33,10 +36,10 @@ Use the matching JDK in `JAVA_HOME` for each test. Run
 `bash src/test/generated/verify.sh "$tool"` for generated stack and arithmetic
 programs and `bash src/test/modern/verify.sh "$tool"` for modern classfiles. The
 Kotlin verification script uses the pinned Kotlin compiler bundled with
-Gradle 9.3.1. Set `GRADLE_HOME` to the wrapper's Gradle installation and run
+Gradle 9.3.1. Set `GRADLE_HOME` to your Gradle installation and run
 `bash src/test/kotlin/verify.sh "$tool"`.
 
-See the [reference audit](docs/reference-audit.md) for architectural provenance and licensing.
+See the [dependency inventory](docs/dependencies.md) for the licenses shipped with the CLI.
 
 ## LLVM protection
 

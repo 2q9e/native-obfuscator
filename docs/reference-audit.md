@@ -1,6 +1,6 @@
 # Reference audit
 
-The first-party implementation uses jnic-x's general staging model: analyze and select, generate native functions, register through JNI, compile and package. The seven requested reference repositories were cloned at the revisions below under the ignored `.references/` directory. The large LLVM fork was cloned sparsely. No implementation or generated code from those clones is distributed with this project.
+The design review compared jnic-x's pipeline with six other reference projects. The translation, JNI registration, packaging, and LLVM passes were implemented in this repository. The reference checkouts are kept under the ignored `.references/` directory, with a sparse checkout for the large LLVM fork. The project distribution contains no implementation or generated code from those checkouts.
 
 | Reference | Pinned revision | Root license |
 | --- | --- | --- |

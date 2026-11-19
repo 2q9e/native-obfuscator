@@ -4,11 +4,11 @@ This example targets Minecraft 1.21.11, Yarn `1.21.11+build.4`, Loom `1.14.10`, 
 
 ## Build and protect
 
-From the native-obfuscator repository root, use JDK 21 or 25 and Gradle 9.3.1. A default native build targets the Linux host with its local C compiler. Zig is required for the optional cross-build.
+From the native-obfuscator repository root, use JDK 21 or 25 and install Gradle 9.3.1. A default native build targets the Linux host with its local C compiler. Zig is required for the optional cross-build.
 
 ```sh
-gradle installDist
-gradle -p examples/fabric protectFabricJar
+./gradlew installDist
+./gradlew -p examples/fabric protectFabricJar
 ```
 
 The example is a standalone Gradle project. `protectFabricJar` uses Loom's `remapJar` output by default and converts only `example/nativefixture/Kernel#mix(II)I`. Its filters keep the entrypoint and Mixin in Java. The output is `examples/fabric/build/libs/native-fabric-fixture-1.0.0-protected.jar`. Gradle logs the CLI's method decisions and compiler errors.
@@ -23,7 +23,7 @@ Use these Gradle properties when the corresponding input differs:
 | `nativeTarget`, `nativeZig` | A target such as `aarch64-linux` or `all`, and the absolute path to a Zig executable for cross-compilation. |
 
 ```sh
-gradle -p examples/fabric protectFabricJar \
+./gradlew -p examples/fabric protectFabricJar \
   -PnativeInputJar=/absolute/path/to/post-java-obfuscation.jar \
   '-PnativeMethod=example/nativefixture/Kernel#mix(II)I'
 ```
