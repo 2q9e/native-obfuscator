@@ -13,13 +13,30 @@ import java.util.Locale;
 
 /** Copied into the protected JAR under an input-specific name. */
 public final class NativeRuntime {
+    public static final int MAX_REGISTRATION_BYTES = 16 * 1024 * 1024;
+
     static {
         load();
     }
 
     private NativeRuntime() {}
 
-    public static native void register(Class<?> declaringClass, int index);
+    public static void register(Class<?> declaringClass, int index) {
+        String path = resourceRoot() + "registration/" + index + ".bin";
+        try (InputStream input = resource(path)) {
+            byte[] metadata = input.readNBytes(MAX_REGISTRATION_BYTES + 1);
+            if (metadata.length == 0 || metadata.length > MAX_REGISTRATION_BYTES)
+                throw new IOException("Invalid native registration metadata size");
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(metadata);
+            register0(declaringClass, index, metadata, digest);
+        } catch (IOException | NoSuchAlgorithmException failure) {
+            var error = new UnsatisfiedLinkError("Cannot load " + path + ": " + failure.getMessage());
+            error.initCause(failure);
+            throw error;
+        }
+    }
+
+    private static native void register0(Class<?> declaringClass, int index, byte[] metadata, byte[] digest);
 
     private static void load() {
         String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
@@ -33,8 +50,7 @@ public final class NativeRuntime {
         if (platform.isEmpty() || machine.isEmpty())
             throw new UnsatisfiedLinkError("Unsupported native target " + os + "/" + arch);
 
-        String root = "/META-INF/native-obfuscator/" + NativeRuntime.class.getSimpleName()
-            + "/" + machine + "-" + platform + "/";
+        String root = resourceRoot() + machine + "-" + platform + "/";
         String binary = platform.equals("windows") ? "protected.dll" : "libprotected.so";
         try {
             byte[] expected;
@@ -84,6 +100,10 @@ public final class NativeRuntime {
             error.initCause(failure);
             throw error;
         }
+    }
+
+    private static String resourceRoot() {
+        return "/META-INF/native-obfuscator/" + NativeRuntime.class.getSimpleName() + "/";
     }
 
     private static InputStream resource(String path) throws IOException {

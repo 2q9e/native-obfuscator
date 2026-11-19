@@ -53,7 +53,8 @@ final class Protector {
                 if (separator >= 0) versioned.add(name.substring(separator + 1, name.length() - 6));
             }
         }
-        var source = new StringBuilder(MethodCompiler.runtimeSupport());
+        var source = new StringBuilder(MethodCompiler.runtimeSupport()).append(registrationSupport());
+        var registrationResources = new LinkedHashMap<String, byte[]>();
         var registrations = new StringBuilder();
         var outputs = new LinkedHashMap<String, byte[]>();
         int ordinal = 0;
@@ -102,8 +103,11 @@ final class Protector {
                 }
             }
             if (!bindings.isEmpty() && !config.analyze) {
-                appendRegistrations(source, registrations, bindings, outputs.size());
-                outputs.put(entry, rewrite(node, loader, outputs.size(), bindings));
+                int index = outputs.size();
+                byte[] metadata = registrationMetadata(bindings);
+                appendRegistrations(source, registrations, bindings, index, metadata);
+                registrationResources.put(RESOURCE + id + "/registration/" + index + ".bin", metadata);
+                outputs.put(entry, rewrite(node, loader, index, bindings));
             }
         }
         if (unsupported != 0 && !config.skipUnsupported)
@@ -112,8 +116,12 @@ final class Protector {
         if (outputs.isEmpty()) throw new IOException("No supported methods were selected");
         if (files.containsKey(loader + ".class")) throw new IOException("Injected runtime path collides with input");
         source.append("JNIEXPORT void JNICALL Java_").append(jniMangle(loader))
-            .append("_register(JNIEnv *env, jclass runtime, jclass owner, jint index) {\n")
-            .append("    (void)runtime;\n    switch (index) {\n").append(registrations)
+            .append("_register0(JNIEnv *env, jclass runtime, jclass owner, jint index, jbyteArray metadata, jbyteArray digest) {\n")
+            .append("    (void)runtime;\n")
+            .append("    unsigned char actual_digest[32];\n")
+            .append("    (*env)->GetByteArrayRegion(env, digest, 0, 32, (jbyte *)actual_digest);\n")
+            .append("    if ((*env)->ExceptionCheck(env)) return;\n")
+            .append("    switch (index) {\n").append(registrations)
             .append("    default: break;\n    }\n")
             .append("    if (!(*env)->ExceptionCheck(env)) {\n")
             .append("        jclass error = (*env)->FindClass(env, \"java/lang/UnsatisfiedLinkError\");\n")
@@ -127,6 +135,7 @@ final class Protector {
         try {
             Path c = Files.writeString(workspace.resolve("translated.c"), source);
             files.putAll(outputs);
+            files.putAll(registrationResources);
             files.put(loader + ".class", runtime(loader));
             for (NativeTarget target : config.targets) {
                 byte[] binary = target.compile(workspace, c, config, null);
@@ -174,7 +183,7 @@ final class Protector {
             digest.update(data);
         });
         digest.update((config.includes + "\n" + config.excludes + "\n" + config.targets
-            + "\n" + config.llvmPasses + "\nformat 1").getBytes(StandardCharsets.UTF_8));
+            + "\n" + config.llvmPasses + "\nformat 2").getBytes(StandardCharsets.UTF_8));
         return "Runtime" + HexFormat.of().formatHex(digest.digest(), 0, 16);
     }
 
@@ -223,31 +232,81 @@ final class Protector {
         }
     }
 
-    private static void appendRegistrations(StringBuilder source, StringBuilder dispatch,
-                                            List<Binding> bindings, int index) throws IOException {
-        for (Binding binding : bindings) source.append(binding.c);
-        source.append("static const JNINativeMethod class_").append(index).append("[] = {\n");
-        for (Binding binding : bindings) {
-            source.append("    {").append(cString(binding.method.name)).append(", ")
-                .append(cString(binding.method.desc)).append(", (void *)").append(binding.symbol).append("},\n");
+    private static byte[] registrationMetadata(List<Binding> bindings) throws IOException {
+        var bytes = new ByteArrayOutputStream();
+        try (var out = new DataOutputStream(bytes)) {
+            for (Binding binding : bindings) {
+                out.writeUTF(binding.method.name);
+                out.writeByte(0);
+                out.writeUTF(binding.method.desc);
+                out.writeByte(0);
+                if (bytes.size() > NativeRuntime.MAX_REGISTRATION_BYTES)
+                    throw new IOException("Native registration metadata exceeds size limit");
+            }
         }
-        source.append("};\n\n");
+        return bytes.toByteArray();
+    }
+
+    private static void appendRegistrations(StringBuilder source, StringBuilder dispatch,
+                                            List<Binding> bindings, int index, byte[] metadata) {
+        for (Binding binding : bindings) source.append(binding.c);
+        source.append("static void *const class_").append(index).append("[] = {\n");
+        for (Binding binding : bindings) {
+            source.append("    (void *)").append(binding.symbol).append(",\n");
+        }
+        source.append("};\n");
+        var digest = HexFormat.ofDelimiter(", ").withPrefix("0x").formatHex(Archive.sha256().digest(metadata));
+        source.append("static const unsigned char class_digest_").append(index)
+            .append("[] = {").append(digest).append("};\n\n");
         dispatch.append("    case ").append(index).append(":\n")
-            .append("        if ((*env)->RegisterNatives(env, owner, class_").append(index).append(", ")
+            .append("        if (memcmp(actual_digest, class_digest_").append(index).append(", 32) == 0")
+            .append(" && register_methods(env, owner, metadata, class_").append(index).append(", ")
             .append(bindings.size()).append(") == JNI_OK) return;\n")
             .append("        break;\n");
     }
 
-    private static String cString(String value) throws IOException {
-        var bytes = new ByteArrayOutputStream();
-        try (var out = new DataOutputStream(bytes)) { out.writeUTF(value); }
-        byte[] encoded = bytes.toByteArray();
-        var escaped = new StringBuilder("\"");
-        for (int i = 2; i < encoded.length; i++) {
-            int b = Byte.toUnsignedInt(encoded[i]);
-            escaped.append('\\').append((b >>> 6) & 7).append((b >>> 3) & 7).append(b & 7);
-        }
-        return escaped.append('"').toString();
+    private static String registrationSupport() {
+        return """
+            #include <stdlib.h>
+
+            static char *registration_string(unsigned char **cursor, const unsigned char *end) {
+                unsigned char *field = *cursor;
+                size_t remaining = (size_t)(end - field);
+                if (remaining < 3) return NULL;
+                size_t length = ((size_t)field[0] << 8) | field[1];
+                if (length == 0 || length > remaining - 3 || field[2 + length] != 0
+                        || memchr(field + 2, 0, length) != NULL) return NULL;
+                *cursor = field + length + 3;
+                return (char *)(field + 2);
+            }
+
+            static jint register_methods(JNIEnv *env, jclass owner, jbyteArray metadata,
+                                         void *const *functions, jint count) {
+                JNINativeMethod *methods = calloc((size_t)count, sizeof *methods);
+                if (methods == NULL) return JNI_ERR;
+                jsize length = (*env)->GetArrayLength(env, metadata);
+                jbyte *data = (*env)->GetByteArrayElements(env, metadata, NULL);
+                if (data == NULL) {
+                    free(methods);
+                    return JNI_ERR;
+                }
+                unsigned char *cursor = (unsigned char *)data;
+                const unsigned char *end = cursor + length;
+                jint status = JNI_ERR;
+                for (jint i = 0; i < count; ++i) {
+                    methods[i].name = registration_string(&cursor, end);
+                    methods[i].signature = registration_string(&cursor, end);
+                    if (methods[i].name == NULL || methods[i].signature == NULL) goto cleanup;
+                    methods[i].fnPtr = functions[i];
+                }
+                if (cursor == end) status = (*env)->RegisterNatives(env, owner, methods, count);
+            cleanup:
+                (*env)->ReleaseByteArrayElements(env, metadata, data, JNI_ABORT);
+                free(methods);
+                return status;
+            }
+
+            """;
     }
 
     private static String jniMangle(String name) {
