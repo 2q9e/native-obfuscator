@@ -47,6 +47,12 @@ javap -p -s -classpath input.jar my.mod.Math
 - Protect an unsigned input JAR, then sign the output if your release process requires signing. Use `--emit-c` to inspect the generated C.
 - For repeatable builds, save the options in a [JSON configuration](examples/protect.json) and run `"$tool" protect --config protect.json`. Relative paths resolve from the working directory.
 
+## Optional file padding
+
+Interactive `protect` runs ask whether to add 12 standalone utility class files. Press Enter to skip padding. Use `--padding on` or `--padding off` to choose in advance. Non-interactive builds default to off. In JSON configuration, set `"padding": "on"` or `"padding": "off"`.
+
+The classes contain working routines such as binary search, checksums, and moving averages. They use obfuscated class and method names and omit debug metadata. The protected JAR stores them as resources outside its application classpath, so the application does not load or execute them. Padding increases the size of the output JAR.
+
 ## Minecraft Fabric
 
 Run Native Obfuscator on the JAR after Fabric Loom's `remapJar` task. If you also use a Java bytecode obfuscator, pass its remapped output to Native Obfuscator and select methods by their final names. Start with internal numeric methods. Fabric entrypoints and classes declared in Mixin, language-adapter, and access-widener metadata are excluded from conversion.

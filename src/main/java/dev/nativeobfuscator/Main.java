@@ -3,6 +3,7 @@ package dev.nativeobfuscator;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import java.io.Console;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,6 +38,7 @@ public final class Main {
                 --profile PROFILE     compatibility, balanced, aggressive or maximum.
                 --seed UNSIGNED        Reproducible LLVM build seed (default 0).
                 --max-growth PERCENT  Cap executable code growth relative to the LLVM baseline.
+                --padding MODE        on or off. Prompts for JAR output in an interactive terminal.
                 --markers COUNT       Add 1-1000 inert analysis markers (disabled by default).
                 --marker-seed UINT64  Reproducible marker seed (default 0).
                 --emit-c              Write generated C to --output for inspection.
@@ -96,7 +98,7 @@ public final class Main {
                     else targets.add(NativeTarget.parse(value));
                 }
                 case "--input", "--output", "--zig", "--unsupported", "--clang", "--llvm-opt", "--llvm-plugin",
-                     "--llvm-passes", "--profile", "--seed", "--max-growth", "--markers", "--marker-seed" -> {
+                     "--llvm-passes", "--profile", "--seed", "--max-growth", "--padding", "--markers", "--marker-seed" -> {
                     if (options.putIfAbsent(key, value) != null)
                         throw new IllegalArgumentException("Repeated option " + key);
                 }
@@ -155,9 +157,43 @@ public final class Main {
             throw new IllegalArgumentException("--markers must be between 0 and 1000");
         if ((markers > 0 && (analyze || emitC)) || (markers == 0 && options.containsKey("--marker-seed")))
             throw new IllegalArgumentException("Markers require protect JAR output and a positive --markers count");
+        boolean padding = parsePadding(options.get("--padding"), !analyze && !emitC);
         return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), List.copyOf(targets),
             options.get("--zig"), skip, analyze, emitC, options.get("--clang"), options.get("--llvm-opt"),
-            plugin, plugin == null ? null : passes, growth, markers, markerSeed);
+            plugin, plugin == null ? null : passes, growth, markers, markerSeed, padding);
+    }
+
+    private static boolean parsePadding(String mode, boolean jarOutput) {
+        if (!jarOutput) {
+            if (mode != null) throw new IllegalArgumentException("--padding requires protect JAR output");
+            return false;
+        }
+        if (mode != null) {
+            return switch (mode) {
+                case "on" -> true;
+                case "off" -> false;
+                default -> throw new IllegalArgumentException("--padding must be on or off");
+            };
+        }
+
+        Console console = System.console();
+        if (!isTerminal(console)) return false;
+        System.err.printf("Add %d standalone utility classes as file padding? [y/N] ", FilePadding.classCount());
+        System.err.flush();
+        String answer = console.readLine();
+        return answer != null && (answer.strip().equalsIgnoreCase("y") || answer.strip().equalsIgnoreCase("yes"));
+    }
+
+    private static boolean isTerminal(Console console) {
+        if (console == null) return false;
+        try {
+            // Newer JDKs can return a Console for redirected input as well.
+            return Boolean.TRUE.equals(Console.class.getMethod("isTerminal").invoke(console));
+        } catch (NoSuchMethodException java21) {
+            return true;
+        } catch (ReflectiveOperationException failure) {
+            return false;
+        }
     }
 
     private static String[] loadConfig(String action, Path path) throws IOException {

@@ -85,4 +85,29 @@ grep -q 'Duplicate JAR entry' "$work/duplicate.err"
 grep -q 'Unsafe JAR entry name' "$work/traversal.err"
 grep -q 'Signed input JAR' "$work/signed.err"
 grep -q 'classfile' "$work/malformed.err"
+if (( $# == 0 )); then
+    "$tool" protect --input "$work/original.jar" --output "$work/padded.jar" --include 'Arithmetic#calc*' \
+        --unsupported retain --padding on > "$work/padded.jsonl"
+    "$java_home/bin/java" -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED \
+        -jar "$work/padded.jar" > "$work/padded.txt"
+    cmp "$work/protected.txt" "$work/padded.txt"
+    python3 - "$work" <<'PYTHON'
+import pathlib, re, sys, zipfile
+
+work = pathlib.Path(sys.argv[1])
+with zipfile.ZipFile(work / "protected.jar") as standard, zipfile.ZipFile(work / "padded.jar") as padded:
+    new_entries = set(padded.namelist()) - set(standard.namelist())
+    assert len(new_entries) == 12, new_entries
+    for unchanged in standard.namelist():
+        assert standard.read(unchanged) == padded.read(unchanged), unchanged
+    for entry in new_entries:
+        assert re.fullmatch(
+            r"META-INF/native-obfuscator/Runtime[0-9a-f]{32}/padding/dev/nativeobfuscator/padding/C[0-9a-f]{24}\.class",
+            entry,
+        ), entry
+        bytecode = padded.read(entry)
+        assert bytecode.startswith(bytes.fromhex("cafebabe")), entry
+        assert b"SourceFile" not in bytecode, entry
+PYTHON
+fi
 printf 'Java %s differential test passed (%s)\n' "$release" "$(cat "$work/protected.txt")"

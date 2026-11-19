@@ -34,7 +34,8 @@ final class Protector {
 
     record Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
-                  boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed) {}
+                  boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed,
+                  boolean padding) {}
     record Decision(String method, String result, String reason) {}
     private record Binding(MethodNode method, String symbol, String c) {}
 
@@ -136,6 +137,9 @@ final class Protector {
             }
             if (config.markers > 0) {
                 files.put(RESOURCE + id + "/markers.txt", markers(id, config.markers, config.markerSeed));
+            }
+            if (config.padding) {
+                FilePadding.bundle(files, RESOURCE + id + "/", id);
             }
             Archive.write(files, config.output);
         } finally {
