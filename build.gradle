@@ -32,3 +32,16 @@ tasks.withType(AbstractArchiveTask).configureEach {
     preserveFileTimestamps = false
     reproducibleFileOrder = true
 }
+
+tasks.named('startScripts') {
+    def unixLauncher = layout.projectDirectory.file('src/launchers/native-obfuscator').asFile
+    def windowsLauncher = layout.projectDirectory.file('src/launchers/native-obfuscator.bat').asFile
+
+    inputs.files(unixLauncher, windowsLauncher).withPathSensitivity(PathSensitivity.RELATIVE)
+    unixStartScriptGenerator = { details, output ->
+        output.write(unixLauncher.getText('UTF-8'))
+    } as org.gradle.jvm.application.scripts.ScriptGenerator
+    windowsStartScriptGenerator = { details, output ->
+        output.write(windowsLauncher.getText('UTF-8').replace('\r\n', '\n').replace('\n', '\r\n'))
+    } as org.gradle.jvm.application.scripts.ScriptGenerator
+}

@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+launcher=$0
+while [ -L "$launcher" ]; do
+    target=$(readlink "$launcher")
+    case "$target" in
+        /*) launcher=$target ;;
+        *) launcher=$(dirname -- "$launcher")/$target ;;
+    esac
+done
+app_root=$(CDPATH= cd -P "$(dirname -- "$launcher")/.." && pwd)
+java_command=java
+if [ -n "${JAVA_HOME:-}" ]; then
+    java_command="$JAVA_HOME/bin/java"
+fi
+if [ -n "${JAVA_OPTS:-}${NATIVE_OBFUSCATOR_OPTS:-}" ]; then
+    export JDK_JAVA_OPTIONS="${JDK_JAVA_OPTIONS:-} ${JAVA_OPTS:-} ${NATIVE_OBFUSCATOR_OPTS:-}"
+fi
+exec "$java_command" -cp "$app_root/lib/*" dev.nativeobfuscator.Main "$@"
