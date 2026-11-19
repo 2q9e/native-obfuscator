@@ -1,0 +1,62 @@
+# Fabric fixture
+
+This example targets Minecraft 1.21.11, Yarn `1.21.11+build.4`, Loom `1.14.10`, and Fabric Loader `0.18.4`. The mod requires Java 21 or later and has no Fabric API dependency. At initialization it checks the integer kernel, a Mixin accessor on Minecraft's `Identifier`, and a direct access to a second private field exposed by an access widener. Fabric provides the version-specific [Loom documentation](https://docs.fabricmc.net/1.21.11/develop/loom/) and [1.21.11 release guidance](https://fabricmc.net/2025/12/05/12111.html).
+
+## Build and protect
+
+From the native-obfuscator repository root, use JDK 21 or 25 and Gradle 9.3.1. A default native build targets the Linux host with its local C compiler. Zig is required for the optional cross-build.
+
+```sh
+gradle installDist
+gradle -p examples/fabric protectFabricJar
+```
+
+The example is a standalone Gradle project. `protectFabricJar` uses Loom's `remapJar` output by default and converts only `example/nativefixture/Kernel#mix(II)I`. Its filters keep the entrypoint and Mixin in Java. The output is `examples/fabric/build/libs/native-fabric-fixture-1.0.0-protected.jar`. Gradle logs the CLI's method decisions and compiler errors.
+
+Use these Gradle properties when the corresponding input differs:
+
+| Property | Value |
+| --- | --- |
+| `nativeInputJar` | Absolute path to the existing Java obfuscator's output. Start from Loom's remapped JAR and preserve intermediary mappings, Fabric metadata, mixin configuration and access-widener resources. |
+| `nativeMethod` | Final `owner#name(descriptor)` selector when a Java obfuscator renames the kernel. Leave it unset if the original signature is retained. |
+| `nativeCli` | Absolute path to an alternate native-obfuscator executable. The default uses the root `installDist` Java libraries. |
+| `nativeTarget`, `nativeZig` | A target such as `aarch64-linux` or `all`, and the absolute path to a Zig executable for cross-compilation. |
+
+```sh
+gradle -p examples/fabric protectFabricJar \
+  -PnativeInputJar=/absolute/path/to/post-java-obfuscation.jar \
+  '-PnativeMethod=example/nativefixture/Kernel#mix(II)I'
+```
+
+To check that the kernel is native and the access widener uses the runtime namespace:
+
+```sh
+fixture_jar=examples/fabric/build/libs/native-fabric-fixture-1.0.0-protected.jar
+javap -p -classpath "$fixture_jar" example.nativefixture.Kernel
+unzip -p "$fixture_jar" native-fixture.accesswidener
+```
+
+Expect `static native int mix(int, int)` and the `intermediary` access-widener header, with the widened `Identifier` field mapped to `class_2960.field_13355`.
+
+## Run on Minecraft
+
+In a Minecraft 1.21.11 Fabric Loader 0.18.4 test server whose operator has accepted the Minecraft EULA, install the protected JAR in `mods/`. Use the [official Fabric server launcher](https://fabricmc.net/use/server/), with the original fixture JAR removed from that server's mods. Run the installed launcher, substituting its filename if it differs.
+
+```sh
+java --enable-native-access=ALL-UNNAMED -jar fabric-server-launch.jar nogui
+```
+
+Look for `Native fixture passed (kernel = 997305193, Mixin and access widener active)` in the server log. Wait for the Minecraft world to finish loading, enter `stop` in the server console, and confirm that it exits. The repository and build tasks do not accept Minecraft's EULA.
+
+## Offline bootstrap smoke test
+
+The smoke script exercises the real publisher server JAR in Fabric's production mappings. Its first process starts the Minecraft command-line entrypoint through Fabric Loader with `--help`. Its second process initializes the production Fabric class loader and invokes Fabric's dedicated-server mod initialization callback under `-Xcheck:jni`. This checks actual native execution, mixin application, and access widening before world startup.
+
+On Linux, supply the original Minecraft 1.21.11 server bundle and a colon-separated classpath of absolute paths to the Fabric Loader `0.18.4`, `intermediary:1.21.11:v2`, `sponge-mixin:0.17.0+mixin.0.8.7`, and ASM `9.9` JARs. The ASM modules are `asm`, `asm-analysis`, `asm-commons`, `asm-tree`, and `asm-util`. Use the original bundle `minecraft-server.jar` from the Loom cache or the server download from Minecraft.
+
+```sh
+examples/fabric/smoke/check-bootstrap.sh "$fixture_jar" \
+  /absolute/path/to/minecraft-server.jar "$fabric_classpath"
+```
+
+The script uses a temporary working directory and does not start a world. Neither smoke process creates or changes an EULA file.

@@ -1,0 +1,82 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version '1.14.10'
+}
+
+version = '1.0.0'
+group = 'example.nativefixture'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft 'com.mojang:minecraft:1.21.11'
+    mappings 'net.fabricmc:yarn:1.21.11+build.4:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.18.4'
+}
+
+loom {
+    accessWidenerPath = file('src/main/resources/native-fixture.accesswidener')
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+
+def remap = tasks.named('remapJar')
+def remappedJar = remap.flatMap { it.archiveFile }
+def externalJar = providers.gradleProperty('nativeInputJar').map { file(it) }
+def nativeInput = externalJar.orElse(remappedJar.map { it.asFile })
+def protectedJar = layout.buildDirectory.file("libs/${project.name}-${version}-protected.jar")
+def nativeCli = providers.gradleProperty('nativeCli').map { file(it) }
+def nativeLibs = fileTree('../../build/install/native-obfuscator/lib') { include '*.jar' }
+def nativeMethod = providers.gradleProperty('nativeMethod').orElse('example/nativefixture/Kernel#mix(II)I')
+def nativeTarget = providers.gradleProperty('nativeTarget')
+def nativeZig = providers.gradleProperty('nativeZig')
+
+tasks.register('protectFabricJar', Exec) {
+    group = 'build'
+    description = 'Convert the example kernel after Fabric Loom remaps the mod.'
+    if (!externalJar.isPresent()) {
+        dependsOn remap
+    }
+    inputs.file(nativeInput)
+    if (nativeCli.isPresent()) {
+        inputs.file(nativeCli)
+    } else {
+        inputs.files(nativeLibs)
+    }
+    inputs.property('nativeMethod', nativeMethod)
+    inputs.property('nativeTarget', nativeTarget.orElse(''))
+    inputs.property('nativeZig', nativeZig.orElse(''))
+    outputs.file(protectedJar)
+    // The result also depends on the local compiler and the CLI's installed libraries.
+    outputs.upToDateWhen { false }
+
+    doFirst {
+        if (nativeCli.isPresent()) {
+            executable nativeCli.get()
+        } else {
+            if (nativeLibs.isEmpty()) {
+                throw new GradleException('Build the root installDist or supply -PnativeCli=/path/to/executable')
+            }
+            executable javaToolchains.launcherFor(java.toolchain).get().executablePath.asFile
+            args '-cp', nativeLibs.asPath, 'dev.nativeobfuscator.Main'
+        }
+
+        def output = protectedJar.get().asFile
+        output.parentFile.mkdirs()
+        args 'protect', '--input', nativeInput.get().absolutePath,
+            '--output', output.absolutePath,
+            '--include', nativeMethod.get(),
+            '--exclude', 'example/nativefixture/NativeFixture#*',
+            '--exclude', 'example/nativefixture/mixin/*#*'
+        if (nativeTarget.isPresent()) {
+            args '--target', nativeTarget.get()
+        }
+        if (nativeZig.isPresent()) {
+            args '--zig', file(nativeZig.get()).absolutePath
+        }
+    }
+}

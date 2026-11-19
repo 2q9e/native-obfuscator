@@ -1,0 +1,6 @@
+{
+  "required": true,
+  "package": "example.nativefixture.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": ["IdentifierAccessor"]
+}

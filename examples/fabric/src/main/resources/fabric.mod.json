@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "native_fixture",
+  "version": "1.0.0",
+  "name": "Native Obfuscator Fabric Fixture",
+  "entrypoints": {
+    "main": ["example.nativefixture.NativeFixture"]
+  },
+  "mixins": ["native-fixture.mixins.json"],
+  "accessWidener": "native-fixture.accesswidener",
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "minecraft": "1.21.11",
+    "java": ">=21"
+  }
+}
