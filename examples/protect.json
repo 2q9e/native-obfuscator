@@ -1,0 +1,7 @@
+{
+  "input": "example-original.jar",
+  "output": "example-protected.jar",
+  "include": ["example/nativefixture/Kernel#mix(II)I"],
+  "unsupported": "fail",
+  "target": ["aarch64-linux"]
+}
