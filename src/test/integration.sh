@@ -97,7 +97,7 @@ if (( $# == 0 )); then
 import pathlib, re, sys, zipfile
 
 work = pathlib.Path(sys.argv[1])
-native_names = re.findall(r"^static \w+ JNICALL (method_[0-9a-f]{121})\(", (work / "translated.c").read_text(), re.M)
+native_names = re.findall(r"^static \w+ JNICALL (method_[0-9a-f]{293})\(", (work / "translated.c").read_text(), re.M)
 assert len(set(native_names)) == len(native_names) == 18, native_names
 with zipfile.ZipFile(work / "protected.jar") as standard, zipfile.ZipFile(work / "padded.jar") as padded:
     new_entries = set(padded.namelist()) - set(standard.namelist())
@@ -105,14 +105,17 @@ with zipfile.ZipFile(work / "protected.jar") as standard, zipfile.ZipFile(work /
     for unchanged in standard.namelist():
         assert standard.read(unchanged) == padded.read(unchanged), unchanged
     for entry in new_entries:
-        assert re.fullmatch(
-            r"META-INF/native-obfuscator/Runtime[0-9a-f]{32}/padding/dev/nativeobfuscator/padding/C[0-9a-f]{127}\.class",
-            entry,
-        ), entry
+        root, class_entry = entry.split("/padding/", 1)
+        assert re.fullmatch(r"META-INF/native-obfuscator/Runtime[0-9a-f]{32}", root), entry
+        assert class_entry.endswith(".class") and len(class_entry.removesuffix(".class")) == 300, entry
+        assert all(len(part) <= 255 for part in class_entry.split("/")), entry
+        leaf = class_entry.rsplit("/", 1)[1]
+        assert re.fullmatch(r"C[0-9a-f !$+_~\-]{199}\.class", leaf) and "  " in leaf, leaf
         bytecode = padded.read(entry)
         assert bytecode.startswith(bytes.fromhex("cafebabe")), entry
         assert b"SourceFile" not in bytecode, entry
-        assert re.search(rb"m[0-9a-f]{127}(?![0-9a-f])", bytecode), entry
+        name = re.search(rb"m[0-9a-f !$+_~\-]{299}(?![0-9a-f !$+_~\-])", bytecode)
+        assert name and b"  " in name.group(), entry
 PYTHON
 fi
 printf 'Java %s differential test passed (%s)\n' "$release" "$(cat "$work/protected.txt")"

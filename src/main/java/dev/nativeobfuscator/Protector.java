@@ -86,7 +86,7 @@ final class Protector {
                 } else if (exclusion != null) {
                     report.accept(new Decision(name, "excluded", exclusion));
                 } else {
-                    String symbol = GeneratedNames.forSymbol("method_", id, name);
+                    String symbol = GeneratedNames.nativeFunction(id, name);
                     try {
                         int sort = Type.getReturnType(method.desc).getSort();
                         if (sort == Type.ARRAY || sort == Type.OBJECT)

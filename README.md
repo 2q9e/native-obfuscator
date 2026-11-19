@@ -51,7 +51,7 @@ javap -p -s -classpath input.jar my.mod.Math
 
 Interactive `protect` runs ask whether to add 12 standalone utility class files. Press Enter to skip padding. Use `--padding on` or `--padding off` to choose in advance. Non-interactive builds default to off. In JSON configuration, set `"padding": "on"` or `"padding": "off"`.
 
-The classes contain working routines such as binary search, checksums, and moving averages. They use 128-character ASCII class and method names and omit debug metadata. The protected JAR stores them as resources outside its application classpath, so the application does not load or execute them. Padding increases the size of the output JAR.
+The classes contain working routines such as binary search, checksums, and moving averages. Their 300-character internal class and method names include double spaces and punctuation. The class name is split across its package and a 200-character filename stem. Debug metadata is omitted. The protected JAR stores them as resources outside its application classpath, so the application does not load or execute them. Padding increases the size of the output JAR.
 
 ## Minecraft Fabric
 
@@ -90,7 +90,7 @@ Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `c
 
 ## Bytecode support
 
-The translator handles primitive numeric instructions, branches, loops, switches, primitive returns, and reference identity checks in static and instance methods. Constructors, interface methods, calls, field access, array operations, reference returns, and exception handlers stay in JVM bytecode. The tool preserves the input classfile version and Java names used by callers. It generates 128-character internal native function names with a `method_` prefix.
+The translator handles primitive numeric instructions, branches, loops, switches, primitive returns, and reference identity checks in static and instance methods. Constructors, interface methods, calls, field access, array operations, reference returns, and exception handlers stay in JVM bytecode. The tool preserves the input classfile version and Java names used by callers. It generates 300-character internal native function names with a `method_` prefix.
 
 GitHub Actions runs Java 21 and 25 differential tests, Kotlin tests, and JNI runtime checks on all four targets. See the [verification report](docs/verification.md) for the results and the scope of the Fabric smoke test. For local differential tests, set `JAVA_HOME` and `JAVA_RELEASE` to the matching JDK and run `bash src/test/integration.sh "$tool"`. Set `GRADLE_HOME` to Gradle 9.3.1 to run `bash src/test/kotlin/verify.sh "$tool"`.
 

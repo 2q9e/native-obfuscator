@@ -28,12 +28,12 @@ final class FilePadding {
     static void bundle(Map<String, byte[]> files, String resourceRoot, String buildId) throws IOException {
         for (Class<?> utility : UTILITIES) {
             String original = Type.getInternalName(utility);
-            String renamed = "dev/nativeobfuscator/padding/" + GeneratedNames.forSymbol("C", buildId, original);
+            String renamed = GeneratedNames.paddingClass(buildId, original);
             var names = new HashMap<String, String>();
             names.put(original, renamed);
             for (var method : utility.getDeclaredMethods()) {
                 String methodKey = original + "." + method.getName() + Type.getMethodDescriptor(method);
-                names.put(methodKey, GeneratedNames.forSymbol("m", buildId, methodKey));
+                names.put(methodKey, GeneratedNames.paddingMethod(buildId, methodKey));
             }
 
             var writer = new ClassWriter(0);
