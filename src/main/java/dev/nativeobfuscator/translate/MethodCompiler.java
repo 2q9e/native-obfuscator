@@ -105,7 +105,12 @@ public final class MethodCompiler {
                 String slot = "l[" + increment.var + "].i";
                 line(code, slot + " = bits_i((uint32_t)" + slot + " + (uint32_t)(" + increment.incr + "));");
             }
-            case DUP -> line(code, out + " = " + a + ";");
+            case DUP -> duplicate(code, frame, 1, 0);
+            case DUP_X1 -> duplicate(code, frame, 1, 1);
+            case DUP_X2 -> duplicate(code, frame, 1, 2);
+            case DUP2 -> duplicate(code, frame, 2, 0);
+            case DUP2_X1 -> duplicate(code, frame, 2, 1);
+            case DUP2_X2 -> duplicate(code, frame, 2, 2);
             case SWAP -> line(code, "{ Value tmp = " + a + "; " + a + " = " + b + "; " + b + " = tmp; }");
             case IADD, ISUB, IMUL, IAND, IOR, IXOR, LADD, LSUB, LMUL, LAND, LOR, LXOR -> {
                 boolean wide = op == LADD || op == LSUB || op == LMUL || op == LAND || op == LOR || op == LXOR;
@@ -219,6 +224,24 @@ public final class MethodCompiler {
             case LRETURN, FRETURN, DRETURN, ARETURN -> line(code, "return " + a + "." + field(result) + ";");
             default -> throw new Unsupported("unsupported operation");
         }
+    }
+
+    private static void duplicate(StringBuilder code, Frame<BasicValue> frame,
+                                  int topSlots, int belowSlots) throws Unsupported {
+        int depth = frame.getStackSize();
+        int top = startOfSlots(frame, depth, topSlots);
+        int bottom = startOfSlots(frame, top, belowSlots);
+        int count = depth - top;
+        line(code, "{ Value copy[" + count + "]; memcpy(copy, &s[" + top + "], sizeof copy);"
+            + " memmove(&s[" + (bottom + count) + "], &s[" + bottom + "], "
+            + (depth - bottom) + " * sizeof(Value));"
+            + " memcpy(&s[" + bottom + "], copy, sizeof copy); }");
+    }
+
+    private static int startOfSlots(Frame<BasicValue> frame, int end, int slots) throws Unsupported {
+        while (slots > 0 && end > 0) slots -= frame.getStack(--end).getSize();
+        if (slots != 0) throw new Unsupported("invalid stack category for duplication");
+        return end;
     }
 
     private static String zeroReturn(Type type) {
