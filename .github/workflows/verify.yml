@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   differential:
+    needs: cross-build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
@@ -24,7 +25,11 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
-      - run: ./gradlew --no-daemon installDist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-obfuscator-cli
+      - run: mkdir -p build/install && tar -xzf native-obfuscator-cli.tar.gz -C build/install
+      - run: ./gradlew --version
       - run: bash src/test/integration.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
         env:
           JAVA_RELEASE: ${{ matrix.java }}
@@ -52,6 +57,13 @@ jobs:
           distribution: temurin
           java-version: '25'
       - run: ./gradlew --no-daemon installDist
+      - run: tar -czf native-obfuscator-cli.tar.gz -C build/install native-obfuscator
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-obfuscator-cli
+          path: native-obfuscator-cli.tar.gz
+          if-no-files-found: error
+          retention-days: 3
       - name: Cross-compile the arithmetic fixture
         shell: bash
         run: |
