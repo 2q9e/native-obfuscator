@@ -6,7 +6,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 enum NativeTarget {
     LINUX_X64("x86_64-linux", "x86_64-linux-gnu.2.28", "libprotected.so"),
@@ -43,7 +45,8 @@ enum NativeTarget {
         throw new IllegalArgumentException("Unsupported host OS, specify --target");
     }
 
-    byte[] compile(Path workspace, Path source, Protector.Config config) throws IOException, InterruptedException {
+    byte[] compile(Path workspace, Path source, Protector.Config config, Consumer<Map<String, Long>> sizes)
+            throws IOException, InterruptedException {
         Path output = Files.createDirectory(workspace.resolve(key)).resolve(file);
         Path headers = Path.of(System.getProperty("java.home"), "include");
         if (!Files.isRegularFile(headers.resolve("jni.h")))
@@ -100,19 +103,16 @@ enum NativeTarget {
             execute(List.of(config.llvmOpt(), "-load-pass-plugin=" + config.llvmPlugin(),
                 "-passes=" + config.llvmPasses() + ",verify", optimized.toString(), "-o", transformed.toString()),
                 "LLVM protection for " + key);
-            lower(config, transformed, output, clangTriple, linux);
+            lower(config, transformed, output, clangTriple, linux, sizes);
             if (config.maxGrowth() >= 0) {
                 baseline = output.resolveSibling("baseline-" + file);
-                lower(config, optimized, baseline, clangTriple, linux);
+                lower(config, optimized, baseline, clangTriple, linux, null);
             }
         } else {
-            var command = compiler(config);
-            command.addAll(flags);
-            command.addAll(includeFlags);
-            if (linux) command.add("-fPIC");
-            command.addAll(List.of("-shared", source.toString(), "-o", output.toString()));
-            if (linux) command.add("-lm");
-            execute(command, "Native compilation for " + key);
+            var compileFlags = new ArrayList<>(flags);
+            compileFlags.addAll(includeFlags);
+            if (linux) compileFlags.add("-fPIC");
+            link(config, source, output, compileFlags, linux, sizes);
         }
         byte[] binary = readLibrary(output);
         long protectedCode = NativeImage.executableBytes(binary, this);
@@ -144,7 +144,8 @@ enum NativeTarget {
         return new ArrayList<>(List.of(executable));
     }
 
-    private void lower(Protector.Config config, Path bitcode, Path output, String clangTriple, boolean linux)
+    private void lower(Protector.Config config, Path bitcode, Path output, String clangTriple, boolean linux,
+                       Consumer<Map<String, Long>> sizes)
             throws IOException, InterruptedException {
         Path object = output.resolveSibling(output.getFileName() + ".o");
         var backend = new ArrayList<>(List.of(config.clang(), "-O0"));
@@ -153,10 +154,29 @@ enum NativeTarget {
         backend.addAll(List.of("-c", bitcode.toString(), "-o", object.toString()));
         execute(backend, "LLVM code generation for " + key);
 
+        link(config, object, output, List.of(), linux, sizes);
+    }
+
+    private void link(Protector.Config config, Path input, Path output, List<String> flags, boolean linux,
+                      Consumer<Map<String, Long>> sizes) throws IOException, InterruptedException {
         var command = compiler(config);
-        command.addAll(List.of("-shared", object.toString(), "-o", output.toString()));
+        command.addAll(flags);
+        command.addAll(List.of("-shared", input.toString()));
         if (linux) command.add("-lm");
-        execute(command, "Native link for " + key);
+
+        if (linux && sizes != null) {
+            // Measure an unstripped link of the same input. Only the release link is packaged.
+            Path unstripped = output.resolveSibling("with-symbols-" + output.getFileName());
+            var measuredLink = new ArrayList<>(command);
+            measuredLink.addAll(List.of("-o", unstripped.toString()));
+            execute(measuredLink, "Native link for size reporting on " + key);
+            sizes.accept(ElfFunctionSizes.read(readLibrary(unstripped)));
+        }
+
+        // The compiler driver selects the target linker, including for cross-compilation.
+        if (!linux) command.add("-Wl,/Brepro");
+        command.addAll(List.of("-s", "-o", output.toString()));
+        execute(command, "Native release link for " + key);
     }
 
     private static void execute(List<String> command, String stage) throws IOException, InterruptedException {
