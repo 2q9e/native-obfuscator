@@ -37,6 +37,8 @@ public final class Main {
                 --profile PROFILE     compatibility, balanced, aggressive or maximum.
                 --seed UNSIGNED        Reproducible LLVM build seed (default 0).
                 --max-growth PERCENT  Cap executable code growth relative to the LLVM baseline.
+                --markers COUNT       Add 1-1000 inert analysis markers (disabled by default).
+                --marker-seed UINT64  Reproducible marker seed (default 0).
                 --emit-c              Write generated C to --output for inspection.
                 --clang PATH          Clang executable for optional LLVM processing.
                 --llvm-opt PATH       Matching opt executable.
@@ -94,7 +96,7 @@ public final class Main {
                     else targets.add(NativeTarget.parse(value));
                 }
                 case "--input", "--output", "--zig", "--unsupported", "--clang", "--llvm-opt", "--llvm-plugin",
-                     "--llvm-passes", "--profile", "--seed", "--max-growth" -> {
+                     "--llvm-passes", "--profile", "--seed", "--max-growth", "--markers", "--marker-seed" -> {
                     if (options.putIfAbsent(key, value) != null)
                         throw new IllegalArgumentException("Repeated option " + key);
                 }
@@ -147,9 +149,15 @@ public final class Main {
         String passes = options.getOrDefault("--llvm-passes", preset);
         if (targets.isEmpty() && !analyze && !emitC) targets.add(NativeTarget.host());
         Path plugin = llvm && sites > 0 ? path(options, "--llvm-plugin") : null;
+        int markers = Integer.parseInt(options.getOrDefault("--markers", "0"));
+        long markerSeed = Long.parseUnsignedLong(options.getOrDefault("--marker-seed", "0"));
+        if (markers < 0 || markers > 1000)
+            throw new IllegalArgumentException("--markers must be between 0 and 1000");
+        if ((markers > 0 && (analyze || emitC)) || (markers == 0 && options.containsKey("--marker-seed")))
+            throw new IllegalArgumentException("Markers require protect JAR output and a positive --markers count");
         return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), List.copyOf(targets),
             options.get("--zig"), skip, analyze, emitC, options.get("--clang"), options.get("--llvm-opt"),
-            plugin, plugin == null ? null : passes, growth);
+            plugin, plugin == null ? null : passes, growth, markers, markerSeed);
     }
 
     private static String[] loadConfig(String action, Path path) throws IOException {

@@ -34,7 +34,7 @@ final class Protector {
 
     record Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
-                  boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth) {}
+                  boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed) {}
     record Decision(String method, String result, String reason) {}
     private record Binding(MethodNode method, String symbol, String c) {}
 
@@ -134,6 +134,9 @@ final class Protector {
                 files.put(base + ".sha256", HexFormat.of().formatHex(Archive.sha256().digest(binary))
                     .getBytes(StandardCharsets.US_ASCII));
             }
+            if (config.markers > 0) {
+                files.put(RESOURCE + id + "/markers.txt", markers(id, config.markers, config.markerSeed));
+            }
             Archive.write(files, config.output);
         } finally {
             try (var paths = Files.walk(workspace)) {
@@ -141,6 +144,21 @@ final class Protector {
             }
         }
         return ordinal;
+    }
+
+    private static byte[] markers(String id, int count, long seed) {
+        var markerText = new StringBuilder();
+        var input = ByteBuffer.allocate(Long.BYTES + Integer.BYTES);
+        var digest = Archive.sha256();
+        byte[] build = id.getBytes(StandardCharsets.US_ASCII);
+        for (int i = 0; i < count; i++) {
+            input.clear();
+            input.putLong(seed).putInt(i);
+            digest.update(build);
+            markerText.append("canary-").append(HexFormat.of().formatHex(digest.digest(input.array())))
+                .append('\n');
+        }
+        return markerText.toString().getBytes(StandardCharsets.US_ASCII);
     }
 
     private static String runtimeId(Map<String, byte[]> files, Config config) {
