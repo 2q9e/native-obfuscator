@@ -136,8 +136,15 @@ public final class Main {
             throw new IllegalArgumentException("--max-growth needs a non-negative percentage and an LLVM protection profile");
         if (options.containsKey("--seed") && (!llvm || sites == 0 || options.containsKey("--llvm-passes")))
             throw new IllegalArgumentException("--seed applies to preset LLVM passes; configure explicit passes directly");
-        String passes = options.getOrDefault("--llvm-passes",
-            "native-encode<seed=" + seed + ";max=" + sites + ";prefix=method_>");
+        String arithmetic = "native-encode<seed=" + seed + ";max=" + sites + ";prefix=method_>";
+        int branches = switch (profile) {
+            case "aggressive" -> 1;
+            case "maximum" -> 3;
+            default -> 0;
+        };
+        String preset = branches == 0 ? arithmetic
+            : "native-diversify<seed=" + seed + ";max=" + branches + ";prefix=method_>," + arithmetic;
+        String passes = options.getOrDefault("--llvm-passes", preset);
         if (targets.isEmpty() && !analyze && !emitC) targets.add(NativeTarget.host());
         Path plugin = llvm && sites > 0 ? path(options, "--llvm-plugin") : null;
         return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), List.copyOf(targets),

@@ -1,4 +1,4 @@
-# LLVM arithmetic substitution
+# LLVM native protection
 
 `NativeEncode` is an LLVM 23 new-pass-manager plugin. Use the same LLVM build for the
 development headers, `clang`, `opt`, and `llc`. The plugin has been tested with LLVM
@@ -22,7 +22,9 @@ c++ -std=c++17 -O2 -Wall -Wextra -Werror -fPIC -shared \
   -isystem "$llvm_sdk/include" llvm/NativeEncode.cpp \
   /usr/lib64/libLLVM.so.23.1 -o NativeEncode.so
 bash llvm/tests/verify.sh "$PWD/NativeEncode.so" "$llvm_sdk/bin"
+bash llvm/tests/verify.sh "$PWD/NativeEncode.so" "$llvm_sdk/bin" cc native-diversify
 bash llvm/tests/verify-cross.sh "$PWD/NativeEncode.so" "$llvm_sdk/bin"
+bash llvm/tests/verify-cross.sh "$PWD/NativeEncode.so" "$llvm_sdk/bin" native-diversify
 ```
 
 Run the pass explicitly after ordinary optimization, then lower directly to
@@ -42,7 +44,7 @@ eight. A value of zero disables the pass. `prefix` limits the pass to named
 functions with that prefix. Generated JNI implementations use `method_`. Omit
 `prefix` to allow every function. Options can appear in any order.
 
-The pass substitutes scalar 8-, 16-, 32-, and 64-bit integer addition and
+`native-encode` substitutes scalar 8-, 16-, 32-, and 64-bit integer addition and
 subtraction. For each candidate, it multiplies both operands by the same odd
 factor, computes the operation, then multiplies by the factor's modular
 inverse. In arithmetic modulo 2ⁿ, multiplication distributes over addition
@@ -50,11 +52,24 @@ and subtraction, so the resulting value is unchanged. Each input retains one
 use. The pass skips instructions carrying no-wrap flags and functions marked
 `optnone`. One substitution adds at most three IR instructions.
 
+`native-diversify` accepts the same options and defaults to two sites per
+function. It replaces an eligible operation with two equivalent paths. One
+performs the original operation, and the other uses modular encoding. A
+seeded choice of four bits from a defined integer argument selects the path.
+Both paths preserve the operation's behavior, including a poison result
+arising from its other operand. The pass requires an explicit `noundef`
+argument as one operand and skips functions with exceptional, convergent,
+coroutine or indirect control flow. It also skips address-taken blocks.
+An eligible site adds at most three blocks and ten IR instructions. The
+branch can introduce input-dependent timing.
+
 The native differential test runs 100,324 boundary and seeded input pairs
 per build. It also checks that a fixed seed reproduces the bitcode, another
 seed changes it, malformed options fail, and the prefix and per-function cap
-are enforced. On Linux AArch64 the final linked test executable retains three
-multiplication instructions in the selected 32-bit sum. The cross-target test
+are enforced. The diversification test also exercises an existing PHI with
+two incoming edges, checks that functions without a safe selector retain their
+body, and looks for the added branch after linking. The cross-target test
 reports code size and disassembles an address-taken function in ELF and COFF
-objects. Those objects are compiler and disassembly checks. Substitution
-increases code size and work, and this identity can be simplified algebraically.
+objects. Those objects are compiler and disassembly checks. Both passes
+increase code size and work, and their arithmetic can be simplified
+algebraically.

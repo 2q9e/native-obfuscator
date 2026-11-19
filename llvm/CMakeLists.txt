@@ -16,9 +16,11 @@ target_compile_features(NativeEncode PRIVATE cxx_std_17)
 
 include(CTest)
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  add_test(
-    NAME llvm-native-encode
-    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify.sh"
-      "$<TARGET_FILE:NativeEncode>" "${LLVM_TOOLS_BINARY_DIR}"
-      "${CMAKE_C_COMPILER}")
+  foreach(pass IN ITEMS native-encode native-diversify)
+    add_test(
+      NAME "llvm-${pass}"
+      COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify.sh"
+        "$<TARGET_FILE:NativeEncode>" "${LLVM_TOOLS_BINARY_DIR}"
+        "${CMAKE_C_COMPILER}" "${pass}")
+  endforeach()
 endif()

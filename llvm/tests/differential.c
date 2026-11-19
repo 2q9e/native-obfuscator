@@ -7,6 +7,7 @@ uint64_t method_sub64(uint64_t left, uint64_t right);
 uint32_t method_sum8(uint32_t left, uint32_t right);
 uint32_t method_sub16(uint32_t left, uint32_t right);
 uint32_t method_chain32(uint32_t left, uint32_t right);
+uint32_t method_phi32(uint32_t left, uint32_t right);
 
 static uint64_t next_input(uint64_t *state) {
   *state ^= *state << 13;
@@ -21,7 +22,8 @@ static int compare(uint64_t left, uint64_t right) {
   if (method_sum32(a, b) == a + b && method_sub64(left, right) == left - right &&
       method_sum8(a, b) == ((a + b) & UINT32_C(0xff)) &&
       method_sub16(a, b) == ((a - b) & UINT32_C(0xffff)) &&
-      method_chain32(a, b) == (((a + b) ^ b) - a))
+      method_chain32(a, b) == (((a + b) ^ b) - a) &&
+      method_phi32(a, b) == ((a & 1) ? a + b : a - b))
     return 0;
   fprintf(stderr, "arithmetic mismatch for (%" PRIu64 ", %" PRIu64 ")\n",
           left, right);

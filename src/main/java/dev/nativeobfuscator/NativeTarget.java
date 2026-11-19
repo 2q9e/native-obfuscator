@@ -68,26 +68,28 @@ enum NativeTarget {
             #endif
             """);
         var flags = List.of("-std=c11", "-O2", "-ffp-contract=off", "-fno-fast-math",
-            "-fvisibility=hidden", "-I", headers.toString(), "-I", output.getParent().toString());
+            "-fvisibility=hidden");
+        var includeFlags = List.of("-I", headers.toString(), "-I", output.getParent().toString());
         String machine = key.substring(0, key.indexOf('-'));
         boolean linux = key.endsWith("-linux");
         String clangTriple = machine + (linux ? "-unknown-linux-gnu" : "-w64-windows-gnu");
         if (config.llvmPlugin() != null) {
             var frontend = new ArrayList<String>();
             frontend.add(config.clang());
-            frontend.addAll(flags.subList(0, 5));
+            frontend.addAll(flags);
             Path input = source;
             if (config.zig() != null) {
                 input = output.resolveSibling("translated.i");
                 var preprocessor = compiler(config);
                 preprocessor.addAll(flags);
+                preprocessor.addAll(includeFlags);
                 preprocessor.addAll(List.of("-E", source.toString(), "-o", input.toString()));
                 execute(preprocessor, "Zig preprocessing for " + key);
                 frontend.addAll(List.of("-target", clangTriple));
             } else {
                 if (this != host() || !linux)
                     throw new IOException("Use --zig PATH for LLVM target " + key);
-                frontend.addAll(flags.subList(5, flags.size()));
+                frontend.addAll(includeFlags);
             }
             Path optimized = output.resolveSibling("optimized.bc");
             Path transformed = output.resolveSibling("transformed.bc");
@@ -110,6 +112,7 @@ enum NativeTarget {
         } else {
             var command = compiler(config);
             command.addAll(flags);
+            command.addAll(includeFlags);
             if (linux) command.add("-fPIC");
             command.addAll(List.of("-shared", source.toString(), "-o", output.toString()));
             if (linux) command.add("-lm");

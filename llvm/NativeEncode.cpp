@@ -4,6 +4,7 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
@@ -14,7 +15,10 @@
 
 namespace {
 
+enum class Transform { Encode, Diversify };
+
 struct Options {
+  Transform Kind = Transform::Encode;
   uint64_t Seed = 0;
   unsigned MaxSites = 8;
   std::string Prefix;
@@ -25,10 +29,12 @@ bool isPrefixCharacter(char C) {
          (C >= '0' && C <= '9') || C == '_' || C == '.' || C == '$';
 }
 
-bool readOptions(llvm::StringRef Name, Options &Config) {
-  if (Name == "native-encode")
+bool readOptions(llvm::StringRef Name, llvm::StringRef PassName, Options &Config) {
+  if (!Name.consume_front(PassName))
+    return false;
+  if (Name.empty())
     return true;
-  if (!Name.consume_front("native-encode<") || !Name.consume_back(">") ||
+  if (!Name.consume_front("<") || !Name.consume_back(">") ||
       Name.empty() || Name.ends_with(";"))
     return false;
 
@@ -58,12 +64,12 @@ bool readOptions(llvm::StringRef Name, Options &Config) {
   return true;
 }
 
-uint64_t nextFactor(uint64_t &State) {
+uint64_t nextRandom(uint64_t &State) {
   State += UINT64_C(0x9e3779b97f4a7c15);
   uint64_t Mixed = State;
   Mixed = (Mixed ^ (Mixed >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
   Mixed = (Mixed ^ (Mixed >> 27)) * UINT64_C(0x94d049bb133111eb);
-  return (Mixed ^ (Mixed >> 31)) | UINT64_C(1);
+  return Mixed ^ (Mixed >> 31);
 }
 
 llvm::APInt modularInverse(const llvm::APInt &Factor) {
@@ -95,19 +101,122 @@ bool canEncode(const llvm::BinaryOperator &Operation) {
   }
 }
 
-bool encodeFunction(llvm::Function &Function, const Options &Config) {
+llvm::Value *buildEncoding(llvm::IRBuilder<> &Builder,
+                           const llvm::BinaryOperator &Operation, uint64_t &State) {
+  auto *Type = llvm::cast<llvm::IntegerType>(Operation.getType());
+  unsigned Width = Type->getBitWidth();
+  llvm::APInt Factor =
+      llvm::APInt(64, nextRandom(State) | UINT64_C(1)).zextOrTrunc(Width);
+  if (Factor.isOne() || Factor.isAllOnes())
+    Factor = llvm::APInt(Width, 3);
+
+  auto *Scale = llvm::ConstantInt::get(Type, Factor);
+  auto *Inverse = llvm::ConstantInt::get(Type, modularInverse(Factor));
+  // Work in Z/(2^N). The encoding is linear, and the odd scale is
+  // invertible. Each original operand is used once.
+  auto *Left =
+      Builder.CreateMul(Operation.getOperand(0), Scale, "native.encode.left");
+  auto *Right =
+      Builder.CreateMul(Operation.getOperand(1), Scale, "native.encode.right");
+  auto *Encoded = Builder.CreateBinOp(Operation.getOpcode(), Left, Right,
+                                      "native.encode.combined");
+  return Builder.CreateMul(Encoded, Inverse, "native.encode.result");
+}
+
+bool canDiversify(const llvm::Function &Function) {
+  if (Function.hasPersonalityFn() || Function.isPresplitCoroutine() ||
+      Function.hasFnAttribute(llvm::Attribute::Convergent) ||
+      Function.hasFnAttribute(llvm::Attribute::Naked))
+    return false;
+  for (const llvm::Instruction &Instruction : llvm::instructions(Function)) {
+    if (llvm::isa<llvm::CallBrInst, llvm::IndirectBrInst>(Instruction))
+      return false;
+    if (auto *Call = llvm::dyn_cast<llvm::CallBase>(&Instruction);
+        Call && Call->isConvergent())
+      return false;
+  }
+  return true;
+}
+
+llvm::Argument *findGuard(const llvm::BinaryOperator &Operation) {
+  if (Operation.getParent()->hasAddressTaken())
+    return nullptr;
+  // A branch on poison or undef would add undefined behavior. A noundef
+  // argument supplies a defined branch input for every valid call.
+  for (llvm::Value *Operand : Operation.operands()) {
+    auto *Argument = llvm::dyn_cast<llvm::Argument>(Operand);
+    if (Argument && Argument->hasAttribute(llvm::Attribute::NoUndef))
+      return Argument;
+  }
+  return nullptr;
+}
+
+llvm::PHINode *diversify(llvm::BinaryOperator &Operation, llvm::Argument &Guard,
+                        uint64_t &State) {
+  auto *Initial = Operation.getParent();
+  auto *Join = Initial->splitBasicBlock(Operation.getIterator(),
+                                        "native.diversify.join");
+  auto *Function = Initial->getParent();
+  auto &Context = Function->getContext();
+  auto *Plain =
+      llvm::BasicBlock::Create(Context, "native.diversify.plain", Function, Join);
+  auto *Encoded =
+      llvm::BasicBlock::Create(Context, "native.diversify.encoded", Function, Join);
+  auto *Type = llvm::cast<llvm::IntegerType>(Operation.getType());
+
+  Initial->getTerminator()->eraseFromParent();
+  llvm::IRBuilder<> Builder(Initial);
+  Builder.SetCurrentDebugLocation(Operation.getDebugLoc());
+  unsigned Shift = nextRandom(State) % (Type->getBitWidth() - 3);
+  auto *Mask = llvm::ConstantInt::get(Type, UINT64_C(15) << Shift);
+  auto *Masked = Builder.CreateAnd(&Guard, Mask);
+  // Four zero bits occur once per sixteen uniformly distributed inputs.
+  // Keep the inexpensive path favored when lowering the control flow.
+  auto *Weights = llvm::MDBuilder(Context).createBranchWeights(1, 15);
+  Builder.CreateCondBr(Builder.CreateIsNull(Masked), Encoded, Plain, Weights);
+
+  Builder.SetInsertPoint(Plain);
+  Builder.SetCurrentDebugLocation(Operation.getDebugLoc());
+  auto *PlainResult = Builder.CreateBinOp(Operation.getOpcode(),
+                                          Operation.getOperand(0),
+                                          Operation.getOperand(1));
+  Builder.CreateBr(Join);
+
+  Builder.SetInsertPoint(Encoded);
+  Builder.SetCurrentDebugLocation(Operation.getDebugLoc());
+  auto *EncodedResult = buildEncoding(Builder, Operation, State);
+  Builder.CreateBr(Join);
+
+  Builder.SetInsertPoint(&Operation);
+  auto *Result = Builder.CreatePHI(Type, 2);
+  Result->addIncoming(PlainResult, Plain);
+  Result->addIncoming(EncodedResult, Encoded);
+  return Result;
+}
+
+bool rewriteFunction(llvm::Function &Function, const Options &Config) {
   if (Config.MaxSites == 0 || !Function.getName().starts_with(Config.Prefix) ||
       Function.hasFnAttribute(llvm::Attribute::OptimizeNone))
     return false;
+  bool UseBranches = Config.Kind == Transform::Diversify;
+  if (UseBranches && !canDiversify(Function))
+    return false;
 
-  llvm::SmallVector<llvm::BinaryOperator *, 8> Sites;
+  struct Site {
+    llvm::BinaryOperator *Operation;
+    llvm::Argument *Guard;
+  };
+  llvm::SmallVector<Site, 8> Sites;
   for (llvm::Instruction &Instruction : llvm::instructions(Function)) {
     auto *Operation = llvm::dyn_cast<llvm::BinaryOperator>(&Instruction);
-    if (Operation && canEncode(*Operation)) {
-      Sites.push_back(Operation);
-      if (Sites.size() == Config.MaxSites)
-        break;
-    }
+    if (!Operation || !canEncode(*Operation))
+      continue;
+    auto *Guard = UseBranches ? findGuard(*Operation) : nullptr;
+    if (UseBranches && !Guard)
+      continue;
+    Sites.push_back({Operation, Guard});
+    if (Sites.size() == Config.MaxSites)
+      break;
   }
 
   uint64_t State = UINT64_C(0xcbf29ce484222325);
@@ -117,27 +226,11 @@ bool encodeFunction(llvm::Function &Function, const Options &Config) {
   }
   State ^= Config.Seed;
 
-  for (llvm::BinaryOperator *Operation : Sites) {
-    auto *Type = llvm::cast<llvm::IntegerType>(Operation->getType());
-    unsigned Width = Type->getBitWidth();
-    llvm::APInt Factor = llvm::APInt(64, nextFactor(State)).zextOrTrunc(Width);
-    if (Factor.isOne() || Factor.isAllOnes())
-      Factor = llvm::APInt(Width, 3);
-
+  for (const auto &[Operation, Guard] : Sites) {
     llvm::IRBuilder<> Builder(Operation);
     Builder.SetCurrentDebugLocation(Operation->getDebugLoc());
-    auto *Scale = llvm::ConstantInt::get(Type, Factor);
-    auto *Inverse = llvm::ConstantInt::get(Type, modularInverse(Factor));
-    // Work in Z/(2^N). The encoding is linear, and the odd scale is
-    // invertible. Each original operand is used once.
-    auto *Left = Builder.CreateMul(Operation->getOperand(0), Scale,
-                                   "native.encode.left");
-    auto *Right = Builder.CreateMul(Operation->getOperand(1), Scale,
-                                    "native.encode.right");
-    auto *Encoded =
-        Builder.CreateBinOp(Operation->getOpcode(), Left, Right,
-                            "native.encode.combined");
-    auto *Result = Builder.CreateMul(Encoded, Inverse, "native.encode.result");
+    auto *Result = Guard ? diversify(*Operation, *Guard, State)
+                         : buildEncoding(Builder, *Operation, State);
     if (auto *ResultInstruction = llvm::dyn_cast<llvm::Instruction>(Result))
       ResultInstruction->takeName(Operation);
     Operation->replaceAllUsesWith(Result);
@@ -156,7 +249,7 @@ public:
                               llvm::ModuleAnalysisManager &) {
     bool Changed = false;
     for (llvm::Function &Function : Module)
-      Changed |= encodeFunction(Function, Config);
+      Changed |= rewriteFunction(Function, Config);
     return Changed ? llvm::PreservedAnalyses::none()
                    : llvm::PreservedAnalyses::all();
   }
@@ -166,12 +259,21 @@ void registerPass(llvm::PassBuilder &Builder) {
   Builder.registerPipelineParsingCallback(
       [](llvm::StringRef Name, llvm::ModulePassManager &Manager,
          llvm::ArrayRef<llvm::PassBuilder::PipelineElement> InnerPipeline) {
-        if (Name != "native-encode" && !Name.starts_with("native-encode<"))
-          return false;
         Options Config;
-        if (!InnerPipeline.empty() || !readOptions(Name, Config)) {
-          llvm::errs() << "invalid native-encode options; expected "
-                          "native-encode<seed=UINT64;max=UINT;prefix=NAME>\n";
+        llvm::StringRef Pass;
+        if (Name == "native-encode" || Name.starts_with("native-encode<")) {
+          Pass = "native-encode";
+        } else if (Name == "native-diversify" ||
+                   Name.starts_with("native-diversify<")) {
+          Pass = "native-diversify";
+          Config.Kind = Transform::Diversify;
+          Config.MaxSites = 2;
+        } else {
+          return false;
+        }
+        if (!InnerPipeline.empty() || !readOptions(Name, Pass, Config)) {
+          llvm::errs() << "invalid " << Pass << " options; expected "
+                       << Pass << "<seed=UINT64;max=UINT;prefix=NAME>\n";
           return false;
         }
         Manager.addPass(NativeEncode(std::move(Config)));
