@@ -45,3 +45,14 @@ tasks.named('startScripts') {
         output.write(windowsLauncher.getText('UTF-8').replace('\r\n', '\n').replace('\n', '\r\n'))
     } as org.gradle.jvm.application.scripts.ScriptGenerator
 }
+
+distributions {
+    main {
+        contents {
+            from('LICENSE')
+            into('licenses') {
+                from('licenses')
+            }
+        }
+    }
+}

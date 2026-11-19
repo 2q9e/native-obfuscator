@@ -1,0 +1,5 @@
+ASM 9.9 (asm, asm-analysis, asm-commons, asm-tree)
+BSD 3-Clause license in ASM.txt
+
+Gson 2.13.2 and Error Prone Annotations 2.41.0
+Apache License 2.0 in Apache-2.0.txt
