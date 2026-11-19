@@ -30,6 +30,8 @@ public final class Main {
 
                 --include GLOB        Select an owner#name(descriptor) signature. Repeatable.
                 --exclude GLOB        Retain a matching signature in Java. Repeatable.
+                --min-instructions N  Skip compatible methods under N JVM instructions (default 0).
+                --report-native-sizes Report exact Linux function sizes as JSON records.
                 --unsupported POLICY  fail (default) or retain.
                 --target TARGET       Repeatable. x86_64-linux, aarch64-linux,
                                       x86_64-windows, aarch64-windows, or all.
@@ -82,10 +84,15 @@ public final class Main {
         var targets = new LinkedHashSet<NativeTarget>();
         Map<String, String> options = new HashMap<>();
         boolean emitC = false;
+        boolean reportNativeSizes = false;
         for (int i = 1; i < arguments.length; i++) {
             String key = arguments[i];
             if (key.equals("--emit-c") && !emitC) {
                 emitC = true;
+                continue;
+            }
+            if (key.equals("--report-native-sizes") && !reportNativeSizes) {
+                reportNativeSizes = true;
                 continue;
             }
             if (++i == arguments.length) throw new IllegalArgumentException("Missing value for " + key);
@@ -98,7 +105,7 @@ public final class Main {
                     else targets.add(NativeTarget.parse(value));
                 }
                 case "--input", "--output", "--zig", "--unsupported", "--clang", "--llvm-opt", "--llvm-plugin",
-                     "--llvm-passes", "--profile", "--seed", "--max-growth", "--padding", "--markers", "--marker-seed" -> {
+                     "--llvm-passes", "--min-instructions", "--profile", "--seed", "--max-growth", "--padding", "--markers", "--marker-seed" -> {
                     if (options.putIfAbsent(key, value) != null)
                         throw new IllegalArgumentException("Repeated option " + key);
                 }
@@ -157,10 +164,14 @@ public final class Main {
             throw new IllegalArgumentException("--markers must be between 0 and 1000");
         if ((markers > 0 && (analyze || emitC)) || (markers == 0 && options.containsKey("--marker-seed")))
             throw new IllegalArgumentException("Markers require protect JAR output and a positive --markers count");
+        int minInstructions = Integer.parseInt(options.getOrDefault("--min-instructions", "0"));
+        if (minInstructions < 0) throw new IllegalArgumentException("--min-instructions must be non-negative");
+        if (reportNativeSizes && (analyze || emitC || targets.stream().noneMatch(t -> t.key.endsWith("-linux"))))
+            throw new IllegalArgumentException("--report-native-sizes requires at least one Linux JAR target");
         boolean padding = parsePadding(options.get("--padding"), !analyze && !emitC);
         return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), List.copyOf(targets),
             options.get("--zig"), skip, analyze, emitC, options.get("--clang"), options.get("--llvm-opt"),
-            plugin, plugin == null ? null : passes, growth, markers, markerSeed, padding);
+            plugin, plugin == null ? null : passes, growth, markers, markerSeed, padding, minInstructions, reportNativeSizes);
     }
 
     private static boolean parsePadding(String mode, boolean jarOutput) {
@@ -210,9 +221,9 @@ public final class Main {
                         args.add(flag);
                         args.add(stringValue(item));
                     }
-                } else if (key.equals("emit-c")) {
+                } else if (key.equals("emit-c") || key.equals("report-native-sizes")) {
                     if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean())
-                        throw new IllegalArgumentException("emit-c must be a boolean");
+                        throw new IllegalArgumentException(key + " must be a boolean");
                     if (value.getAsBoolean()) args.add(flag);
                 } else {
                     args.add(flag);

@@ -35,8 +35,19 @@ final class Protector {
     record Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
                   boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed,
-                  boolean padding) {}
-    record Decision(String method, String result, String reason) {}
+                  boolean padding, int minInstructions, boolean reportNativeSizes) {}
+    record Decision(String method, String result, String reason, Integer instructions,
+                    Integer branches, String target, Long nativeBytes) {
+        Decision(String method, String result, String reason) {
+            this(method, result, reason, null, null, null, null);
+        }
+
+        Decision(String method, String result, String reason, MethodMetrics metrics) {
+            this(method, result, reason, metrics.instructions, metrics.branches, null, null);
+        }
+    }
+
+    private record MethodMetrics(int instructions, int branches) {}
     private record Binding(MethodNode method, String symbol, String c) {}
 
     static int run(Config config, Consumer<Decision> report) throws IOException, InterruptedException {
@@ -57,6 +68,7 @@ final class Protector {
         var registrationResources = new LinkedHashMap<String, byte[]>();
         var registrations = new StringBuilder();
         var outputs = new LinkedHashMap<String, byte[]>();
+        var selectedSymbols = new LinkedHashMap<String, String>();
         int ordinal = 0;
         int unsupported = 0;
         for (var file : files.entrySet()) {
@@ -93,9 +105,16 @@ final class Protector {
                         if (sort == Type.ARRAY || sort == Type.OBJECT)
                             throw new MethodCompiler.Unsupported("reference-return assignability requires JVM resolution");
                         String c = MethodCompiler.compile(node, method, symbol);
+                        MethodMetrics metrics = measure(method);
+                        if (metrics.instructions < config.minInstructions) {
+                            report.accept(new Decision(name, "excluded",
+                                "below minimum JVM instruction count " + config.minInstructions, metrics));
+                            continue;
+                        }
                         bindings.add(new Binding(method, symbol, c));
+                        if (config.reportNativeSizes) selectedSymbols.put(symbol, name);
                         ordinal++;
-                        report.accept(new Decision(name, config.analyze ? "eligible" : "selected", ""));
+                        report.accept(new Decision(name, config.analyze ? "eligible" : "selected", "", metrics));
                     } catch (MethodCompiler.Unsupported failure) {
                         unsupported++;
                         report.accept(new Decision(name, config.skipUnsupported ? "retained" : "rejected", failure.getMessage()));
@@ -137,8 +156,14 @@ final class Protector {
             files.putAll(outputs);
             files.putAll(registrationResources);
             files.put(loader + ".class", runtime(loader));
+            var nativeSizes = new ArrayList<Decision>();
             for (NativeTarget target : config.targets) {
-                byte[] binary = target.compile(workspace, c, config, null);
+                Consumer<Map<String, Long>> sizes = config.reportNativeSizes
+                    ? measured -> selectedSymbols.forEach((symbol, method) -> nativeSizes.add(
+                        new Decision(method, "native-size", measured.containsKey(symbol) ? "" : "no linked symbol",
+                            null, null, target.key, measured.get(symbol))))
+                    : null;
+                byte[] binary = target.compile(workspace, c, config, sizes);
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
                 files.put(base, binary);
                 files.put(base + ".sha256", HexFormat.of().formatHex(Archive.sha256().digest(binary))
@@ -151,6 +176,7 @@ final class Protector {
                 FilePadding.bundle(files, RESOURCE + id + "/", id);
             }
             Archive.write(files, config.output);
+            nativeSizes.forEach(report);
         } finally {
             try (var paths = Files.walk(workspace)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
@@ -184,7 +210,23 @@ final class Protector {
         });
         digest.update((config.includes + "\n" + config.excludes + "\n" + config.targets
             + "\n" + config.llvmPasses + "\nformat 2").getBytes(StandardCharsets.UTF_8));
+        if (config.minInstructions != 0)
+            digest.update(("minimum instructions " + config.minInstructions).getBytes(StandardCharsets.UTF_8));
         return "Runtime" + HexFormat.of().formatHex(digest.digest(), 0, 16);
+    }
+
+    private static MethodMetrics measure(MethodNode method) {
+        int instructions = 0;
+        int branches = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            int opcode = instruction.getOpcode();
+            if (opcode < 0) continue;
+            instructions++;
+            if (instruction instanceof TableSwitchInsnNode || instruction instanceof LookupSwitchInsnNode
+                || (instruction instanceof JumpInsnNode && opcode != GOTO && opcode != JSR))
+                branches++;
+        }
+        return new MethodMetrics(instructions, branches);
     }
 
     private static boolean matches(List<Pattern> patterns, String method) {

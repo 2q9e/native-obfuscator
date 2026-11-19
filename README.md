@@ -44,6 +44,8 @@ javap -p -s -classpath input.jar my.mod.Math
 
 - Select methods as `internal/Class#method(descriptor)`. Repeat `--include` or `--exclude` to combine patterns. Quote patterns containing `*` or `?`.
 - The default policy fails if a selected method uses unsupported bytecode. Use `--unsupported retain` to leave those methods in Java. The CLI reports each decision as JSON.
+- Use `--min-instructions 8` to skip compatible methods below eight JVM instructions. Analysis and build reports include bytecode instruction and branch counts for compatible methods.
+- Use `--report-native-sizes` on a build with at least one Linux target to add exact pre-strip function sizes to the JSON report. This measures what the compiler emitted. It adds a diagnostic link for each Linux target.
 - Protect an unsigned input JAR, then sign the output if your release process requires signing. Use `--emit-c` to inspect the generated C.
 - For repeatable builds, save the options in a [JSON configuration](examples/protect.json) and run `"$tool" protect --config protect.json`. Relative paths resolve from the working directory.
 
@@ -73,7 +75,7 @@ A default Linux build targets the host. Use [Zig 0.15.2](https://ziglang.org/dow
   --include 'my/mod/Math#mix(II)I' --target all --zig /path/to/zig
 ```
 
-At runtime the loader selects the library for the current OS and CPU architecture and checks its checksum. End users need a compatible JVM. On Java 25, enable native access with `--enable-native-access=ALL-UNNAMED` for classpath launches or name the module containing the loader for modular launches.
+Packaged Linux libraries omit the local symbol table. Windows builds suppress PDB references. The loader selects the library for the current OS and CPU architecture and checks its checksum. JNI registration names and descriptors are stored with the Java-side registration data. They remain visible in the JAR's Java declarations. End users need a compatible JVM. On Java 25, enable native access with `--enable-native-access=ALL-UNNAMED` for classpath launches or name the module containing the loader for modular launches.
 
 ## LLVM obfuscation
 
