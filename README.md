@@ -7,7 +7,7 @@ Native Obfuscator converts explicitly selected JVM methods in an existing JAR to
 Use JDK 21 or 25, Gradle 9.3.1, and a Linux C11 compiler for a host build. Use Zig 0.15.2 for the four bundled targets.
 
 ```sh
-gradle installDist
+./gradlew installDist
 tool=build/install/native-obfuscator/bin/native-obfuscator
 "$tool" analyze --input input.jar --include 'my/mod/Math#mix(II)I'
 "$tool" protect --input input.jar --output protected.jar \
@@ -32,3 +32,42 @@ JAVA_RELEASE=25 bash src/test/integration.sh "$tool"
 Use the matching JDK in `JAVA_HOME` for each test.
 
 See the [reference audit](docs/reference-audit.md) for architectural provenance and licensing.
+
+## LLVM protection
+
+Build the project-owned [LLVM 23 pass plugin](llvm/README.md) with the same LLVM
+version as `clang` and `opt`. Normal optimization runs before the selected
+protection passes. The final code generation step verifies the IR and lowers it
+without running another optimization pipeline.
+
+```sh
+"$tool" protect --input input.jar --output protected.jar \
+  --include 'my/mod/Math#mix(II)I' \
+  --clang /path/to/clang --llvm-opt /path/to/opt --llvm-plugin /path/to/NativeEncode.so \
+  --profile balanced --seed 42 --max-growth 25
+```
+
+Compatibility is the default without LLVM. Balanced, aggressive and maximum
+allocate up to 4, 12 and 32 arithmetic substitutions per protected function.
+Aggressive and maximum also attempt up to 1 and 3 equivalent conditional
+paths per function when the pass can prove the selector is safe to branch on.
+Use `--llvm-passes` to select an explicit pipeline. Add `--zig` to an LLVM build
+to preprocess and link with the requested cross toolchain. The optional growth
+limit compares each full library with a matching LLVM build before protection
+and aborts publication if the size exceeds the limit.
+
+For build automation, put the same options in a [JSON config](examples/protect.json)
+and run `"$tool" protect --config path/to/protect.json`. Relative paths resolve
+from the current working directory. `include`, `exclude` and `target` are arrays.
+
+## Benchmarks
+
+```sh
+bash benchmarks/run.sh "$tool" --clang /path/to/clang --llvm-opt /path/to/opt \
+  --llvm-plugin /path/to/NativeEncode.so --profile balanced --seed 42
+```
+
+The benchmark reports median call time, checksums, JAR and library bytes.
+Set `MAX_ARITHMETIC_OVERHEAD_PERCENT` to enforce an arithmetic workload budget
+for the LLVM build. See [local verification](docs/verification.md) for measured
+results and platform coverage.
