@@ -1,52 +1,77 @@
 # Native Obfuscator
 
-Native Obfuscator converts explicitly selected JVM methods in an existing JAR to JNI functions. It accepts the final JAR produced by a Java obfuscator or Fabric Loom and bundles the native libraries. The input JAR is analyzed as data and its classes are never loaded by the CLI.
+Native Obfuscator is a **Java and Kotlin JAR obfuscator for Minecraft Fabric mods and JVM applications**. It compiles selected JVM bytecode methods to native code through JNI and bundles the libraries in the output JAR. Optional LLVM passes transform arithmetic and control flow with a reproducible seed.
 
-## Build and use
+[GitHub Actions](https://github.com/2q9e/native-obfuscator/actions/workflows/verify.yml) · [Fabric Loom example](examples/fabric/README.md) · [Benchmarks](docs/verification.md) · [MIT license](LICENSE)
 
-Use JDK 21 or 25, an installed Gradle 9.3.1, and a Linux C11 compiler for a host build. Use Zig 0.15.2 for the four bundled targets.
+## Quick start
 
-The build scripts use Gradle from `GRADLE_HOME` or `PATH`. The installed CLI uses
-Java from `JAVA_HOME` or `PATH` and accepts JVM options through `JDK_JAVA_OPTIONS`.
+The commands below use a Linux shell, JDK 21 or 25, an installed Gradle 9.3.1, and a C11 compiler on `PATH`. Set `GRADLE_HOME` or add Gradle to `PATH` before building.
 
 ```sh
+git clone https://github.com/2q9e/native-obfuscator.git
+cd native-obfuscator
 ./gradlew installDist
+```
+
+Build the bundled arithmetic fixture, check one method, and run the protected JAR:
+
+```sh
 tool=build/install/native-obfuscator/bin/native-obfuscator
+mkdir -p build/quickstart
+javac --release 21 -d build/quickstart src/test/fixtures/Arithmetic.java
+jar --create --file build/quickstart.jar --main-class Arithmetic -C build/quickstart .
+
+"$tool" analyze --input build/quickstart.jar --include 'Arithmetic#calcInt(III)I'
+"$tool" protect --input build/quickstart.jar --output build/quickstart-protected.jar \
+  --include 'Arithmetic#calcInt(III)I'
+
+java --enable-native-access=ALL-UNNAMED -jar build/quickstart-protected.jar
+```
+
+The protected fixture prints `55cfd63f18498e67`, the same checksum as the original.
+
+## Protect your own JAR
+
+Run `analyze` first to see which methods can be converted. Use the names and descriptors from the final input JAR, especially if a build step renamed or remapped the classes.
+
+```sh
+javap -p -s -classpath input.jar my.mod.Math
 "$tool" analyze --input input.jar --include 'my/mod/Math#mix(II)I'
+"$tool" protect --input input.jar --output protected.jar \
+  --include 'my/mod/Math#mix(II)I'
+```
+
+- Select methods as `internal/Class#method(descriptor)`. Repeat `--include` or `--exclude` to combine patterns. Quote patterns containing `*` or `?`.
+- The default policy fails if a selected method uses unsupported bytecode. Use `--unsupported retain` to leave those methods in Java. The CLI reports each decision as JSON.
+- Protect an unsigned input JAR, then sign the output if your release process requires signing. Use `--emit-c` to inspect the generated C.
+- For repeatable builds, save the options in a [JSON configuration](examples/protect.json) and run `"$tool" protect --config protect.json`. Relative paths resolve from the working directory.
+
+## Minecraft Fabric
+
+Run Native Obfuscator on the JAR after Fabric Loom's `remapJar` task. If you also use a Java bytecode obfuscator, pass its remapped output to Native Obfuscator and select methods by their final names. Start with internal numeric methods. Fabric entrypoints and classes declared in Mixin, language-adapter, and access-widener metadata are excluded from conversion.
+
+The [Fabric 1.21.11 example](examples/fabric/README.md) includes a `protectFabricJar` Gradle task and a bootstrap test that exercises the generated JNI code, a Mixin accessor, and an access widener. Place the protected JAR in your Fabric instance's `mods` directory.
+
+## Native targets
+
+| Platform | x64 | ARM64 |
+| --- | --- | --- |
+| Linux | `x86_64-linux` | `aarch64-linux` |
+| Windows | `x86_64-windows` | `aarch64-windows` |
+
+A default Linux build targets the host. Use [Zig 0.15.2](https://ziglang.org/download/) to select another target or bundle all four libraries:
+
+```sh
 "$tool" protect --input input.jar --output protected.jar \
   --include 'my/mod/Math#mix(II)I' --target all --zig /path/to/zig
 ```
 
-Selection uses `internal/Class#name(descriptor)`. `*` matches zero or more characters and `?` matches one. Repeat `--include` and `--exclude` as needed. The CLI emits one JSON record for each selected method. By default, an unsupported selected method fails the build. Use `--unsupported retain` to keep its body in Java. Signed input JARs must be protected before signing. `--emit-c` writes the generated C for inspection.
+At runtime the loader selects the library for the current OS and CPU architecture and checks its checksum. End users need a compatible JVM. On Java 25, enable native access with `--enable-native-access=ALL-UNNAMED` for classpath launches or name the module containing the loader for modular launches.
 
-Use `--enable-native-access=ALL-UNNAMED` for classpath launches on Java 25. Named modules need native access enabled for the module that contains the generated loader. Libraries are extracted into a private per-classloader temporary directory on systems with POSIX permissions. The checksum detects corruption of the library resource; use publisher signing for JAR authenticity.
+## LLVM obfuscation
 
-## Coverage
-
-The translator handles primitive numeric instructions, branches, loops, table and lookup switches, primitive returns, static and instance methods, and reference identity checks. It preserves existing classfile versions, and registers native code before the original declaring-class initializer. Constructors, interface methods, reference returns, JVM linkage operations such as calls and field access, exception handlers, array operations, and unrecognized instructions remain outside the current translation subset. The CLI excludes classes named by Fabric entrypoint, mixin, language-adapter, and access-widener metadata, as well as multi-release classes.
-
-The target list includes Linux x64 and ARM64 and Windows x64 and ARM64. A single artifact covers each respective OS and architecture family. Cross-compilation and native execution are tested separately.
-
-```sh
-JAVA_RELEASE=21 bash src/test/integration.sh "$tool"
-JAVA_RELEASE=25 bash src/test/integration.sh "$tool"
-```
-
-Use the matching JDK in `JAVA_HOME` for each test. Run
-`bash src/test/generated/verify.sh "$tool"` for generated stack and arithmetic
-programs and `bash src/test/modern/verify.sh "$tool"` for modern classfiles. The
-Kotlin verification script uses the pinned Kotlin compiler bundled with
-Gradle 9.3.1. Set `GRADLE_HOME` to your Gradle installation and run
-`bash src/test/kotlin/verify.sh "$tool"`.
-
-See the [dependency inventory](docs/dependencies.md) for the licenses shipped with the CLI.
-
-## LLVM protection
-
-Build the project-owned [LLVM 23 pass plugin](llvm/README.md) with the same LLVM
-version as `clang` and `opt`. Normal optimization runs before the selected
-protection passes. The final code generation step verifies the IR and lowers it
-without running another optimization pipeline.
+Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `clang` and `opt`. The default `compatibility` profile builds JNI code with standard optimization. `balanced` adds arithmetic substitutions, while `aggressive` and `maximum` also attempt equivalent conditional paths.
 
 ```sh
 "$tool" protect --input input.jar --output protected.jar \
@@ -55,34 +80,12 @@ without running another optimization pipeline.
   --profile balanced --seed 42 --max-growth 25
 ```
 
-Compatibility is the default without LLVM. Balanced, aggressive and maximum
-allocate up to 4, 12 and 32 arithmetic substitutions per protected function.
-Aggressive and maximum also attempt up to 1 and 3 equivalent conditional
-paths per function when the pass can prove the selector is safe to branch on.
-Use `--llvm-passes` to select an explicit pipeline. Add `--zig` to an LLVM build
-to preprocess and link with the requested cross toolchain. The optional growth
-limit compares executable sections with a matching LLVM build before
-protection and aborts publication if the code size exceeds the limit.
+`--max-growth` caps executable code growth as a percentage of the matching LLVM build baseline. Use `--llvm-passes` to specify a custom pipeline. The [benchmark results](docs/verification.md) include code size, JNI overhead, and checks that transformations survive compilation.
 
-For build automation, put the same options in a [JSON config](examples/protect.json)
-and run `"$tool" protect --config path/to/protect.json`. Relative paths resolve
-from the current working directory. `include`, `exclude` and `target` are arrays.
+## Bytecode support
 
-For analysis benchmarks, `--markers 200 --marker-seed 42` adds a resource of 200
-deterministic hexadecimal canaries. The loader never reads it. The feature is
-disabled by default.
+The translator handles primitive numeric instructions, branches, loops, switches, primitive returns, and reference identity checks in static and instance methods. Constructors, interface methods, calls, field access, array operations, reference returns, and exception handlers stay in JVM bytecode. The tool preserves the input classfile version.
 
-## Benchmarks
+GitHub Actions runs Java 21 and 25 differential tests, Kotlin tests, and JNI runtime checks on all four targets. See the [verification report](docs/verification.md) for the results and the scope of the Fabric smoke test. For local differential tests, set `JAVA_HOME` and `JAVA_RELEASE` to the matching JDK and run `bash src/test/integration.sh "$tool"`. Set `GRADLE_HOME` to Gradle 9.3.1 to run `bash src/test/kotlin/verify.sh "$tool"`.
 
-```sh
-bash benchmarks/run.sh "$tool" --clang /path/to/clang --llvm-opt /path/to/opt \
-  --llvm-plugin /path/to/NativeEncode.so --profile balanced --seed 42
-```
-
-The benchmark reports median call time, checksums, JAR and library bytes.
-Set `MAX_ARITHMETIC_OVERHEAD_PERCENT` to enforce an arithmetic workload budget
-for the LLVM build. See [local verification](docs/verification.md) for measured
-results and platform coverage.
-
-The [Fabric Loom example](examples/fabric/README.md) accepts either a remapped
-JAR or the output of a separate Java obfuscator.
+The project is [MIT-licensed](LICENSE). See the [dependency inventory](docs/dependencies.md) for the licenses packaged with the CLI.
