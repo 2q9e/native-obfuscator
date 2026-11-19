@@ -31,6 +31,14 @@ jobs:
       - run: bash src/test/modern/verify.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
         env:
           JAVA_RELEASE: ${{ matrix.java }}
+      - run: bash src/test/generated/verify.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
+        env:
+          JAVA_RELEASE: ${{ matrix.java }}
+      - name: Verify Kotlin compilation and runtime
+        shell: bash
+        run: |
+          export GRADLE_HOME="$(find "${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists/gradle-9.3.1-bin" -type d -name gradle-9.3.1 -print -quit)"
+          bash src/test/kotlin/verify.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
 
   cross-build:
     runs-on: ubuntu-24.04
@@ -80,10 +88,11 @@ jobs:
             arch: x64
           - runner: windows-11-arm
             arch: arm64
+            distribution: zulu
     steps:
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
-          distribution: temurin
+          distribution: ${{ matrix.distribution || 'temurin' }}
           java-version: '25'
           architecture: ${{ matrix.arch }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
