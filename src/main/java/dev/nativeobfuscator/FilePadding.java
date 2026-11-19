@@ -1,10 +1,8 @@
 package dev.nativeobfuscator;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import org.objectweb.asm.ClassReader;
@@ -30,12 +28,12 @@ final class FilePadding {
     static void bundle(Map<String, byte[]> files, String resourceRoot, String buildId) throws IOException {
         for (Class<?> utility : UTILITIES) {
             String original = Type.getInternalName(utility);
-            String renamed = "dev/nativeobfuscator/padding/C" + identifier(buildId, original);
+            String renamed = "dev/nativeobfuscator/padding/" + GeneratedNames.forSymbol("C", buildId, original);
             var names = new HashMap<String, String>();
             names.put(original, renamed);
             for (var method : utility.getDeclaredMethods()) {
                 String methodKey = original + "." + method.getName() + Type.getMethodDescriptor(method);
-                names.put(methodKey, "m" + identifier(buildId, methodKey));
+                names.put(methodKey, GeneratedNames.forSymbol("m", buildId, methodKey));
             }
 
             var writer = new ClassWriter(0);
@@ -48,11 +46,6 @@ final class FilePadding {
             if (files.putIfAbsent(path, writer.toByteArray()) != null)
                 throw new IOException("Padding class path collides with a JAR entry: " + path);
         }
-    }
-
-    private static String identifier(String buildId, String symbol) {
-        byte[] hash = Archive.sha256().digest((buildId + "/" + symbol).getBytes(StandardCharsets.UTF_8));
-        return HexFormat.of().formatHex(hash, 0, 12);
     }
 }
 
