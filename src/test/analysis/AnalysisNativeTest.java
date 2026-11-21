@@ -29,10 +29,13 @@ public final class AnalysisNativeTest {
 
     private static void checkSelection(MethodNode narrow, MethodNode wide) throws Exception {
         var analysis = new AnalysisNative(SEED, 1);
-        var site = analysis.prepare(narrow, INT_ROOT);
+        var site = analysis.prepare(narrow, INT_ROOT, narrow.name + narrow.desc);
         require(site.enabled() && site.opcode() == ISUB, "returning subtraction was not eligible");
-        require(site.equals(analysis.prepare(narrow, INT_ROOT)) && analysis.selectedCount() == 0,
+        require(site.equals(analysis.prepare(narrow, INT_ROOT, narrow.name + narrow.desc)) && analysis.selectedCount() == 0,
             "preparing a site should be reproducible without consuming the budget");
+        var renamed = analysis.prepare(narrow, "method_different_runtime", narrow.name + narrow.desc);
+        require(renamed.rootSection().equals(site.rootSection()) && renamed.reversed() == site.reversed(),
+            "runtime naming changed the per-method analysis seed stream");
         require(site.lower(site.instructionIndex() - 1, ISUB, "a", "b") == null, "nonselected instruction was lowered");
         require(site.lower(site.instructionIndex(), IADD, "a", "b") == null, "nonselected opcode was lowered");
         require(site.lower(site.instructionIndex(), ISUB, "a", "b").contains(site.helper()),
@@ -41,11 +44,12 @@ public final class AnalysisNativeTest {
             "integer helper ABI was not emitted");
         boolean varied = false;
         for (long seed = 0; seed < 64; seed++) {
-            if (new AnalysisNative(seed, 1).prepare(narrow, INT_ROOT).reversed() != site.reversed()) varied = true;
+            var candidate = new AnalysisNative(seed, 1).prepare(narrow, INT_ROOT, narrow.name + narrow.desc);
+            if (candidate.reversed() != site.reversed()) varied = true;
         }
         require(varied, "seed had no effect on the helper operand order");
         analysis.accept(site);
-        require(analysis.selectedCount() == 1 && analysis.prepare(wide, LONG_ROOT).reason().contains("limit"),
+        require(analysis.selectedCount() == 1 && analysis.prepare(wide, LONG_ROOT, wide.name + wide.desc).reason().contains("limit"),
             "selected site did not consume the method budget");
 
         var skipped = new AnalysisNative(SEED, AnalysisNative.MAX_METHODS);
@@ -55,7 +59,7 @@ public final class AnalysisNativeTest {
         constant.visitInsn(IADD);
         constant.visitInsn(IRETURN);
         constant.visitMaxs(2, 0);
-        require(skipped.prepare(constant, "method_constant").reason().contains("does not read an argument"),
+        require(skipped.prepare(constant, "method_constant", constant.name + constant.desc).reason().contains("does not read an argument"),
             "constant-only operation was eligible");
 
         var branch = method("branch", "(I)I");
@@ -70,11 +74,12 @@ public final class AnalysisNativeTest {
         branch.visitInsn(IADD);
         branch.visitInsn(IRETURN);
         branch.visitMaxs(2, 1);
-        require(skipped.prepare(branch, "method_branch").reason().contains("straight-line"),
+        require(skipped.prepare(branch, "method_branch", branch.name + branch.desc).reason().contains("straight-line"),
             "multi-path method was eligible");
 
         String baseline = MethodCompiler.compile(owner(), narrow, INT_ROOT);
-        String disabled = MethodCompiler.compile(owner(), narrow, INT_ROOT, "", skipped.prepare(constant, "method_constant")::lower);
+        var disabledSite = skipped.prepare(constant, "method_constant", constant.name + constant.desc);
+        String disabled = MethodCompiler.compile(owner(), narrow, INT_ROOT, "", disabledSite::lower);
         require(baseline.equals(disabled), "disabled helper changed emitted C");
         String lowered = MethodCompiler.compile(owner(), narrow, INT_ROOT, site.rootAttribute(), site::lower);
         require(lowered.contains(site.rootSection()) && lowered.contains("bits_i(" + site.helper()),
@@ -130,9 +135,9 @@ public final class AnalysisNativeTest {
             """);
 
         var analysis = new AnalysisNative(SEED, 2);
-        var integer = analysis.prepare(narrow, INT_ROOT);
+        var integer = analysis.prepare(narrow, INT_ROOT, narrow.name + narrow.desc);
         analysis.accept(integer);
-        var longInteger = analysis.prepare(wide, LONG_ROOT);
+        var longInteger = analysis.prepare(wide, LONG_ROOT, wide.name + wide.desc);
         analysis.accept(longInteger);
         require(longInteger.enabled() && longInteger.support().contains("uint64_t"), "long helper ABI was not emitted");
         String support = MethodCompiler.runtimeSupport() + integer.support() + longInteger.support();

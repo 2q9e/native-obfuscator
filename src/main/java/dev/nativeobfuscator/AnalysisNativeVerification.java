@@ -90,7 +90,7 @@ final class AnalysisNativeVerification {
                 String signature = type.name + "#" + method.name + method.desc;
                 if (!expectedMethods.contains(signature)) continue;
                 String root = GeneratedNames.nativeFunction(runtimeId, signature);
-                var site = nativeHelpers.prepare(method, root);
+                var site = nativeHelpers.prepare(method, root, signature);
                 if (!site.enabled()) continue;
                 nativeHelpers.accept(site);
                 methodsByRoot.put(root, signature);

@@ -134,7 +134,7 @@ final class Protector {
                 } else {
                     String symbol = GeneratedNames.nativeFunction(id, name);
                     try {
-                        var site = nativePlan != null && !required ? nativePlan.prepare(method, symbol) : null;
+                        var site = nativePlan != null && !required ? nativePlan.prepare(method, symbol, name) : null;
                         String c = compile(node, method, symbol, site);
                         MethodMetrics metrics = measure(method);
                         if (!required && metrics.instructions < config.minInstructions) {

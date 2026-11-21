@@ -62,7 +62,9 @@ final class AnalysisNative {
 
     record Evidence(String root, String status, String reason, Long rootBytes, Long helperBytes, Long edgeOffset) {}
 
-    Selection prepare(MethodNode method, String root) {
+    Selection prepare(MethodNode method, String root, String signature) {
+        if (method.instructions.size() > 12_000)
+            return Selection.skipped(root, "classfile instruction list exceeds the translator limit");
         int returnOpcode = switch (Type.getReturnType(method.desc).getSort()) {
             case Type.INT -> IRETURN;
             case Type.LONG -> LRETURN;
@@ -122,8 +124,10 @@ final class AnalysisNative {
         if (!readsArgument) return Selection.skipped(root, "integer expression does not read an argument");
         if (selected.size() >= limit) return Selection.skipped(root, "native helper method limit reached");
 
-        String suffix = Integer.toHexString(selected.size());
-        boolean reversed = new SplittableRandom(seed ^ root.hashCode()).nextBoolean();
+        int methodHash = signature.hashCode();
+        int ordinal = selected.size();
+        String suffix = Integer.toHexString(0x1000 | (methodHash & 0xff) << 4 | ordinal).substring(1);
+        boolean reversed = new SplittableRandom(seed ^ 0x5694a91d56c7ef02L ^ methodHash).nextBoolean();
         return new Selection(root, "", method.instructions.indexOf(operation), operation.getOpcode(),
             ".nar" + suffix, ".nah" + suffix, "native_analysis_" + suffix, reversed);
     }
