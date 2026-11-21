@@ -42,6 +42,16 @@ jobs:
       - run: bash src/test/generated/verify.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
         env:
           JAVA_RELEASE: ${{ matrix.java }}
+      - name: Verify JNI array, field, and call slices
+        run: python3 src/test/native-coverage/verify.py build/install/native-obfuscator
+      - name: Verify deterministic utility generation and archive heuristics
+        shell: bash
+        run: |
+          mkdir -p build/padding-tests
+          javac --release 21 -cp 'build/install/native-obfuscator/lib/*' -d build/padding-tests \
+            src/test/padding/GeneratorChecks.java src/test/padding/ArchiveCheck.java
+          java -Xverify:all -cp 'build/padding-tests:build/install/native-obfuscator/lib/*' dev.nativeobfuscator.GeneratorChecks
+          java -cp 'build/padding-tests:build/install/native-obfuscator/lib/*' ArchiveCheck --self-test
       - name: Verify Kotlin compilation and runtime
         shell: bash
         run: |
