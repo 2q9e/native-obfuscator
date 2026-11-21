@@ -4,18 +4,30 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 final class NativeImage {
     private NativeImage() {}
 
     static long executableBytes(byte[] binary, NativeTarget target) throws IOException {
+        return executableBytes(binary, target, null);
+    }
+
+    static String executableSha256(byte[] binary, NativeTarget target) throws IOException {
+        var digest = Archive.sha256();
+        executableBytes(binary, target, digest);
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static long executableBytes(byte[] binary, NativeTarget target, MessageDigest digest) throws IOException {
         ByteBuffer image = ByteBuffer.wrap(binary).order(ByteOrder.LITTLE_ENDIAN);
         try {
             long size = switch (target) {
-                case LINUX_X64 -> elf(image, 62);
-                case LINUX_ARM64 -> elf(image, 183);
-                case WINDOWS_X64 -> pe(image, 0x8664);
-                case WINDOWS_ARM64 -> pe(image, 0xaa64);
+                case LINUX_X64 -> elf(image, 62, digest);
+                case LINUX_ARM64 -> elf(image, 183, digest);
+                case WINDOWS_X64 -> pe(image, 0x8664, digest);
+                case WINDOWS_ARM64 -> pe(image, 0xaa64, digest);
             };
             if (size <= 0 || size > binary.length)
                 throw new IOException("Invalid executable section size for " + target.key);
@@ -32,7 +44,7 @@ final class NativeImage {
             throw new IOException("Expected a matching 64-bit ELF shared library");
     }
 
-    private static long elf(ByteBuffer image, int machine) throws IOException {
+    private static long elf(ByteBuffer image, int machine, MessageDigest digest) throws IOException {
         requireElfHeader(image, machine);
         int sectionTable = Math.toIntExact(image.getLong(40));
         int stride = unsignedShort(image, 58);
@@ -44,7 +56,9 @@ final class NativeImage {
             int section = Math.toIntExact((long) sectionTable + (long) i * stride);
             if ((image.getLong(section + 8) & 4) != 0) {
                 long bytes = image.getLong(section + 32);
-                requireRange(image, image.getLong(section + 24), bytes);
+                long offset = image.getLong(section + 24);
+                requireRange(image, offset, bytes);
+                digestSection(image, digest, offset, bytes);
                 size = Math.addExact(size, bytes);
             }
         }
@@ -65,7 +79,7 @@ final class NativeImage {
         return header;
     }
 
-    private static long pe(ByteBuffer image, int machine) throws IOException {
+    private static long pe(ByteBuffer image, int machine, MessageDigest digest) throws IOException {
         int header = requirePeHeader(image, machine);
         int sections = unsignedShort(image, header + 6);
         int table = header + 24 + unsignedShort(image, header + 20);
@@ -76,8 +90,11 @@ final class NativeImage {
             if ((flags & 0x20000000) != 0) {
                 long logical = Integer.toUnsignedLong(image.getInt(section + 8));
                 long raw = Integer.toUnsignedLong(image.getInt(section + 16));
-                requireRange(image, Integer.toUnsignedLong(image.getInt(section + 20)), raw);
-                size = Math.addExact(size, Math.min(logical, raw));
+                long offset = Integer.toUnsignedLong(image.getInt(section + 20));
+                requireRange(image, offset, raw);
+                long bytes = Math.min(logical, raw);
+                digestSection(image, digest, offset, bytes);
+                size = Math.addExact(size, bytes);
             }
         }
         return size;
@@ -233,6 +250,12 @@ final class NativeImage {
 
     private static int unsignedShort(ByteBuffer image, int offset) {
         return Short.toUnsignedInt(image.getShort(offset));
+    }
+
+    private static void digestSection(ByteBuffer image, MessageDigest digest, long start, long length) {
+        if (digest == null) return;
+        digest.update(ByteBuffer.allocate(Long.BYTES).putLong(length).array());
+        digest.update(image.array(), (int) start, (int) length);
     }
 
     private static void requireRange(ByteBuffer image, long start, long length) throws IOException {

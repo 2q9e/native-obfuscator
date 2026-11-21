@@ -120,6 +120,13 @@ public final class NativeBindingTest {
         if (NativeImage.requireCodeSection(elfCode.array(), NativeTarget.LINUX_X64, SECTION_NAME) != ANCHOR.length
             || NativeImage.requireCodeSection(peCode.array(), NativeTarget.WINDOWS_ARM64, SECTION_NAME) != ANCHOR.length)
             throw new AssertionError("Incorrect executable section length");
+        String elfDigest = NativeImage.executableSha256(elfCode.array(), NativeTarget.LINUX_X64);
+        elfCode.put(ELF_OTHER_PAYLOAD, (byte) 0x42);
+        if (!elfDigest.equals(NativeImage.executableSha256(elfCode.array(), NativeTarget.LINUX_X64)))
+            throw new AssertionError("Non-executable data affected the ELF code digest");
+        elfCode.put(ELF_PAYLOAD, (byte) 0x42);
+        if (elfDigest.equals(NativeImage.executableSha256(elfCode.array(), NativeTarget.LINUX_X64)))
+            throw new AssertionError("Changed executable bytes kept the same ELF code digest");
         rejectCode(elf(62), NativeTarget.LINUX_X64);
         rejectCode(pe(0xaa64), NativeTarget.WINDOWS_ARM64);
         rejectCode(elfCode.putInt(ELF_PROGRAM + 4, 7).array(), NativeTarget.LINUX_X64);
