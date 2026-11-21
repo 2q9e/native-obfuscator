@@ -26,4 +26,12 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         "$<TARGET_FILE:NativeEncode>" "${LLVM_TOOLS_BINARY_DIR}"
         "${CMAKE_C_COMPILER}" "${pass}")
   endforeach()
+  find_package(Python3 QUIET COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME llvm-native-extended
+      COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify-extended.py"
+        --llvm-bin "${LLVM_TOOLS_BINARY_DIR}" --plugin "$<TARGET_FILE:NativeEncode>"
+        --cc "${CMAKE_C_COMPILER}")
+  endif()
 endif()

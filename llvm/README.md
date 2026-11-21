@@ -67,6 +67,47 @@ coroutine or indirect control flow. It also skips address-taken blocks.
 An eligible site adds at most three blocks and ten IR instructions. The
 branch can introduce input-dependent timing.
 
+`native-mix` accepts the same options and defaults to four sites per function.
+It substitutes scalar 8-, 16-, 32-, and 64-bit `add`, `sub`, `mul`, `and`,
+`or`, and `xor` instructions. The seed and function name select the identity
+or the multiplication offset. Arithmetic in the following examples wraps at
+the operand width.
+
+| Operation | Example identity |
+| --- | --- |
+| `add` | `(x ^ y) + 2 * (x & y)` |
+| `sub` | `(x ^ y) - 2 * (~x & y)` |
+| `mul` | `(x + k) * y - k * y` |
+| `and` | `(x + y) - (x \| y)` |
+| `or` | `(x + y) - (x & y)` |
+| `xor` | `(x \| y) - (x & y)` |
+
+The pass requires LLVM ValueTracking to prove that both operands are free of
+poison and `undef`, since the replacement can use each operand more than once.
+Examples of eligible inputs include integer constants, `noundef` arguments,
+and results of `freeze`. The pass skips `optnone` and `naked` functions and
+instructions with poison-generating flags such as `nuw`, `nsw`, and `disjoint`.
+One substitution adds at most four IR instructions.
+
+`native-route` accepts the same options and defaults to one site per function.
+It routes a scalar 8-, 16-, 32-, or 64-bit `add`, `sub`, or `mul` through two
+equivalent paths and joins them with a PHI. A seeded bit of an operand that
+LLVM can prove both defined and non-poison selects the path. For addition and
+subtraction, each path has a distinct invertible scale. For multiplication,
+each path uses a distinct offset and repeats only the defined selector operand.
+The other operand is used once on each path and can still propagate poison.
+The pass skips unsupported flags, constant-only selectors, address-taken
+blocks, and functions with exceptional, convergent, coroutine, indirect,
+garbage collection, or `returns_twice` control flow. Each site adds at most
+three blocks and thirteen IR instructions. Lowering can convert the branch
+to conditional selection. The selected path can affect timing.
+
+The extended passes report rejected flags and types, with `skipped_undefined`
+for mix and `skipped_unsafe_blocks` and `skipped_guard` for route. Each selected
+function gets a report, including functions with zero candidates. Configure
+both passes explicitly. When composing passes, each sees the previous pass's
+output and applies its own cap to eligible instructions in that IR.
+
 The native differential test runs 100,324 boundary and seeded input pairs
 per build. It also checks that a fixed seed reproduces the bitcode, another
 seed changes it, malformed options fail, and the prefix and per-function cap
@@ -77,3 +118,33 @@ reports code size and disassembles an address-taken function in ELF and COFF
 objects. Those objects are compiler and disassembly checks. Both passes
 increase code size and work, and their arithmetic can be simplified
 algebraically.
+
+The extended differential test runs 165,825 pairs across the six operations
+at all four widths, a dependent chain, and a function with an existing PHI.
+It includes every 8-bit input pair, wider boundaries, and deterministic
+pseudorandom inputs. It checks rejection reasons, caps, option parsing, seed
+reproducibility, IR verification, and representative linked instructions.
+Linux CTest runs this test when a Python 3 interpreter is available. To run
+it directly with a loadable plugin:
+
+```sh
+python3 llvm/tests/verify-extended.py --llvm-bin "$llvm_sdk/bin" \
+  --plugin "$PWD/NativeEncode.so" --cc cc
+```
+
+With the Windows LLVM 23.1.6 static `opt` wrapper and Zig 0.15.2, the baseline,
+four mix seeds, and two route seeds each passed the differential test. In the
+linked x86-64 PE at seed 42, mix `method_add32` used `andl` and `xorl`, route
+`method_add32` used a conditional jump and two modular sequences, and route
+`method_mul32` used a conditional jump and two offset products. LLVM lowered
+route selection to `csel` in the AArch64 ELF and COFF object probes. For the
+address-taken `method_1` fixture, `.text` grew from 4 to 9 bytes with mix and
+from 4 to 50 with route on x86-64, and from 8 to 16 with mix and from 8 to 60
+with route on AArch64. These measurements use seed 42 and one site per
+function. The linked evidence is specific to the tested toolchain and inputs.
+
+```powershell
+py -3 llvm/tests/verify-extended.py --llvm-bin $llvmBin --static-opt $staticOpt `
+  --cc $zig --cc-arg=cc --cc-arg=-target --cc-arg=x86_64-windows-gnu `
+  --target x86_64-windows-gnu
+```
