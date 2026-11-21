@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -54,30 +55,29 @@ final class AnalysisDecoys {
             String path = entry.getKey();
             if (!path.endsWith(CLASS_SUFFIX)) continue;
             reservePath(path, occupied);
-            ClassReader reader;
             try {
-                reader = new ClassReader(entry.getValue());
+                var reader = new ClassReader(entry.getValue());
+                String owner = reader.getClassName();
+                occupied.add(owner);
+                if (path.startsWith("META-INF/") || !path.equals(owner + CLASS_SUFFIX)
+                    || (reader.getAccess() & (ACC_INTERFACE | ACC_ANNOTATION | ACC_MODULE)) != 0) continue;
+                int separator = owner.lastIndexOf('/');
+                String leaf = owner.substring(separator + 1);
+                if (leaf.equals("package-info") || leaf.equals("module-info")) continue;
+                String pkg = owner.substring(0, separator + 1);
+                if (safePackage(pkg)) packages.merge(pkg, reader.readUnsignedShort(6), Math::min);
             } catch (RuntimeException failure) {
                 // Future or invalid classes under metadata can still reserve their versioned path.
                 if (path.startsWith("META-INF/")) continue;
                 throw new IOException("Cannot inspect analysis utility class reference " + path, failure);
             }
-            String owner = reader.getClassName();
-            occupied.add(owner);
-            if (path.startsWith("META-INF/") || !path.equals(owner + CLASS_SUFFIX)
-                || (reader.getAccess() & (ACC_INTERFACE | ACC_ANNOTATION | ACC_MODULE)) != 0) continue;
-            int separator = owner.lastIndexOf('/');
-            String leaf = owner.substring(separator + 1);
-            if (leaf.equals("package-info") || leaf.equals("module-info")) continue;
-            String pkg = owner.substring(0, separator + 1);
-            if (safePackage(pkg)) packages.merge(pkg, reader.readUnsignedShort(6), Math::min);
         }
         if (packages.size() > 1) packages.remove("");
         if (packages.isEmpty()) packages.put("utility/", V1_8);
         var candidates = new ArrayList<>(packages.entrySet());
 
         var random = new SplittableRandom(analysisSeed ^ SEED_DOMAIN);
-        var schedule = new ArrayList<>(java.util.List.of(Utility.values()));
+        var schedule = new ArrayList<>(List.of(Utility.values()));
         Collections.shuffle(schedule, random);
         var classes = new LinkedHashMap<String, byte[]>();
         var selected = new LinkedHashMap<String, String>();
@@ -124,7 +124,7 @@ final class AnalysisDecoys {
     }
 
     private static boolean safePackage(String name) {
-        return name.isEmpty() || (PACKAGE.matcher(name).matches()
+        return name.isEmpty() || (name.length() <= 1024 && PACKAGE.matcher(name).matches()
             && !name.startsWith("java/") && !name.startsWith("javax/") && !name.startsWith("jdk/")
             && !name.startsWith("sun/") && !name.startsWith("com/sun/")
             && !name.startsWith("dev/nativeobfuscator/runtime/"));
