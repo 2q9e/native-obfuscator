@@ -24,6 +24,7 @@ public final class AnalysisCorpusTest {
         var maximum = AnalysisCorpus.plan(2, SEED, AnalysisManifest.MAXIMUM_BYTES, AnalysisManifest.MAXIMUM_ENTRIES);
         Map<String, byte[]> balancedFiles = checkGenerated(balanced);
         Map<String, byte[]> maximumFiles = checkGenerated(maximum);
+        checkUtilityCatalog(balanced);
         require(maximum.byteCount() > balanced.byteCount() && maximum.entryCount() > balanced.entryCount(),
             "Maximum profile should expand the corpus");
         require(balancedFiles.containsKey("analysis/report-00.txt")
@@ -55,6 +56,31 @@ public final class AnalysisCorpusTest {
 
         checkBudgets(balanced, balancedFiles);
         System.out.println("PASS analysis corpus");
+    }
+
+    private static void checkUtilityCatalog(AnalysisCorpus.Plan base) throws Exception {
+        var utilities = AnalysisDecoys.generate(Map.of(), 2, SEED);
+        var enriched = AnalysisCorpus.withUtilities(base, utilities);
+        Map<String, byte[]> entries = AnalysisCorpus.generate(enriched);
+        String index = enriched.componentIndex();
+        require(index != null && entries.containsKey("analysis/component-index.tsv"), "Missing utility catalog");
+        require(entries.size() == base.entryCount() + 1 && entries.size() == enriched.entryCount(),
+            "Unexpected entry count after catalog planning");
+        require(entries.values().stream().mapToInt(bytes -> bytes.length).sum() == enriched.byteCount(),
+            "Catalog budget differs from generated resources");
+        int row = 2;
+        var lines = index.lines().toList();
+        for (var method : utilities.nativeMethods().entrySet()) {
+            String[] fields = lines.get(row++).split("\t");
+            String classPath = method.getKey().substring(0, method.getKey().indexOf('#')) + ".class";
+            byte[] owner = utilities.classes().get(classPath);
+            String digest = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(owner));
+            require(fields.length == 5 && fields[1].equals(method.getValue()) && fields[3].equals(digest)
+                && entries.containsKey("analysis/" + fields[4]), "Invalid utility catalog row");
+        }
+        var capped = AnalysisCorpus.plan(1, SEED, 256, 2);
+        require(AnalysisCorpus.withUtilities(capped, utilities) == capped,
+            "A utility catalog exceeded the requested archive budget");
     }
 
     private static AnalysisCorpus.Plan balanced(long seed) {

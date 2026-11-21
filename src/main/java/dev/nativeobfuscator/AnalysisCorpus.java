@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,8 @@ import java.util.Random;
 final class AnalysisCorpus {
     static final int MIN_BYTE_BUDGET = 256;
     static final int MIN_ENTRY_BUDGET = 2;
+
+    private static final String COMPONENT_INDEX = "analysis/component-index.tsv";
 
     private static final int[] BALANCED_ROWS = {8, 12, 16, 20};
     private static final int[] MAXIMUM_ROWS = {24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112};
@@ -70,7 +73,35 @@ final class AnalysisCorpus {
             manifestBytes = expandedManifestBytes;
         }
         if (entries.isEmpty()) throw new IllegalStateException("Analysis corpus cannot fit its minimum budget");
-        return new Plan(profile, seed, byteBudget, entryBudget, corpusBytes + manifestBytes, manifestBytes, entries);
+        return new Plan(profile, seed, byteBudget, entryBudget, corpusBytes + manifestBytes, manifestBytes, entries,
+            null);
+    }
+
+    static Plan withUtilities(Plan plan, FilePadding.Generation utilities) {
+        if (utilities.nativeMethods().isEmpty() || plan.entryCount() == plan.entryBudget()) return plan;
+        var names = new ArrayList<>(plan.entries().stream().map(EntryPlan::name).toList());
+        names.add(COMPONENT_INDEX);
+        int manifestBytes = AnalysisManifest.encodedSize(names);
+        var catalog = new StringBuilder("# Synthetic utility catalog v1\n")
+            .append("component\talgorithm\tprototype\tclass_sha256\tsample_document\n");
+        int row = 0;
+        var hex = HexFormat.of();
+        var digest = Archive.sha256();
+        for (var entry : utilities.nativeMethods().entrySet()) {
+            String method = entry.getKey();
+            int ownerEnd = method.indexOf('#');
+            int descriptorStart = method.indexOf('(', ownerEnd);
+            byte[] utility = utilities.classes().get(method.substring(0, ownerEnd) + ".class");
+            String hash = hex.formatHex(digest.digest(utility));
+            String sample = plan.entries().get(row++ % plan.entries().size()).name().substring("analysis/".length());
+            catalog.append(hash, 0, 16).append('\t').append(entry.getValue()).append('\t')
+                .append(method.substring(descriptorStart)).append('\t').append(hash).append('\t').append(sample).append('\n');
+        }
+        byte[] data = catalog.toString().getBytes(StandardCharsets.US_ASCII);
+        int bytes = plan.byteCount() - plan.manifestBytes() + manifestBytes + data.length;
+        if (data.length > AnalysisManifest.MAX_ENTRY_BYTES || bytes > plan.byteBudget()) return plan;
+        return new Plan(plan.profile(), plan.seed(), plan.byteBudget(), plan.entryBudget(), bytes, manifestBytes,
+            plan.entries(), catalog.toString());
     }
 
     static Map<String, byte[]> generate(Plan plan) throws IOException {
@@ -86,6 +117,8 @@ final class AnalysisCorpus {
             if (bytes.length != entry.byteCount()) throw new IllegalStateException("Unexpected analysis resource size");
             additions.put(entry.name(), bytes);
         }
+        if (plan.componentIndex() != null)
+            additions.put(COMPONENT_INDEX, plan.componentIndex().getBytes(StandardCharsets.US_ASCII));
         byte[] manifest = AnalysisManifest.encode(plan.profile(), plan.byteBudget(), plan.entryBudget(), additions);
         if (manifest.length != plan.manifestBytes()) throw new IllegalStateException("Unexpected analysis manifest size");
         additions.put(AnalysisManifest.PATH, manifest);
@@ -132,13 +165,13 @@ final class AnalysisCorpus {
     }
 
     record Plan(int profile, long seed, int byteBudget, int entryBudget, int byteCount, int manifestBytes,
-                List<EntryPlan> entries) {
+                List<EntryPlan> entries, String componentIndex) {
         Plan {
             entries = List.copyOf(entries);
         }
 
         int entryCount() {
-            return entries.size() + 1;
+            return entries.size() + 1 + (componentIndex == null ? 0 : 1);
         }
     }
 
