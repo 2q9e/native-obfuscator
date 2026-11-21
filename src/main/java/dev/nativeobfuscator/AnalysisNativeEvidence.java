@@ -1,6 +1,7 @@
 package dev.nativeobfuscator;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -10,7 +11,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 
 import dev.nativeobfuscator.AnalysisNative.Evidence;
@@ -118,32 +122,42 @@ final class AnalysisNativeEvidence {
         }
         Path image = library.toAbsolutePath();
         command.add(image.toString());
-        Path log = Files.createTempFile(image.getParent(), "analysis-disassembly-", ".txt");
+        var builder = new ProcessBuilder(command).redirectErrorStream(true);
+        builder.environment().put("LC_ALL", "C");
+        Process process;
         try {
-            var builder = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile());
-            builder.environment().put("LC_ALL", "C");
-            Process process;
-            try {
-                process = builder.start();
-            } catch (IOException failure) {
-                throw new IOException("could not start linked disassembly tool " + objdump, failure);
-            }
-            try {
-                if (!process.waitFor(30, TimeUnit.SECONDS))
-                    throw new IOException("linked disassembly timed out");
-                if (process.exitValue() != 0)
-                    throw new IOException("linked disassembly exited with status " + process.exitValue());
-            } finally {
-                if (process.isAlive()) {
-                    process.descendants().forEach(ProcessHandle::destroyForcibly);
-                    process.destroyForcibly();
+            process = builder.start();
+        } catch (IOException failure) {
+            throw new IOException("could not start linked disassembly tool " + objdump, failure);
+        }
+        var output = new CompletableFuture<byte[]>();
+        try {
+            Thread.startVirtualThread(() -> {
+                try (var input = process.getInputStream()) {
+                    byte[] bytes = input.readNBytes(MAX_DISASSEMBLY + 1);
+                    if (bytes.length > MAX_DISASSEMBLY)
+                        throw new IOException("linked disassembly exceeds the analysis size limit");
+                    output.complete(bytes);
+                } catch (IOException failure) {
+                    output.completeExceptionally(failure);
                 }
-            }
-            if (Files.size(log) > MAX_DISASSEMBLY)
-                throw new IOException("linked disassembly exceeds the analysis size limit");
-            return Files.readString(log);
+            });
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            byte[] bytes = output.get(30, TimeUnit.SECONDS);
+            if (!process.waitFor(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS))
+                throw new IOException("linked disassembly timed out");
+            if (process.exitValue() != 0)
+                throw new IOException("linked disassembly exited with status " + process.exitValue());
+            return new String(bytes, StandardCharsets.UTF_8);
+        } catch (TimeoutException failure) {
+            throw new IOException("linked disassembly timed out", failure);
+        } catch (ExecutionException failure) {
+            throw new IOException(failure.getCause().getMessage(), failure.getCause());
         } finally {
-            Files.deleteIfExists(log);
+            if (process.isAlive()) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+            }
         }
     }
 
