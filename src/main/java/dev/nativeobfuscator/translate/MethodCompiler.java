@@ -9,6 +9,8 @@ import static org.objectweb.asm.Opcodes.*;
 
 /** Lowers verified stack frames to per-instruction C statements. */
 public final class MethodCompiler {
+    private static final Type OBJECT_TYPE = Type.getObjectType("java/lang/Object");
+
     private MethodCompiler() {}
 
     public static final class Unsupported extends Exception {
@@ -313,6 +315,13 @@ public final class MethodCompiler {
                 default -> result;
             };
         }
+        @Override public BasicValue ternaryOperation(AbstractInsnNode insn, BasicValue array, BasicValue index,
+                                                    BasicValue value) throws AnalyzerException {
+            // BasicVerifier checks array-store indices by equality against INT_VALUE.
+            // Narrow integer values use the same JVM int stack category.
+            if (isNarrow(index.getType())) index = BasicValue.INT_VALUE;
+            return super.ternaryOperation(insn, array, index, value);
+        }
         private BasicValue integralConstant(int value) {
             if (value == 0 || value == 1) return newValue(Type.BOOLEAN_TYPE);
             if (value == (byte) value) return newValue(Type.BYTE_TYPE);
@@ -327,7 +336,7 @@ public final class MethodCompiler {
             Type type = value.getType();
             if (type != null && isNull(type)) return value;
             if (type != null && type.getSort() == Type.ARRAY)
-                return newValue(Type.getType(type.getDescriptor().substring(1)));
+                return newValue(arrayComponent(type));
             throw new AnalyzerException(null, "array operand requires a proven array type");
         }
         @Override protected boolean isSubTypeOf(BasicValue value, BasicValue expected) {
@@ -342,11 +351,8 @@ public final class MethodCompiler {
         @Override public BasicValue merge(BasicValue left, BasicValue right) {
             if (left.equals(right)) return left;
             if (isStackInt(left.getType()) && isStackInt(right.getType())) return BasicValue.INT_VALUE;
-            if (left.isReference() && right.isReference()) {
-                if (isNull(left.getType())) return right;
-                if (isNull(right.getType())) return left;
-                return newValue(Type.getObjectType("java/lang/Object"));
-            }
+            if (left.isReference() && right.isReference())
+                return newValue(mergeReferenceTypes(left.getType(), right.getType()));
             return BasicValue.UNINITIALIZED_VALUE;
         }
     }
@@ -361,15 +367,36 @@ public final class MethodCompiler {
 
     private static boolean referenceSubtype(Type actual, Type expected) {
         if (actual.equals(expected) || isNull(actual)) return true;
-        if (expected.equals(Type.getObjectType("java/lang/Object"))) return true;
+        if (expected.equals(OBJECT_TYPE)) return true;
         if (actual.getSort() == Type.ARRAY && expected.getSort() == Type.ARRAY) {
-            Type left = Type.getType(actual.getDescriptor().substring(1));
-            Type right = Type.getType(expected.getDescriptor().substring(1));
-            if ((left.getSort() == Type.ARRAY || left.getSort() == Type.OBJECT)
-                && (right.getSort() == Type.ARRAY || right.getSort() == Type.OBJECT))
+            Type left = arrayComponent(actual);
+            Type right = arrayComponent(expected);
+            if (isReferenceType(left) && isReferenceType(right))
                 return referenceSubtype(left, right);
         }
         return false;
+    }
+
+    private static Type mergeReferenceTypes(Type left, Type right) {
+        if (left.equals(right) || isNull(right)) return left;
+        if (isNull(left)) return right;
+        if (left.getSort() == Type.ARRAY && right.getSort() == Type.ARRAY) {
+            Type leftComponent = arrayComponent(left);
+            Type rightComponent = arrayComponent(right);
+            // If both arrays contain references, their component types have a
+            // safe common supertype even when neither component class is available.
+            if (isReferenceType(leftComponent) && isReferenceType(rightComponent))
+                return Type.getType("[" + mergeReferenceTypes(leftComponent, rightComponent).getDescriptor());
+        }
+        return OBJECT_TYPE;
+    }
+
+    private static Type arrayComponent(Type array) {
+        return Type.getType(array.getDescriptor().substring(1));
+    }
+
+    private static boolean isReferenceType(Type type) {
+        return type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT;
     }
 
     private static boolean isNull(Type type) {
@@ -427,9 +454,13 @@ public final class MethodCompiler {
         boolean store = op >= IASTORE && op <= SASTORE;
         int base = frame.getStackSize() - (store ? 3 : 2);
         Type array = frame.getStack(base).getType();
+        if (isNull(array)) {
+            line(code, "null_error(env); " + zeroReturn(result));
+            return;
+        }
         if (array == null || array.getSort() != Type.ARRAY)
             throw new Unsupported("array access requires an exact array descriptor (including byte versus boolean)");
-        Type element = Type.getType(array.getDescriptor().substring(1));
+        Type element = arrayComponent(array);
         String kind = switch (element.getSort()) {
             case Type.BOOLEAN -> "Boolean";
             case Type.BYTE -> "Byte";
