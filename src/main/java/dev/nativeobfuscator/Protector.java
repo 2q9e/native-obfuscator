@@ -48,6 +48,12 @@ final class Protector {
                 llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount, paddingSeed,
                 minInstructions, reportNativeSizes, AnalysisConfig.OFF);
         }
+
+        Config withOutput(Path replacement) {
+            return new Config(input, replacement, includes, excludes, targets, zig, skipUnsupported, analyze,
+                emitC, clang, llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount,
+                paddingSeed, minInstructions, reportNativeSizes, analysis);
+        }
     }
     record Decision(String method, String result, String reason, Integer instructions,
                     Integer branches, String target, Long nativeBytes) {

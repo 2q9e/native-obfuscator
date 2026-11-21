@@ -119,13 +119,21 @@ public final class Main {
         String[] protectArguments = arguments.clone();
         protectArguments[0] = "protect";
         var config = parse(protectArguments);
-        var decisions = new ArrayList<Protector.Decision>();
-        int count = runProtection(config, gson, decisions::add);
-        var expected = new java.util.TreeSet<String>();
-        decisions.stream().filter(decision -> decision.result().equals("selected"))
-            .map(Protector.Decision::method).forEach(expected::add);
-        var report = Workflow.verify(config.input(), config.output(), expected, targetKeys(config.targets()),
-            config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(), config.clang());
+        Path candidate = Files.createTempFile(config.output().getParent(), ".native-obfuscator-stage-", ".jar");
+        Workflow.VerificationReport report;
+        int count;
+        try {
+            var expected = new java.util.TreeSet<String>();
+            count = runProtection(config.withOutput(candidate), gson, decision -> {
+                if (decision.result().equals("selected")) expected.add(decision.method());
+            });
+            report = Workflow.verify(config.input(), candidate, expected, targetKeys(config.targets()),
+                config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(),
+                config.clang());
+            if (report.structurallyValid()) Workflow.publishStage(candidate, config.output(), report);
+        } finally {
+            Files.deleteIfExists(candidate);
+        }
         System.out.println(gson.toJson(Map.of("status", report.structurallyValid() ? "staged" : "verification-failed",
             "generatedMethods", count, "verification", report,
             "nextSteps", report.structurallyValid()

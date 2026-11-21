@@ -356,6 +356,14 @@ final class Workflow {
         return writer.toByteArray();
     }
 
+    static void publishStage(Path candidate, Path staged, VerificationReport verification) throws IOException {
+        if (!verification.structurallyValid())
+            throw new IllegalArgumentException("Staged verification did not pass");
+        if (!sha256(candidate).equals(verification.stagedSha256()))
+            throw new IOException("Candidate JAR changed after staged verification");
+        atomicMove(candidate, staged);
+    }
+
     static PromotionResult apply(Path stagedJar, Path releaseJar, Path stateRoot,
                                  boolean confirmed, String verifiedSha256) throws IOException {
         Path staged = regularFile(stagedJar, "Staged JAR");
