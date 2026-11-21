@@ -70,6 +70,7 @@ final class AnalysisRuntime {
     static byte[] manifest(String loader) throws IOException {
         var node = new ClassNode();
         readClass(AnalysisManifest.class, MANIFEST, node);
+        node.methods.removeIf(method -> method.name.equals("encodedSize") || method.name.equals("encode"));
         var writer = new ClassWriter(0);
         node.accept(new ClassRemapper(writer, new SimpleRemapper(ASM9, Map.of(MANIFEST, manifestClass(loader)))));
         return writer.toByteArray();
