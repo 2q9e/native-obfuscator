@@ -25,7 +25,7 @@ final class AnalysisRuntime {
     private static final String FIELD = "analysisDigest";
     private static final String ORIGINAL_REGISTER = "register0";
     static final String REGISTER = "registerBoundV1";
-    private static final String BOUND_DESCRIPTOR = "(Ljava/lang/Class;I[B[B[B)V";
+    static final String BOUND_DESCRIPTOR = "(Ljava/lang/Class;I[B[B[B)V";
 
     private AnalysisRuntime() {}
 

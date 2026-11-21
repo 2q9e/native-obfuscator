@@ -56,7 +56,8 @@ final class Workflow {
                               String originalSha256, String stagedSha256,
                               int nativeLibraryCount, List<String> nativeTargets,
                               List<String> expectedMethods, List<String> verifiedMethods,
-                              List<String> expectedGeneratedClasses, List<String> errors) {
+                              List<String> expectedGeneratedClasses, List<String> errors,
+                              AnalysisVerification.Report analysis) {
         VerificationReport {
             nativeTargets = List.copyOf(nativeTargets);
             expectedMethods = List.copyOf(expectedMethods);
@@ -83,6 +84,15 @@ final class Workflow {
     static VerificationReport verify(Path originalJar, Path stagedJar,
                                      Set<String> expectedNativeMethods, Set<String> expectedTargets,
                                      int paddingCount, long paddingSeed, int markers, long markerSeed) throws IOException {
+        return verify(originalJar, stagedJar, expectedNativeMethods, expectedTargets, paddingCount, paddingSeed,
+            markers, markerSeed, AnalysisConfig.OFF);
+    }
+
+    static VerificationReport verify(Path originalJar, Path stagedJar,
+                                     Set<String> expectedNativeMethods,
+                                     Set<String> expectedTargets,
+                                     int paddingCount, long paddingSeed, int markers, long markerSeed,
+                                     AnalysisConfig analysis) throws IOException {
         if (markers < 0 || markers > 1000) throw new IllegalArgumentException("markers must be between 0 and 1000");
         Path original = regularFile(originalJar, "Original JAR");
         Path staged = regularFile(stagedJar, "Staged JAR");
@@ -98,13 +108,14 @@ final class Workflow {
             originalEntries = Archive.read(original);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
-                List.of(), 0, List.of(), Set.of(), List.of("Original JAR: " + failure.getMessage()));
+                List.of(), 0, List.of(), Set.of(), List.of("Original JAR: " + failure.getMessage()), null);
         }
         try {
+            Archive.checkFileSize(Files.size(staged));
             stagedEntries = Archive.read(staged);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
-                List.of(), 0, List.of(), Set.of(), List.of("Staged JAR: " + failure.getMessage()));
+                List.of(), 0, List.of(), Set.of(), List.of("Staged JAR: " + failure.getMessage()), null);
         }
         if (!sha256(original).equals(originalHash))
             errors.add("Original JAR changed during verification");
@@ -124,6 +135,8 @@ final class Workflow {
         if (!expected.containsAll(generation.nativeMethods().keySet()))
             errors.add("Expected method plan omits required generated native methods");
         if (expected.isEmpty()) errors.add("No eligible methods were supplied for coverage verification");
+        if (analysis.enabled() && generation.nativeMethods().keySet().containsAll(expected))
+            errors.add("Analysis resistance requires a supported application method");
         var expectedByClass = new LinkedHashMap<String, Set<String>>();
         for (String method : expected) {
             int separator = method.indexOf('#');
@@ -247,20 +260,34 @@ final class Workflow {
                 errors.add("Unexpected packaged native target " + target);
         }
 
+        AnalysisVerification.Report analysisReport = null;
         if (runtimeIds.size() == 1) {
             String runtimeId = runtimeIds.first();
-            String runtimePath = "dev/nativeobfuscator/runtime/" + runtimeId + ".class";
+            String loader = "dev/nativeobfuscator/runtime/" + runtimeId;
+            String runtimePath = loader + ".class";
             byte[] runtimeBytes = stagedEntries.get(runtimePath);
             if (runtimeBytes == null) {
                 errors.add("Generated runtime class is missing: " + runtimePath);
             } else {
-                verifyRuntimeClass(runtimeBytes, runtimeId, errors);
-                if (!sameClass(Protector.runtime("dev/nativeobfuscator/runtime/" + runtimeId), runtimeBytes))
+                verifyRuntimeClass(runtimeBytes, runtimeId, analysis.enabled(), errors);
+                byte[] trustedRuntime = analysis.enabled() ? AnalysisRuntime.loader(loader) : Protector.runtime(loader);
+                if (!sameClass(trustedRuntime, runtimeBytes))
                     errors.add("Generated runtime class does not match trusted implementation");
                 verifyRegistrations(stagedEntries, runtimeId, addedNative,
                     registrationResources, errors);
             }
             String resourceRoot = "META-INF/native-obfuscator/" + runtimeId + "/";
+            String manifestClass = AnalysisRuntime.manifestClass(loader) + ".class";
+            Set<String> allowedAnalysisResources = Set.of();
+            if (analysis.enabled()) {
+                byte[] actualManifestClass = stagedEntries.get(manifestClass);
+                if (originalEntries.containsKey(manifestClass) || actualManifestClass == null
+                    || !sameClass(AnalysisRuntime.manifest(loader), actualManifestClass))
+                    errors.add("Generated analysis manifest class does not match trusted implementation");
+                var verified = AnalysisVerification.verify(analysis, resourceRoot, stagedEntries, librariesByTarget, errors);
+                analysisReport = verified.report();
+                allowedAnalysisResources = verified.allowedEntries();
+            }
             String markerPath = resourceRoot + "markers.txt";
             byte[] actualMarkers = stagedEntries.get(markerPath);
             if (markers > 0) {
@@ -290,11 +317,13 @@ final class Workflow {
                 if (originalEntries.containsKey(name) || generatedEntries.containsKey(name)) continue;
                 Matcher runtimeClass = RUNTIME_CLASS.matcher(name);
                 if (runtimeClass.matches() && runtimeClass.group(1).equals(runtimeId)) continue;
+                if (analysis.enabled() && name.equals(manifestClass)) continue;
                 boolean knownResource = REGISTRATION.matcher(name).matches()
                     || NATIVE_LIBRARY.matcher(name).matches()
                     || name.endsWith(".sha256") && stagedEntries.containsKey(name.substring(0, name.length() - 7))
                         && NATIVE_LIBRARY.matcher(name.substring(0, name.length() - 7)).matches()
-                    || markers > 0 && name.equals(markerPath);
+                    || markers > 0 && name.equals(markerPath)
+                    || allowedAnalysisResources.contains(name);
                 if (!name.startsWith(resourceRoot) || !knownResource)
                     errors.add("Unexpected added JAR entry " + name);
             }
@@ -302,7 +331,7 @@ final class Workflow {
 
         return verification(originalHash, stagedHash, expected,
             new ArrayList<>(addedNative), librariesByTarget.size(),
-            new ArrayList<>(librariesByTarget.keySet()), generatedEntries.keySet(), errors);
+            new ArrayList<>(librariesByTarget.keySet()), generatedEntries.keySet(), errors, analysisReport);
     }
 
     private static boolean sameClass(byte[] expected, byte[] actual) {
@@ -488,13 +517,14 @@ final class Workflow {
 
     private static VerificationReport verification(String originalHash, String stagedHash,
             Set<String> expectedMethods, List<String> verifiedMethods, int libraryCount,
-            List<String> targets, Set<String> generatedClasses, List<String> errors) {
+            List<String> targets, Set<String> generatedClasses, List<String> errors,
+            AnalysisVerification.Report analysis) {
         return new VerificationReport(errors.isEmpty(), false, originalHash, stagedHash,
             libraryCount, targets, new ArrayList<>(new TreeSet<>(expectedMethods)),
-            verifiedMethods, generatedClasses.stream().sorted().toList(), errors);
+            verifiedMethods, generatedClasses.stream().sorted().toList(), errors, analysis);
     }
 
-    private static void verifyRuntimeClass(byte[] bytes, String runtimeId,
+    private static void verifyRuntimeClass(byte[] bytes, String runtimeId, boolean analysis,
                                            List<String> errors) {
         ClassNode node = new ClassNode();
         try {
@@ -509,12 +539,13 @@ final class Workflow {
         boolean register = node.methods.stream().anyMatch(method ->
             method.name.equals("register") && method.desc.equals("(Ljava/lang/Class;I)V")
                 && (method.access & (ACC_PUBLIC | ACC_STATIC)) == (ACC_PUBLIC | ACC_STATIC));
+        String nativeName = analysis ? AnalysisRuntime.REGISTER : "register0";
+        String descriptor = analysis ? AnalysisRuntime.BOUND_DESCRIPTOR : "(Ljava/lang/Class;I[B[B)V";
         boolean register0 = node.methods.stream().anyMatch(method ->
-            method.name.equals("register0")
-                && method.desc.equals("(Ljava/lang/Class;I[B[B)V")
+            method.name.equals(nativeName) && method.desc.equals(descriptor)
                 && (method.access & (ACC_STATIC | ACC_NATIVE)) == (ACC_STATIC | ACC_NATIVE));
         if (!register) errors.add("Generated runtime is missing register(Class, int)");
-        if (!register0) errors.add("Generated runtime is missing native register0");
+        if (!register0) errors.add("Generated runtime is missing native " + nativeName);
     }
 
     private static void verifyRegistrations(Map<String, byte[]> entries, String runtimeId,
