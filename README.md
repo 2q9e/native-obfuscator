@@ -57,6 +57,10 @@ Use `--padding-count N` to add between 0 and 1,000 utility classes. A positive c
 
 Use the same padding count and seed with `protect`, `harden`, `verify`, and `apply`. Verification regenerates expected classes from the original JAR and these trusted options, checks their resulting bytecode and native registrations, and rejects missing classes, extra classes, and unexpected native methods. The verification report includes the expected generated entry names for a local inventory. [Padding details](docs/padding.md)
 
+## Optional analysis resistance
+
+Use `--analysis-resistance balanced` to add reproducible synthetic resources and validate their manifest before native registration. `maximum` also outlines eligible native wrapping operations and checks their presence in each final library. The default is `off`. Configure analysis seeds and resource limits independently of the LLVM profile, padding, and markers. [Analysis resistance guide](docs/analysis-resistance.md)
+
 ## Staged release workflow
 
 Use harden to create a protected staging JAR and run structural checks on its method coverage, runtime resources, native libraries, and SHA-256 sidecars. The --dry-run option reports eligible methods without writing output.
@@ -69,7 +73,7 @@ Use harden to create a protected staging JAR and run structural checks on its me
       --include 'my/mod/Math#mix(II)I' --confirm-overwrite
     "$tool" restore --output release.jar
 
-When replacing an existing release, apply saves a backup under `~/.native-obfuscator/state` by default and restricts its permissions on POSIX systems. Use `--state-dir PATH` to choose another location. Restore checks the promoted file hash before replacing or removing it. Repeat target, selection, padding, and marker options from harden during verify and apply. The default target is the host. Run application checks separately to verify runtime equivalence.
+When replacing an existing release, apply saves a backup under `~/.native-obfuscator/state` by default and restricts its permissions on POSIX systems. Use `--state-dir PATH` to choose another location. Restore checks the promoted file hash before replacing or removing it. Repeat target, selection, analysis, padding, and marker options from harden during verify and apply. The default target is the host. Run application checks separately to verify runtime equivalence.
 
 ## Minecraft Fabric
 
