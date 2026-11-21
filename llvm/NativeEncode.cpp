@@ -85,7 +85,8 @@ llvm::APInt modularInverse(const llvm::APInt &Factor) {
 
 bool canEncode(const llvm::BinaryOperator &Operation) {
   if (Operation.getOpcode() != llvm::Instruction::Add &&
-      Operation.getOpcode() != llvm::Instruction::Sub)
+      Operation.getOpcode() != llvm::Instruction::Sub &&
+      Operation.getOpcode() != llvm::Instruction::Mul)
     return false;
   auto *Type = llvm::dyn_cast<llvm::IntegerType>(Operation.getType());
   if (!Type || Operation.hasNoUnsignedWrap() || Operation.hasNoSignedWrap())
@@ -112,14 +113,21 @@ llvm::Value *buildEncoding(llvm::IRBuilder<> &Builder,
 
   auto *Scale = llvm::ConstantInt::get(Type, Factor);
   auto *Inverse = llvm::ConstantInt::get(Type, modularInverse(Factor));
-  // Work in Z/(2^N). The encoding is linear, and the odd scale is
-  // invertible. Each original operand is used once.
-  auto *Left =
-      Builder.CreateMul(Operation.getOperand(0), Scale, "native.encode.left");
-  auto *Right =
-      Builder.CreateMul(Operation.getOperand(1), Scale, "native.encode.right");
-  auto *Encoded = Builder.CreateBinOp(Operation.getOpcode(), Left, Right,
-                                      "native.encode.combined");
+  // Work in Z/(2^N), where an odd scale has a modular inverse. For add/sub,
+  // scale both inputs; for mul, scale one input. Each original operand is
+  // used once and the final inverse restores the original result.
+  auto *Left = Builder.CreateMul(Operation.getOperand(0), Scale,
+                                 "native.encode.left");
+  llvm::Value *Encoded;
+  if (Operation.getOpcode() == llvm::Instruction::Mul) {
+    Encoded = Builder.CreateMul(Left, Operation.getOperand(1),
+                                "native.encode.combined");
+  } else {
+    auto *Right = Builder.CreateMul(Operation.getOperand(1), Scale,
+                                    "native.encode.right");
+    Encoded = Builder.CreateBinOp(Operation.getOpcode(), Left, Right,
+                                  "native.encode.combined");
+  }
   return Builder.CreateMul(Encoded, Inverse, "native.encode.result");
 }
 
@@ -194,13 +202,33 @@ llvm::PHINode *diversify(llvm::BinaryOperator &Operation, llvm::Argument &Guard,
   return Result;
 }
 
-bool rewriteFunction(llvm::Function &Function, const Options &Config) {
-  if (Config.MaxSites == 0 || !Function.getName().starts_with(Config.Prefix) ||
-      Function.hasFnAttribute(llvm::Attribute::OptimizeNone))
+struct RewriteStatistics {
+  unsigned CandidateSites = 0;
+  unsigned GuardFilteredSites = 0;
+  unsigned EligibleSites = 0;
+  unsigned CapSkippedSites = 0;
+  unsigned TransformedSites = 0;
+  unsigned PrefixFilteredFunctions = 0;
+  unsigned OptimizeNoneFunctions = 0;
+  unsigned UnsafeControlFlowFunctions = 0;
+  unsigned ChangedFunctions = 0;
+};
+
+bool rewriteFunction(llvm::Function &Function, const Options &Config,
+                     RewriteStatistics &Statistics) {
+  if (!Function.getName().starts_with(Config.Prefix)) {
+    ++Statistics.PrefixFilteredFunctions;
     return false;
+  }
+  if (Function.hasFnAttribute(llvm::Attribute::OptimizeNone)) {
+    ++Statistics.OptimizeNoneFunctions;
+    return false;
+  }
   bool UseBranches = Config.Kind == Transform::Diversify;
-  if (UseBranches && !canDiversify(Function))
+  if (UseBranches && !canDiversify(Function)) {
+    ++Statistics.UnsafeControlFlowFunctions;
     return false;
+  }
 
   struct Site {
     llvm::BinaryOperator *Operation;
@@ -211,12 +239,18 @@ bool rewriteFunction(llvm::Function &Function, const Options &Config) {
     auto *Operation = llvm::dyn_cast<llvm::BinaryOperator>(&Instruction);
     if (!Operation || !canEncode(*Operation))
       continue;
+    ++Statistics.CandidateSites;
     auto *Guard = UseBranches ? findGuard(*Operation) : nullptr;
-    if (UseBranches && !Guard)
+    if (UseBranches && !Guard) {
+      ++Statistics.GuardFilteredSites;
       continue;
+    }
+    ++Statistics.EligibleSites;
+    if (Sites.size() == Config.MaxSites) {
+      ++Statistics.CapSkippedSites;
+      continue;
+    }
     Sites.push_back({Operation, Guard});
-    if (Sites.size() == Config.MaxSites)
-      break;
   }
 
   uint64_t State = UINT64_C(0xcbf29ce484222325);
@@ -236,6 +270,9 @@ bool rewriteFunction(llvm::Function &Function, const Options &Config) {
     Operation->replaceAllUsesWith(Result);
     Operation->eraseFromParent();
   }
+  Statistics.TransformedSites += static_cast<unsigned>(Sites.size());
+  if (!Sites.empty())
+    ++Statistics.ChangedFunctions;
   return !Sites.empty();
 }
 
@@ -248,8 +285,28 @@ public:
   llvm::PreservedAnalyses run(llvm::Module &Module,
                               llvm::ModuleAnalysisManager &) {
     bool Changed = false;
+    RewriteStatistics Statistics;
     for (llvm::Function &Function : Module)
-      Changed |= rewriteFunction(Function, Config);
+      if (!Function.isDeclaration())
+        Changed |= rewriteFunction(Function, Config, Statistics);
+    llvm::errs() << "native-obfuscator: "
+                 << (Config.Kind == Transform::Encode ? "native-encode" :
+                                                       "native-diversify")
+                 << " candidates=" << Statistics.CandidateSites
+                 << " eligible=" << Statistics.EligibleSites
+                 << " transformed=" << Statistics.TransformedSites
+                 << " skipped_guard=" << Statistics.GuardFilteredSites
+                 << " skipped_cap=" << Statistics.CapSkippedSites
+                 << " skipped_prefix_functions="
+                 << Statistics.PrefixFilteredFunctions
+                 << " skipped_optnone_functions="
+                 << Statistics.OptimizeNoneFunctions
+                 << " skipped_unsafe_control_flow_functions="
+                 << Statistics.UnsafeControlFlowFunctions
+                 << " changed_functions=" << Statistics.ChangedFunctions
+                 << " max_sites_per_function=" << Config.MaxSites
+                 << " seed=" << Config.Seed
+                 << "\n";
     return Changed ? llvm::PreservedAnalyses::none()
                    : llvm::PreservedAnalyses::all();
   }

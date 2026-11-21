@@ -44,13 +44,17 @@ eight. A value of zero disables the pass. `prefix` limits the pass to named
 functions with that prefix. Generated JNI implementations use `method_`. Omit
 `prefix` to allow every function. Options can appear in any order.
 
-`native-encode` substitutes scalar 8-, 16-, 32-, and 64-bit integer addition and
-subtraction. For each candidate, it multiplies both operands by the same odd
-factor, computes the operation, then multiplies by the factor's modular
-inverse. In arithmetic modulo 2ⁿ, multiplication distributes over addition
-and subtraction, so the resulting value is unchanged. Each input retains one
-use. The pass skips instructions carrying no-wrap flags and functions marked
-`optnone`. One substitution adds at most three IR instructions.
+`native-encode` substitutes scalar 8-, 16-, 32-, and 64-bit integer addition,
+subtraction, and multiplication. For addition and subtraction, it multiplies
+both operands by the same odd factor, computes the operation, then multiplies
+by the factor's modular inverse. For multiplication, it scales one operand,
+computes the product, then applies the inverse. In arithmetic modulo 2ⁿ, these
+steps preserve the original result because odd factors are invertible. Each
+input retains one use. The pass skips instructions carrying no-wrap flags and
+functions marked `optnone`. One substitution adds at most three IR instructions.
+Each pass run prints candidate, eligible (including sites skipped by the cap),
+and transformed site counts, guard and site-cap skips, function-level filters,
+the site cap, and seed to stderr so a no-op run is visible in the build log.
 
 `native-diversify` accepts the same options and defaults to two sites per
 function. It replaces an eligible operation with two equivalent paths. One

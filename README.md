@@ -55,6 +55,20 @@ Interactive `protect` runs ask whether to add 12 standalone utility class files.
 
 The classes contain working routines such as binary search, checksums, and moving averages. Their 300-character internal class and method names include double spaces and punctuation. The class name is split across its package and a 200-character filename stem. Debug metadata is omitted. The protected JAR stores them as resources outside its application classpath, so the application does not load or execute them. Padding increases the size of the output JAR.
 
+## Staged release workflow
+
+Use harden to create a protected staging JAR and run structural checks on its method coverage, runtime resources, native libraries, and SHA-256 sidecars. The --dry-run option reports eligible methods without writing output.
+
+    "$tool" harden --input input.jar --output staged.jar \
+      --include 'my/mod/Math#mix(II)I'
+    "$tool" verify --input input.jar --staged staged.jar \
+      --include 'my/mod/Math#mix(II)I'
+    "$tool" apply --input input.jar --staged staged.jar --output release.jar \
+      --include 'my/mod/Math#mix(II)I' --confirm-overwrite
+    "$tool" restore --output release.jar
+
+When replacing an existing release, apply saves a backup under ~/.native-obfuscator/state by default and restricts its permissions on POSIX systems; set --state-dir PATH to choose another location. Restore checks the promoted file hash before replacing or removing it. Repeat any --target options from harden during verify and apply; when omitted, they expect the host target. Verification is structural and does not execute application code; it cannot prove runtime equivalence. Run your application checks before release.
+
 ## Minecraft Fabric
 
 Run Native Obfuscator on the JAR after Fabric Loom's `remapJar` task. If you also use a Java bytecode obfuscator, pass its remapped output to Native Obfuscator and select methods by their final names. Start with internal numeric methods. Fabric entrypoints and classes declared in Mixin, language-adapter, and access-widener metadata are excluded from conversion.
