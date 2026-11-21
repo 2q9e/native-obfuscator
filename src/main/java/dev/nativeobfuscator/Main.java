@@ -412,7 +412,8 @@ public final class Main {
         long paddingSeed;
         try { paddingSeed = Long.parseLong(options.getOrDefault("--padding-seed", "0")); }
         catch (NumberFormatException invalid) { throw new IllegalArgumentException("--padding-seed must be a signed 64-bit integer"); }
-        return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), List.copyOf(targets),
+        List<NativeTarget> orderedTargets = analysis.enabled() ? targets.stream().sorted().toList() : List.copyOf(targets);
+        return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), orderedTargets,
             options.get("--zig"), skip, analyze, emitC, options.get("--clang"), options.get("--llvm-opt"),
             plugin, plugin == null ? null : passes, growth, markers, markerSeed, paddingCount, paddingSeed,
             minInstructions, reportNativeSizes, analysis);
