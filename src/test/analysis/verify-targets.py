@@ -86,6 +86,7 @@ def jar_stats(path, archive):
                 if entry.filename.startswith(RESOURCE_ROOT) and "/analysis/" in entry.filename]
     return {
         "archiveBytes": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "compressedEntryBytes": sum(entry.compress_size for entry in entries),
         "expandedEntryBytes": sum(entry.file_size for entry in entries),
         "entries": len(entries),
@@ -146,6 +147,9 @@ def check_analysis(profile, seed, build_reports, verification, jar_metrics, nati
     report = reports[0]
     analysis = verification["analysis"]
     require(report["analysisResistance"] == profile and report["analysisSeed"] == seed, "Protect analysis settings")
+    require(report["artifact"]["bytes"] == jar_metrics["archiveBytes"]
+            and report["artifact"]["sha256"] == verification["stagedSha256"] == jar_metrics["sha256"],
+            "Packaged artifact evidence differs from final JAR")
     require(analysis["profile"] == profile and analysis["seed"] == seed and analysis["resourcesVerified"],
             "Verify analysis settings or resource checks")
     require(set(analysis["anchoredNativeTargets"]) == set(TARGETS), "Unverified native analysis binding")
@@ -333,17 +337,20 @@ def main():
 
     cases = [("off", "off", []), ("balanced", "balanced", []), ("maximum", "maximum", [])]
     if compiler_args:
-        cases.append(("maximum-llvm", "maximum", compiler_args))
+        cases.extend([("off-llvm", "off", compiler_args), ("maximum-llvm", "maximum", compiler_args)])
     results = {}
     for label, profile, flags in cases:
         results[label] = measure_case(profile, flags, work=work, tool=tool, java=java, java_tmp=java_tmp,
                                       original=original, baseline=baseline, host=host, args=args, env=env)
         require(results[label]["selectedMethods"] == results["off"]["selectedMethods"],
                 f"Application method selection changed in {label}")
-        if label in ("balanced", "maximum"):
-            results[label]["jarByteGrowthFromOff"] = results[label]["jar"]["archiveBytes"] - results["off"]["jar"]["archiveBytes"]
+        if profile != "off":
+            comparison = "off-llvm" if flags else "off"
+            results[label]["sizeComparisonBaseline"] = comparison
+            results[label]["jarByteGrowthFromOff"] = (results[label]["jar"]["archiveBytes"]
+                                                       - results[comparison]["jar"]["archiveBytes"])
             for target, metrics in results[label]["nativeTargets"].items():
-                before = results["off"]["nativeTargets"][target]
+                before = results[comparison]["nativeTargets"][target]
                 metrics["libraryByteGrowthFromOff"] = metrics["libraryBytes"] - before["libraryBytes"]
                 metrics["executableByteGrowthFromOff"] = metrics["executableBytes"] - before["executableBytes"]
     summary = {
