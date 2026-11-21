@@ -68,7 +68,8 @@ final class Protector {
 
     record AnalysisReport(String analysisResistance, String analysisSeed, int resourceBudget, int entryBudget,
                           String status, String binding, int resourceBytes, int resourceEntries,
-                          int selectedApplicationMethods, int nativeHelperMethods, List<TargetAnalysis> targets) {
+                          int selectedApplicationMethods, int nativeHelperMethods, List<TargetAnalysis> targets,
+                          Archive.WrittenJar artifact) {
         AnalysisReport {
             targets = List.copyOf(targets);
         }
@@ -178,7 +179,7 @@ final class Protector {
             if (analysisPlan != null)
                 analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
                     applicationMethods == 0 ? "skipped-no-eligible-application-methods" : "planned",
-                    "planned-native-registration", helperCount(nativePlan), List.of()));
+                    "planned-native-registration", helperCount(nativePlan), List.of(), null));
             return ordinal;
         }
         if (outputs.isEmpty()) throw new IOException("No supported methods were selected");
@@ -217,7 +218,8 @@ final class Protector {
             Files.writeString(config.output, source);
             if (analysisPlan != null)
                 analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
-                    "c-emitted-resources-omitted", "requires-packaged-jar-runtime", helperCount(nativePlan), List.of()));
+                    "c-emitted-resources-omitted", "requires-packaged-jar-runtime", helperCount(nativePlan), List.of(),
+                    null));
             return ordinal;
         }
         Path workspace = Files.createTempDirectory("native-obfuscator-build-");
@@ -267,11 +269,11 @@ final class Protector {
             if (config.markers > 0) {
                 files.put(RESOURCE + id + "/markers.txt", markers(id, config.markers, config.markerSeed));
             }
-            Archive.write(files, config.output);
+            var artifact = Archive.write(files, config.output, analysisPlan != null);
             nativeSizes.forEach(report);
             if (analysisPlan != null)
                 analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
-                    "packaged", "native-registration", helperCount(nativePlan), targetAnalysis));
+                    "packaged", "native-registration", helperCount(nativePlan), targetAnalysis, artifact));
         } finally {
             try (var paths = Files.walk(workspace)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
@@ -286,10 +288,11 @@ final class Protector {
 
     private static AnalysisReport analysisReport(AnalysisConfig config, AnalysisCorpus.Plan plan,
                                                  int applicationMethods, String status, String binding,
-                                                 int helpers, List<TargetAnalysis> nativeTargets) {
+                                                 int helpers, List<TargetAnalysis> nativeTargets,
+                                                 Archive.WrittenJar artifact) {
         return new AnalysisReport(config.profile().option, Long.toUnsignedString(config.seed()),
             config.resourceBudget(), config.entryBudget(), status, binding, plan.byteCount(), plan.entryCount(),
-            applicationMethods, helpers, nativeTargets);
+            applicationMethods, helpers, nativeTargets, artifact);
     }
 
     static byte[] markers(String id, int count, long seed) {

@@ -7,9 +7,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -107,12 +109,20 @@ final class Archive {
         if (size > FILE_SIZE_LIMIT) throw new IOException("Written JAR exceeds on-disk size limit");
     }
 
+    record WrittenJar(long bytes, String sha256) {}
+
     static void write(Map<String, byte[]> files, Path output) throws IOException {
+        write(files, output, false);
+    }
+
+    static WrittenJar write(Map<String, byte[]> files, Path output, boolean recordDigest) throws IOException {
         preflight(files, 0, 0);
         Path absolute = output.toAbsolutePath().normalize();
         Path temporary = Files.createTempFile(absolute.getParent(), ".native-obfuscator-", ".jar");
         try {
-            try (var zip = new ZipOutputStream(Files.newOutputStream(temporary))) {
+            MessageDigest digest = recordDigest ? sha256() : null;
+            try (var fileStream = Files.newOutputStream(temporary);
+                 var zip = new ZipOutputStream(digest == null ? fileStream : new DigestOutputStream(fileStream, digest))) {
                 for (var file : files.entrySet()) {
                     ZipEntry entry = new ZipEntry(file.getKey());
                     entry.setTimeLocal(LocalDateTime.of(1980, 1, 1, 0, 0));
@@ -121,8 +131,10 @@ final class Archive {
                     zip.closeEntry();
                 }
             }
-            checkFileSize(Files.size(temporary));
+            long bytes = Files.size(temporary);
+            checkFileSize(bytes);
             Files.move(temporary, absolute, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            return new WrittenJar(bytes, digest == null ? null : HexFormat.of().formatHex(digest.digest()));
         } finally {
             Files.deleteIfExists(temporary);
         }
