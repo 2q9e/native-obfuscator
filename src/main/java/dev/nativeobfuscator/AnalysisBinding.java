@@ -1,5 +1,6 @@
 package dev.nativeobfuscator;
 
+import java.io.IOException;
 import java.util.HexFormat;
 
 final class AnalysisBinding {
@@ -14,6 +15,11 @@ final class AnalysisBinding {
         System.arraycopy(HEADER, 0, payload, 0, HEADER.length);
         System.arraycopy(digest, 0, payload, HEADER.length, digest.length);
         return payload;
+    }
+
+    static void require(byte[] binary, NativeTarget target, byte[] binding, String loader) throws IOException {
+        NativeImage.requireReadOnlySection(binary, target, SECTION, binding);
+        NativeExports.requireFunction(binary, target, Protector.registrationExport(loader, true));
     }
 
     static String source(byte[] binding) {

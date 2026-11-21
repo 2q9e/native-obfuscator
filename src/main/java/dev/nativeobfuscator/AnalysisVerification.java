@@ -28,7 +28,7 @@ final class AnalysisVerification {
 
     private AnalysisVerification() {}
 
-    static Result verify(AnalysisConfig config, String root, Map<String, byte[]> staged,
+    static Result verify(AnalysisConfig config, String loader, String root, Map<String, byte[]> staged,
                          Map<String, String> librariesByTarget, List<String> errors) throws IOException {
         var plan = AnalysisCorpus.plan(config.profile().id, config.seed(), config.resourceBudget(), config.entryBudget());
         var expected = AnalysisCorpus.generate(plan);
@@ -62,8 +62,8 @@ final class AnalysisVerification {
             for (var library : librariesByTarget.entrySet()) {
                 if (!library.getValue().startsWith(root)) continue;
                 try {
-                    NativeImage.requireReadOnlySection(staged.get(library.getValue()),
-                        NativeTarget.parse(library.getKey()), AnalysisBinding.SECTION, payload);
+                    AnalysisBinding.require(staged.get(library.getValue()),
+                        NativeTarget.parse(library.getKey()), payload, loader);
                     anchored.add(library.getKey());
                 } catch (IOException failure) {
                     errors.add("Native analysis binding invalid for " + library.getKey() + ": " + failure.getMessage());

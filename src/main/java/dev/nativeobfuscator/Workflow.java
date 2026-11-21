@@ -288,7 +288,7 @@ final class Workflow {
                 if (originalEntries.containsKey(manifestClass) || actualManifestClass == null
                     || !sameClass(AnalysisRuntime.manifest(loader), actualManifestClass))
                     errors.add("Generated analysis manifest class does not match trusted implementation");
-                var verified = AnalysisVerification.verify(analysis, resourceRoot, stagedEntries, librariesByTarget, errors);
+                var verified = AnalysisVerification.verify(analysis, loader, resourceRoot, stagedEntries, librariesByTarget, errors);
                 analysisReport = verified.report();
                 allowedAnalysisResources = verified.allowedEntries();
                 nativeHelpers = AnalysisNativeVerification.verify(analysis, originalEntries, expected, runtimeId,

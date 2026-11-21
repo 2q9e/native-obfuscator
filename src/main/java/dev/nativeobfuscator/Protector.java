@@ -199,8 +199,7 @@ final class Protector {
         byte[] manifest = analysisResources.get(AnalysisManifest.PATH);
         byte[] binding = manifest == null ? null : AnalysisBinding.payload(Archive.sha256().digest(manifest));
         if (binding != null) source.append(AnalysisBinding.source(binding));
-        source.append("JNIEXPORT void JNICALL Java_").append(jniMangle(loader)).append('_')
-            .append(analysisPlan == null ? "register0" : AnalysisRuntime.REGISTER)
+        source.append("JNIEXPORT void JNICALL ").append(registrationExport(loader, analysisPlan != null))
             .append("(JNIEnv *env, jclass runtime, jclass owner, jint index, jbyteArray metadata, jbyteArray digest");
         if (analysisPlan != null) source.append(", jbyteArray analysis_digest");
         source.append(") {\n").append("    (void)runtime;\n");
@@ -243,7 +242,7 @@ final class Protector {
                 byte[] binary = target.compile(workspace, c, config, selectedSymbols, sizes);
                 if (binding != null) {
                     try {
-                        NativeImage.requireReadOnlySection(binary, target, AnalysisBinding.SECTION, binding);
+                        AnalysisBinding.require(binary, target, binding, loader);
                     } catch (IOException failure) {
                         throw new IOException("Native analysis binding invalid for " + target.key + ": "
                             + failure.getMessage(), failure);
@@ -553,6 +552,10 @@ final class Protector {
             }
 
             """;
+    }
+
+    static String registrationExport(String loader, boolean bound) {
+        return "Java_" + jniMangle(loader) + "_" + (bound ? AnalysisRuntime.REGISTER : "register0");
     }
 
     private static String jniMangle(String name) {
