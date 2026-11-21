@@ -257,6 +257,38 @@ def measure_case(profile, compiler_args, *, work, tool, java, java_tmp, original
     return result
 
 
+def check_unverified_maximum(tool, original, work, env, seed):
+    source = work / "maximum" / "protected.jar"
+    tampered = work / "missing-helper-root.jar"
+    with zipfile.ZipFile(source) as verified, zipfile.ZipFile(tampered, "w", zipfile.ZIP_DEFLATED) as changed:
+        target = next(name for name in verified.namelist() if name.endswith("/x86_64-windows/protected.dll"))
+        binary = verified.read(target)
+        require(binary.count(b".nar0\0") == 1, "Expected exactly one root section header")
+        binary = binary.replace(b".nar0\0", b".bad0\0")
+        for name in verified.namelist():
+            if name == target:
+                data = binary
+            elif name == target + ".sha256":
+                data = hashlib.sha256(binary).hexdigest().encode("ascii")
+            else:
+                data = verified.read(name)
+            changed.writestr(name, data)
+
+    release = work / "guarded-release.jar"
+    shutil.copyfile(source, release)
+    state = work / "guarded-state"
+    result = run([*tool, "apply", "--input", original, "--staged", tampered, "--output", release,
+                  "--state-dir", state, "--confirm-overwrite", "--include", "Arithmetic#calc*",
+                  "--unsupported", "retain", "--target", "all", "--analysis-resistance", "maximum",
+                  "--analysis-seed", seed], work / "missing-helper-apply", env=env, check=False)
+    report = read_json_lines(result)[-1]
+    require(result.returncode == 1 and report["status"] == "verification-failed"
+            and any("root executable section missing" in error for error in report["verification"]["errors"]),
+            "Modified helper root unexpectedly passed staged verification")
+    require(release.read_bytes() == source.read_bytes() and not state.exists(),
+            "Helper verification failure changed the release or rollback state")
+
+
 def existing_file(parser, option, value):
     path = Path(value).resolve()
     if not path.is_file():
@@ -353,8 +385,10 @@ def main():
                 before = results[comparison]["nativeTargets"][target]
                 metrics["libraryByteGrowthFromOff"] = metrics["libraryBytes"] - before["libraryBytes"]
                 metrics["executableByteGrowthFromOff"] = metrics["executableBytes"] - before["executableBytes"]
+    check_unverified_maximum(tool, original, work, env, args.analysis_seed)
     summary = {
         "result": "pass",
+        "unverifiedHelperPromotionRejected": True,
         "hostTarget": host,
         "crossBuildOnlyTargets": sorted(set(TARGETS) - {host}),
         "analysisSeed": args.analysis_seed,
