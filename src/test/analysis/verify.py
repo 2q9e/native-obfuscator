@@ -204,6 +204,15 @@ def check_mutations(cli, execute, work, original, common, protected, donor):
     reject_case("changed-anchor", {**protected, library: updated, library + ".sha256": checksum},
                 "Native analysis binding", "Native analysis binding")
 
+    registration_metadata = protected[root + "registration/0.bin"]
+    registration_binding = b"NOAR\x01" + (1).to_bytes(4, "big") + hashlib.sha256(registration_metadata).digest()
+    assert binary.count(registration_binding) == 1, "Expected exactly one registration digest table"
+    changed_registration = registration_binding[:-1] + bytes([registration_binding[-1] ^ 1])
+    bound_library = binary.replace(registration_binding, changed_registration)
+    bound_checksum = hashlib.sha256(bound_library).hexdigest().encode("ascii")
+    reject_case("changed-registration-binding", {**protected, library: bound_library, library + ".sha256": bound_checksum},
+                "Native analysis binding", "Native method registration failed")
+
     registration = ("Java_dev_nativeobfuscator_runtime_" + root.rstrip("/").rsplit("/", 1)[1]
                     + "_registerBoundV1").encode("ascii")
     assert binary.count(registration) == 1, "Expected one stripped JNI registration export"

@@ -168,7 +168,7 @@ final class Protector {
             if (!bindings.isEmpty() && !config.analyze) {
                 int index = outputs.size();
                 byte[] metadata = registrationMetadata(bindings);
-                appendRegistrations(source, registrations, bindings, index, metadata);
+                appendRegistrations(source, registrations, bindings, index, metadata, analysisPlan != null);
                 registrationResources.put(RESOURCE + id + "/registration/" + index + ".bin", metadata);
                 outputs.put(entry, rewrite(node, loader, index, bindings));
             }
@@ -199,7 +199,11 @@ final class Protector {
         var analysisResources = analysisPlan == null ? Map.<String, byte[]>of() : AnalysisCorpus.generate(analysisPlan);
         byte[] manifest = analysisResources.get(AnalysisManifest.PATH);
         byte[] binding = manifest == null ? null : AnalysisBinding.payload(Archive.sha256().digest(manifest));
-        if (binding != null) source.append(AnalysisBinding.source(binding));
+        byte[] registrationBinding = binding == null ? null : AnalysisBinding.registrationPayload(registrationResources.values());
+        if (binding != null) {
+            source.append(AnalysisBinding.source(binding));
+            source.append(AnalysisBinding.registrationSource(registrationBinding));
+        }
         source.append("JNIEXPORT void JNICALL ").append(registrationExport(loader, analysisPlan != null))
             .append("(JNIEnv *env, jclass runtime, jclass owner, jint index, jbyteArray metadata, jbyteArray digest");
         if (analysisPlan != null) source.append(", jbyteArray analysis_digest");
@@ -245,6 +249,7 @@ final class Protector {
                 if (binding != null) {
                     try {
                         AnalysisBinding.require(binary, target, binding, loader);
+                        AnalysisBinding.requireRegistrations(binary, target, registrationBinding);
                     } catch (IOException failure) {
                         throw new IOException("Native analysis binding invalid for " + target.key + ": "
                             + failure.getMessage(), failure);
@@ -323,7 +328,7 @@ final class Protector {
         if (config.minInstructions != 0)
             digest.update(("minimum instructions " + config.minInstructions).getBytes(StandardCharsets.UTF_8));
         if (config.analysis.enabled()) {
-            digest.update("\nanalysis resistance format 1\n".getBytes(StandardCharsets.US_ASCII));
+            digest.update("\nanalysis resistance format 2\n".getBytes(StandardCharsets.US_ASCII));
             digest.update(ByteBuffer.allocate(6 * Integer.BYTES + 3 * Long.BYTES + 1)
                 .putInt(config.analysis.profile().id).putLong(config.analysis.seed())
                 .putInt(config.analysis.resourceBudget()).putInt(config.analysis.entryBudget())
@@ -496,18 +501,22 @@ final class Protector {
     }
 
     private static void appendRegistrations(StringBuilder source, StringBuilder dispatch,
-                                            List<Binding> bindings, int index, byte[] metadata) {
+                                            List<Binding> bindings, int index, byte[] metadata, boolean bound) {
         for (Binding binding : bindings) source.append(binding.c);
         source.append("static void *const class_").append(index).append("[] = {\n");
         for (Binding binding : bindings) {
             source.append("    (void *)").append(binding.symbol).append(",\n");
         }
         source.append("};\n");
-        var digest = HexFormat.ofDelimiter(", ").withPrefix("0x").formatHex(Archive.sha256().digest(metadata));
-        source.append("static const unsigned char class_digest_").append(index)
-            .append("[] = {").append(digest).append("};\n\n");
+        if (!bound) {
+            var digest = HexFormat.ofDelimiter(", ").withPrefix("0x").formatHex(Archive.sha256().digest(metadata));
+            source.append("static const unsigned char class_digest_").append(index)
+                .append("[] = {").append(digest).append("};\n\n");
+        }
+        String digestCheck = bound ? "check_registration_digest(index, actual_digest)"
+            : "memcmp(actual_digest, class_digest_" + index + ", 32) == 0";
         dispatch.append("    case ").append(index).append(":\n")
-            .append("        if (memcmp(actual_digest, class_digest_").append(index).append(", 32) == 0")
+            .append("        if (").append(digestCheck)
             .append(" && register_methods(env, owner, metadata, class_").append(index).append(", ")
             .append(bindings.size()).append(") == JNI_OK) return;\n")
             .append("        break;\n");
