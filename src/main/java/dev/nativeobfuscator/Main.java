@@ -102,7 +102,12 @@ public final class Main {
 
     private static int runHarden(String[] arguments, Gson gson) throws IOException, InterruptedException {
         arguments = expandConfig(arguments);
-        if (hasFlag(arguments, "--dry-run")) {
+        Set<String> flags = actionFlags(arguments);
+        if (flags.contains("--emit-c"))
+            throw new IllegalArgumentException("harden requires a staged JAR output and cannot use --emit-c");
+        if (flags.contains("--confirm-overwrite"))
+            throw new IllegalArgumentException("--confirm-overwrite requires apply");
+        if (flags.contains("--dry-run")) {
             Coverage coverage = analyzeCoverage(arguments, gson);
             System.err.println("Eligible methods: " + coverage.methods.size());
             System.out.println(gson.toJson(Map.of("status", "dry-run-complete",
@@ -114,8 +119,6 @@ public final class Main {
         String[] protectArguments = arguments.clone();
         protectArguments[0] = "protect";
         var config = parse(protectArguments);
-        if (config.emitC())
-            throw new IllegalArgumentException("harden requires a staged JAR output; --emit-c is not supported");
         var decisions = new ArrayList<Protector.Decision>();
         int count = runProtection(config, gson, decisions::add);
         var expected = new java.util.TreeSet<String>();
@@ -301,9 +304,17 @@ public final class Main {
         return targets.isEmpty() ? Set.of(NativeTarget.host().key) : targets;
     }
 
-    private static boolean hasFlag(String[] arguments, String flag) {
-        for (String argument : arguments) if (argument.equals(flag)) return true;
-        return false;
+    private static Set<String> actionFlags(String[] arguments) {
+        var flags = new LinkedHashSet<String>();
+        for (int i = 1; i < arguments.length; i++) {
+            String option = arguments[i];
+            if (Set.of("--dry-run", "--emit-c", "--confirm-overwrite", "--report-native-sizes").contains(option)) {
+                if (!flags.add(option)) throw new IllegalArgumentException("Repeated option " + option);
+            } else {
+                i++;
+            }
+        }
+        return flags;
     }
 
     private static Protector.Config parse(String[] arguments) throws IOException {
@@ -323,11 +334,13 @@ public final class Main {
         boolean reportNativeSizes = false;
         for (int i = 1; i < arguments.length; i++) {
             String key = arguments[i];
-            if (key.equals("--emit-c") && !emitC) {
+            if (key.equals("--emit-c")) {
+                if (emitC) throw new IllegalArgumentException("Repeated option " + key);
                 emitC = true;
                 continue;
             }
-            if (key.equals("--report-native-sizes") && !reportNativeSizes) {
+            if (key.equals("--report-native-sizes")) {
+                if (reportNativeSizes) throw new IllegalArgumentException("Repeated option " + key);
                 reportNativeSizes = true;
                 continue;
             }
