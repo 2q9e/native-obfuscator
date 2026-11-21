@@ -17,6 +17,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import org.objectweb.asm.ClassReader;
@@ -35,7 +36,7 @@ final class Protector {
     record Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
                   boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed,
-                  boolean padding, int minInstructions, boolean reportNativeSizes) {}
+                  int paddingCount, long paddingSeed, int minInstructions, boolean reportNativeSizes) {}
     record Decision(String method, String result, String reason, Integer instructions,
                     Integer branches, String target, Long nativeBytes) {
         Decision(String method, String result, String reason) {
@@ -54,16 +55,13 @@ final class Protector {
         var files = Archive.read(config.input);
         if (files.keySet().stream().anyMatch(name -> name.startsWith(RESOURCE)))
             throw new IOException("Input already uses the native-obfuscator resource namespace");
+        var exclusions = FabricExclusions.from(files);
+        var versioned = versionedClasses(files.keySet());
+        var generated = FilePadding.generate(files, config.paddingCount, config.paddingSeed,
+            config.paddingCount == 0 ? Set.of() : paddingReferencePlan(files, config, exclusions, versioned));
+        files.putAll(generated.classes());
         String id = runtimeId(files, config);
         String loader = RUNTIME.substring(0, RUNTIME.lastIndexOf('/') + 1) + id;
-        var exclusions = FabricExclusions.from(files);
-        var versioned = new HashSet<String>();
-        for (String name : files.keySet()) {
-            if (name.startsWith("META-INF/versions/") && name.endsWith(".class")) {
-                int separator = name.indexOf('/', "META-INF/versions/".length());
-                if (separator >= 0) versioned.add(name.substring(separator + 1, name.length() - 6));
-            }
-        }
         var source = new StringBuilder(MethodCompiler.runtimeSupport()).append(registrationSupport());
         var registrationResources = new LinkedHashMap<String, byte[]>();
         var registrations = new StringBuilder();
@@ -73,54 +71,47 @@ final class Protector {
         int unsupported = 0;
         for (var file : files.entrySet()) {
             String entry = file.getKey();
-            if (!entry.endsWith(".class") || entry.startsWith("META-INF/") || entry.equals("module-info.class")) continue;
-            String owner = entry.substring(0, entry.length() - 6);
-            ClassNode node = new ClassNode();
-            try {
-                new ClassReader(file.getValue()).accept(node, 0);
-            } catch (RuntimeException e) {
-                throw new IOException("Invalid or unsupported classfile " + entry, e);
-            }
-            if (!node.name.equals(owner)) throw new IOException("Class name disagrees with JAR path: " + entry);
-            String exclusion = exclusions.get(owner);
-            if (versioned.contains(owner)) exclusion = "multi-release class";
-            if ((node.access & ACC_INTERFACE) != 0) exclusion = "interface class";
-            if (isMixin(node.visibleAnnotations) || isMixin(node.invisibleAnnotations)) exclusion = "Mixin class";
-            if (node.attrs != null || node.methods.stream().anyMatch(m -> m.attrs != null)
-                || node.fields.stream().anyMatch(f -> f.attrs != null)
-                || (node.recordComponents != null && node.recordComponents.stream().anyMatch(r -> r.attrs != null)))
-                exclusion = "custom classfile attributes";
+            if (!applicationClass(entry)) continue;
+            ClassNode node = readClass(entry, file.getValue());
+            String owner = node.name;
+            String exclusion = classExclusion(node, exclusions, versioned);
             var bindings = new ArrayList<Binding>();
+            boolean generatedClass = generated.classes().containsKey(entry);
             for (MethodNode method : node.methods) {
                 String name = owner + "#" + method.name + method.desc;
-                if (!matches(config.includes, name)) continue;
-                if (matches(config.excludes, name)) {
+                boolean required = generated.nativeMethods().containsKey(name);
+                if (!required && (generatedClass || !matches(config.includes, name))) continue;
+                if (!required && matches(config.excludes, name)) {
                     report.accept(new Decision(name, "excluded", "matched --exclude"));
                 } else if (exclusion != null) {
                     report.accept(new Decision(name, "excluded", exclusion));
                 } else {
                     String symbol = GeneratedNames.nativeFunction(id, name);
                     try {
-                        int sort = Type.getReturnType(method.desc).getSort();
-                        if (sort == Type.ARRAY || sort == Type.OBJECT)
-                            throw new MethodCompiler.Unsupported("reference-return assignability requires JVM resolution");
-                        String c = MethodCompiler.compile(node, method, symbol);
+                        String c = compile(node, method, symbol);
                         MethodMetrics metrics = measure(method);
-                        if (metrics.instructions < config.minInstructions) {
+                        if (!required && metrics.instructions < config.minInstructions) {
                             report.accept(new Decision(name, "excluded",
                                 "below minimum JVM instruction count " + config.minInstructions, metrics));
                             continue;
                         }
                         bindings.add(new Binding(method, symbol, c));
-                        if (config.reportNativeSizes) selectedSymbols.put(symbol, name);
+                        if (!config.analyze && config.llvmPlugin == null)
+                            System.err.println("native-obfuscator: method=" + name + " function=" + symbol
+                                + " profile=compatibility transformed=0");
+                        if (!config.analyze) selectedSymbols.put(symbol, name);
                         ordinal++;
                         report.accept(new Decision(name, config.analyze ? "eligible" : "selected", "", metrics));
                     } catch (MethodCompiler.Unsupported failure) {
+                        if (required) throw new IOException("Generated utility method cannot be converted: " + name
+                            + ": " + failure.getMessage());
                         unsupported++;
                         report.accept(new Decision(name, config.skipUnsupported ? "retained" : "rejected", failure.getMessage()));
                     }
                 }
             }
+            if (generatedClass && bindings.isEmpty())
+                throw new IOException("Generated class has zero converted methods: " + owner);
             if (!bindings.isEmpty() && !config.analyze) {
                 int index = outputs.size();
                 byte[] metadata = registrationMetadata(bindings);
@@ -163,7 +154,7 @@ final class Protector {
                         new Decision(method, "native-size", measured.containsKey(symbol) ? "" : "no linked symbol",
                             null, null, target.key, measured.get(symbol))))
                     : null;
-                byte[] binary = target.compile(workspace, c, config, sizes);
+                byte[] binary = target.compile(workspace, c, config, selectedSymbols, sizes);
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
                 files.put(base, binary);
                 files.put(base + ".sha256", HexFormat.of().formatHex(Archive.sha256().digest(binary))
@@ -171,9 +162,6 @@ final class Protector {
             }
             if (config.markers > 0) {
                 files.put(RESOURCE + id + "/markers.txt", markers(id, config.markers, config.markerSeed));
-            }
-            if (config.padding) {
-                FilePadding.bundle(files, RESOURCE + id + "/", id);
             }
             Archive.write(files, config.output);
             nativeSizes.forEach(report);
@@ -185,7 +173,7 @@ final class Protector {
         return ordinal;
     }
 
-    private static byte[] markers(String id, int count, long seed) {
+    static byte[] markers(String id, int count, long seed) {
         var markerText = new StringBuilder();
         var input = ByteBuffer.allocate(Long.BYTES + Integer.BYTES);
         var digest = Archive.sha256();
@@ -229,6 +217,73 @@ final class Protector {
         return new MethodMetrics(instructions, branches);
     }
 
+    /** Resolve the genuine native selection before sampling final class structures. */
+    private static Set<String> paddingReferencePlan(Map<String, byte[]> files, Config config,
+            Map<String, String> exclusions, Set<String> versioned) throws IOException {
+        var selected = new HashSet<String>();
+        for (var file : files.entrySet()) {
+            String path = file.getKey();
+            if (!applicationClass(path)) continue;
+            ClassNode node = readClass(path, file.getValue());
+            if (classExclusion(node, exclusions, versioned) != null) continue;
+            for (MethodNode method : node.methods) {
+                String signature = node.name + "#" + method.name + method.desc;
+                if (!matches(config.includes, signature) || matches(config.excludes, signature)) continue;
+                try {
+                    compile(node, method, "reference_plan");
+                    if (measure(method).instructions >= config.minInstructions) selected.add(signature);
+                } catch (MethodCompiler.Unsupported ignored) {
+                    // The main plan reports the precise unsupported-policy decision.
+                }
+            }
+        }
+        return Set.copyOf(selected);
+    }
+
+    private static boolean applicationClass(String path) {
+        return path.endsWith(".class") && !path.startsWith("META-INF/") && !path.equals("module-info.class");
+    }
+
+    private static ClassNode readClass(String path, byte[] bytes) throws IOException {
+        var node = new ClassNode();
+        try {
+            new ClassReader(bytes).accept(node, 0);
+        } catch (RuntimeException failure) {
+            throw new IOException("Invalid or unsupported classfile " + path, failure);
+        }
+        if (!path.equals(node.name + ".class")) throw new IOException("Class name disagrees with JAR path: " + path);
+        return node;
+    }
+
+    private static Set<String> versionedClasses(Set<String> paths) {
+        var versioned = new HashSet<String>();
+        String prefix = "META-INF/versions/";
+        for (String path : paths) {
+            if (!path.startsWith(prefix) || !path.endsWith(".class")) continue;
+            int separator = path.indexOf('/', prefix.length());
+            if (separator >= 0) versioned.add(path.substring(separator + 1, path.length() - 6));
+        }
+        return versioned;
+    }
+
+    private static String classExclusion(ClassNode node, Map<String, String> exclusions, Set<String> versioned) {
+        if (node.attrs != null || node.methods.stream().anyMatch(m -> m.attrs != null)
+            || node.fields.stream().anyMatch(f -> f.attrs != null)
+            || (node.recordComponents != null && node.recordComponents.stream().anyMatch(r -> r.attrs != null)))
+            return "custom classfile attributes";
+        if (isMixin(node.visibleAnnotations) || isMixin(node.invisibleAnnotations)) return "Mixin class";
+        if ((node.access & ACC_INTERFACE) != 0) return "interface class";
+        if (versioned.contains(node.name)) return "multi-release class";
+        return exclusions.get(node.name);
+    }
+
+    private static String compile(ClassNode node, MethodNode method, String symbol) throws MethodCompiler.Unsupported {
+        int sort = Type.getReturnType(method.desc).getSort();
+        if (sort == Type.ARRAY || sort == Type.OBJECT)
+            throw new MethodCompiler.Unsupported("reference-return assignability requires JVM resolution");
+        return MethodCompiler.compile(node, method, symbol);
+    }
+
     private static boolean matches(List<Pattern> patterns, String method) {
         return patterns.stream().anyMatch(pattern -> pattern.matcher(method).matches());
     }
@@ -265,7 +320,21 @@ final class Protector {
         return writer.toByteArray();
     }
 
-    private static byte[] runtime(String loader) throws IOException {
+    static byte[] rewriteExpected(byte[] original, String loader, int index,
+                                  java.util.Set<String> methodSignatures) throws IOException {
+        ClassNode node = new ClassNode();
+        new ClassReader(original).accept(node, 0);
+        var bindings = new ArrayList<Binding>();
+        for (MethodNode method : node.methods) {
+            if (methodSignatures.contains(method.name + method.desc))
+                bindings.add(new Binding(method, "", ""));
+        }
+        if (bindings.size() != methodSignatures.size())
+            throw new IOException("Expected native method is absent from trusted class " + node.name);
+        return rewrite(node, loader, index, bindings);
+    }
+
+    static byte[] runtime(String loader) throws IOException {
         try (InputStream input = NativeRuntime.class.getResourceAsStream("/" + RUNTIME + ".class")) {
             if (input == null) throw new IOException("Tool JAR is missing its runtime class");
             var writer = new ClassWriter(0);

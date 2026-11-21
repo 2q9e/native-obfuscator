@@ -45,7 +45,7 @@ final class Workflow {
             + "(x86_64-linux|aarch64-linux|x86_64-windows|aarch64-windows)/"
             + "(libprotected\\.so|protected\\.dll)$");
     private static final Pattern REGISTRATION = Pattern.compile(
-        "^META-INF/native-obfuscator/(Runtime[0-9a-f]{32})/registration/([0-9]+)\\.bin$");
+        "^META-INF/native-obfuscator/(Runtime[0-9a-f]{32})/registration/(0|[1-9][0-9]*)\\.bin$");
     private static final Pattern RUNTIME_CLASS = Pattern.compile(
         "^dev/nativeobfuscator/runtime/(Runtime[0-9a-f]{32})\\.class$");
     private static final int REGISTRATION_LIMIT = 16 * 1024 * 1024;
@@ -56,11 +56,12 @@ final class Workflow {
                               String originalSha256, String stagedSha256,
                               int nativeLibraryCount, List<String> nativeTargets,
                               List<String> expectedMethods, List<String> verifiedMethods,
-                              List<String> errors) {
+                              List<String> expectedGeneratedClasses, List<String> errors) {
         VerificationReport {
             nativeTargets = List.copyOf(nativeTargets);
             expectedMethods = List.copyOf(expectedMethods);
             verifiedMethods = List.copyOf(verifiedMethods);
+            expectedGeneratedClasses = List.copyOf(expectedGeneratedClasses);
             errors = List.copyOf(errors);
         }
     }
@@ -70,6 +71,19 @@ final class Workflow {
     static VerificationReport verify(Path originalJar, Path stagedJar,
                                      Set<String> expectedNativeMethods,
                                      Set<String> expectedTargets) throws IOException {
+        return verify(originalJar, stagedJar, expectedNativeMethods, expectedTargets, 0, 0);
+    }
+
+    static VerificationReport verify(Path originalJar, Path stagedJar,
+                                     Set<String> expectedNativeMethods, Set<String> expectedTargets,
+                                     int paddingCount, long paddingSeed) throws IOException {
+        return verify(originalJar, stagedJar, expectedNativeMethods, expectedTargets, paddingCount, paddingSeed, 0, 0);
+    }
+
+    static VerificationReport verify(Path originalJar, Path stagedJar,
+                                     Set<String> expectedNativeMethods, Set<String> expectedTargets,
+                                     int paddingCount, long paddingSeed, int markers, long markerSeed) throws IOException {
+        if (markers < 0 || markers > 1000) throw new IllegalArgumentException("markers must be between 0 and 1000");
         Path original = regularFile(originalJar, "Original JAR");
         Path staged = regularFile(stagedJar, "Staged JAR");
         if (original.equals(staged))
@@ -84,40 +98,56 @@ final class Workflow {
             originalEntries = Archive.read(original);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
-                List.of(), 0, List.of(), List.of("Original JAR: " + failure.getMessage()));
+                List.of(), 0, List.of(), Set.of(), List.of("Original JAR: " + failure.getMessage()));
         }
         try {
             stagedEntries = Archive.read(staged);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
-                List.of(), 0, List.of(), List.of("Staged JAR: " + failure.getMessage()));
+                List.of(), 0, List.of(), Set.of(), List.of("Staged JAR: " + failure.getMessage()));
         }
         if (!sha256(original).equals(originalHash))
             errors.add("Original JAR changed during verification");
         if (!sha256(staged).equals(stagedHash))
             errors.add("Staged JAR changed during verification");
 
+        var generation = FilePadding.generate(originalEntries, paddingCount, paddingSeed, expectedNativeMethods);
+        Map<String, byte[]> generatedEntries = generation.classes();
+        for (String name : generatedEntries.keySet()) {
+            if (!stagedEntries.containsKey(name)) errors.add("Missing expected generated class " + name);
+        }
         Set<String> originalNative = nativeMethods(originalEntries, errors, "Original");
         Set<String> stagedNative = nativeMethods(stagedEntries, errors, "Staged");
         var addedNative = new TreeSet<>(stagedNative);
         addedNative.removeAll(originalNative);
         var expected = new TreeSet<>(expectedNativeMethods);
+        if (!expected.containsAll(generation.nativeMethods().keySet()))
+            errors.add("Expected method plan omits required generated native methods");
         if (expected.isEmpty()) errors.add("No eligible methods were supplied for coverage verification");
-        var expectedClassEntries = new TreeSet<String>();
+        var expectedByClass = new LinkedHashMap<String, Set<String>>();
         for (String method : expected) {
             int separator = method.indexOf('#');
             if (separator <= 0) {
                 errors.add("Invalid expected method signature: " + method);
             } else {
-                expectedClassEntries.add(method.substring(0, separator) + ".class");
+                String path = method.substring(0, separator) + ".class";
+                expectedByClass.computeIfAbsent(path, ignored -> new TreeSet<>()).add(method.substring(separator + 1));
+                if (generatedEntries.containsKey(path) && !generation.nativeMethods().containsKey(method))
+                    errors.add("Expected method plan includes an unplanned generated native method: " + method);
             }
+        }
+        var trustedEntries = new LinkedHashMap<>(originalEntries);
+        trustedEntries.putAll(generatedEntries);
+        var expectedIndices = new LinkedHashMap<String, Integer>();
+        for (String entry : trustedEntries.keySet()) {
+            if (expectedByClass.containsKey(entry)) expectedIndices.put(entry, expectedIndices.size());
         }
         for (var entry : originalEntries.entrySet()) {
             byte[] updated = stagedEntries.get(entry.getKey());
             if (updated == null) {
                 errors.add("Missing original JAR entry " + entry.getKey());
             } else if (!entry.getKey().endsWith(".class")
-                || !expectedClassEntries.contains(entry.getKey())) {
+                || !expectedByClass.containsKey(entry.getKey())) {
                 if (!Arrays.equals(entry.getValue(), updated))
                     errors.add("Unexpected modification to original JAR entry " + entry.getKey());
             }
@@ -126,7 +156,7 @@ final class Workflow {
             if (!stagedNative.contains(method))
                 errors.add("Selected method is not native in staged JAR: " + method);
             if (!addedNative.contains(method))
-                errors.add("Selected method was already native or is absent from the original JAR: " + method);
+                errors.add("Selected method was already native or is absent from the staged JAR: " + method);
         }
         for (String method : addedNative) {
             if (!expected.contains(method))
@@ -174,8 +204,11 @@ final class Workflow {
             String filename = library.group(3);
             if (target.endsWith("-linux") != filename.endsWith(".so"))
                 errors.add("Native library name does not match target " + target);
-            if (entry.getValue().length == 0)
-                errors.add("Empty native library " + entry.getKey());
+            try {
+                NativeImage.executableBytes(entry.getValue(), NativeTarget.parse(target));
+            } catch (IOException invalid) {
+                errors.add("Invalid native library for " + target + ": " + invalid.getMessage());
+            }
             if (librariesByTarget.putIfAbsent(target, entry.getKey()) != null)
                 errors.add("Duplicate native library target " + target);
             byte[] sidecar = stagedEntries.get(entry.getKey() + ".sha256");
@@ -222,22 +255,70 @@ final class Workflow {
                 errors.add("Generated runtime class is missing: " + runtimePath);
             } else {
                 verifyRuntimeClass(runtimeBytes, runtimeId, errors);
+                if (!sameClass(Protector.runtime("dev/nativeobfuscator/runtime/" + runtimeId), runtimeBytes))
+                    errors.add("Generated runtime class does not match trusted implementation");
                 verifyRegistrations(stagedEntries, runtimeId, addedNative,
                     registrationResources, errors);
             }
             String resourceRoot = "META-INF/native-obfuscator/" + runtimeId + "/";
+            String markerPath = resourceRoot + "markers.txt";
+            byte[] actualMarkers = stagedEntries.get(markerPath);
+            if (markers > 0) {
+                if (actualMarkers == null) errors.add("Missing expected marker resource " + markerPath);
+                else if (!Arrays.equals(actualMarkers, Protector.markers(runtimeId, markers, markerSeed)))
+                    errors.add("Marker resource does not match trusted build inputs: " + markerPath);
+            }
+            for (var ownerPlan : expectedByClass.entrySet()) {
+                String classEntry = ownerPlan.getKey();
+                byte[] trusted = trustedEntries.get(classEntry);
+                if (trusted == null) {
+                    errors.add("Expected native owner is absent from trusted build inputs: " + classEntry);
+                    continue;
+                }
+                byte[] actual = stagedEntries.get(classEntry);
+                if (actual == null) continue;
+                try {
+                    byte[] rewritten = Protector.rewriteExpected(trusted,
+                        "dev/nativeobfuscator/runtime/" + runtimeId, expectedIndices.get(classEntry), ownerPlan.getValue());
+                    if (!sameClass(rewritten, actual))
+                        errors.add("Selected class does not match trusted build inputs: " + classEntry);
+                } catch (IOException | RuntimeException invalid) {
+                    errors.add("Selected class does not match trusted build inputs: " + classEntry);
+                }
+            }
             for (String name : stagedEntries.keySet()) {
-                if (originalEntries.containsKey(name)) continue;
+                if (originalEntries.containsKey(name) || generatedEntries.containsKey(name)) continue;
                 Matcher runtimeClass = RUNTIME_CLASS.matcher(name);
                 if (runtimeClass.matches() && runtimeClass.group(1).equals(runtimeId)) continue;
-                if (!name.startsWith(resourceRoot))
+                boolean knownResource = REGISTRATION.matcher(name).matches()
+                    || NATIVE_LIBRARY.matcher(name).matches()
+                    || name.endsWith(".sha256") && stagedEntries.containsKey(name.substring(0, name.length() - 7))
+                        && NATIVE_LIBRARY.matcher(name.substring(0, name.length() - 7)).matches()
+                    || markers > 0 && name.equals(markerPath);
+                if (!name.startsWith(resourceRoot) || !knownResource)
                     errors.add("Unexpected added JAR entry " + name);
             }
         }
 
-        return verification(originalHash, stagedHash, expectedNativeMethods,
+        return verification(originalHash, stagedHash, expected,
             new ArrayList<>(addedNative), librariesByTarget.size(),
-            new ArrayList<>(librariesByTarget.keySet()), errors);
+            new ArrayList<>(librariesByTarget.keySet()), generatedEntries.keySet(), errors);
+    }
+
+    private static boolean sameClass(byte[] expected, byte[] actual) {
+        try {
+            return Arrays.equals(canonicalClass(expected), canonicalClass(actual));
+        } catch (RuntimeException malformed) {
+            return false;
+        }
+    }
+
+    private static byte[] canonicalClass(byte[] bytes) {
+        var node = new ClassNode();
+        new ClassReader(bytes).accept(node, 0);
+        var writer = new org.objectweb.asm.ClassWriter(0);
+        node.accept(writer);
+        return writer.toByteArray();
     }
 
     static PromotionResult apply(Path stagedJar, Path releaseJar, Path stateRoot,
@@ -407,10 +488,10 @@ final class Workflow {
 
     private static VerificationReport verification(String originalHash, String stagedHash,
             Set<String> expectedMethods, List<String> verifiedMethods, int libraryCount,
-            List<String> targets, List<String> errors) {
+            List<String> targets, Set<String> generatedClasses, List<String> errors) {
         return new VerificationReport(errors.isEmpty(), false, originalHash, stagedHash,
             libraryCount, targets, new ArrayList<>(new TreeSet<>(expectedMethods)),
-            verifiedMethods, errors);
+            verifiedMethods, generatedClasses.stream().sorted().toList(), errors);
     }
 
     private static void verifyRuntimeClass(byte[] bytes, String runtimeId,

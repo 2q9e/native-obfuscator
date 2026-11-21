@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 enum NativeTarget {
     LINUX_X64("x86_64-linux", "x86_64-linux-gnu.2.28", "libprotected.so"),
@@ -16,6 +17,8 @@ enum NativeTarget {
     WINDOWS_X64("x86_64-windows", "x86_64-windows-gnu", "protected.dll"),
     WINDOWS_ARM64("aarch64-windows", "aarch64-windows-gnu", "protected.dll");
 
+    private static final Pattern TRANSFORM_FUNCTION =
+        Pattern.compile("^native-obfuscator-function: pass=\\S+ function=(\\S+) ");
     final String key;
     final String triple;
     final String file;
@@ -45,7 +48,8 @@ enum NativeTarget {
         throw new IllegalArgumentException("Unsupported host OS, specify --target");
     }
 
-    byte[] compile(Path workspace, Path source, Protector.Config config, Consumer<Map<String, Long>> sizes)
+    byte[] compile(Path workspace, Path source, Protector.Config config,
+                   Map<String, String> selectedSymbols, Consumer<Map<String, Long>> sizes)
             throws IOException, InterruptedException {
         Path output = Files.createDirectory(workspace.resolve(key)).resolve(file);
         Path headers = Path.of(System.getProperty("java.home"), "include");
@@ -102,7 +106,11 @@ enum NativeTarget {
             execute(frontend, "LLVM frontend for " + key);
             execute(List.of(config.llvmOpt(), "-load-pass-plugin=" + config.llvmPlugin(),
                 "-passes=" + config.llvmPasses() + ",verify", optimized.toString(), "-o", transformed.toString()),
-                "LLVM protection for " + key, output.resolveSibling("llvm-protection.log"), "target=" + key + " ");
+                "LLVM protection for " + key, output.resolveSibling("llvm-protection.log"), line -> {
+                    var match = TRANSFORM_FUNCTION.matcher(line);
+                    String method = match.find() ? selectedSymbols.get(match.group(1)) : null;
+                    System.err.println("target=" + key + " " + line + (method == null ? "" : " method=" + method));
+                });
             lower(config, transformed, output, clangTriple, linux, sizes);
             if (config.maxGrowth() >= 0) {
                 baseline = output.resolveSibling("baseline-" + file);
@@ -180,10 +188,10 @@ enum NativeTarget {
     }
 
     private static void execute(List<String> command, String stage) throws IOException, InterruptedException {
-        execute(command, stage, null, "");
+        execute(command, stage, null, null);
     }
 
-    private static void execute(List<String> command, String stage, Path errorLog, String prefix)
+    private static void execute(List<String> command, String stage, Path errorLog, Consumer<String> diagnostic)
             throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(command).inheritIO();
         if (errorLog != null) builder.redirectError(errorLog.toFile());
@@ -200,7 +208,7 @@ enum NativeTarget {
             }
             if (errorLog != null && Files.exists(errorLog)) {
                 try (var lines = Files.lines(errorLog)) {
-                    lines.forEach(line -> System.err.println(prefix + line));
+                    lines.forEach(diagnostic);
                 }
             }
         }

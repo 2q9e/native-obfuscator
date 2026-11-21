@@ -52,7 +52,9 @@ public final class Main {
                 --profile PROFILE     compatibility, balanced, aggressive or maximum.
                 --seed UNSIGNED        Reproducible LLVM build seed (default 0).
                 --max-growth PERCENT  Cap executable code growth relative to the LLVM baseline.
-                --padding MODE        on or off. Prompts for JAR output in an interactive terminal.
+                --padding MODE        on (12 classes) or off. Interactive JAR builds prompt.
+                --padding-count N     Generate 0-1000 utility classes; positive enables padding.
+                --padding-seed INT64  Reproduce generated classes independently of --seed (default 0).
                 --markers COUNT       Add 1-1000 inert analysis markers (disabled by default).
                 --marker-seed UINT64  Reproducible marker seed (default 0).
                 --emit-c              Write generated C to --output for inspection.
@@ -89,6 +91,7 @@ public final class Main {
     private record Coverage(Protector.Config config, Set<String> methods) {}
 
     private static int runHarden(String[] arguments, Gson gson) throws IOException, InterruptedException {
+        arguments = expandConfig(arguments);
         if (hasFlag(arguments, "--dry-run")) {
             Coverage coverage = analyzeCoverage(arguments, gson);
             System.err.println("Eligible methods: " + coverage.methods.size());
@@ -111,7 +114,7 @@ public final class Main {
         var expected = new java.util.TreeSet<String>();
         decisions.stream().filter(decision -> decision.result().equals("selected"))
             .map(Protector.Decision::method).forEach(expected::add);
-        var report = Workflow.verify(config.input(), config.output(), expected, targetKeys(config.targets()));
+        var report = Workflow.verify(config.input(), config.output(), expected, targetKeys(config.targets()), config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed());
         System.out.println(gson.toJson(Map.of("status", report.structurallyValid() ? "staged" : "verification-failed",
             "generatedMethods", count, "verification", report,
             "nextSteps", report.structurallyValid()
@@ -123,11 +126,12 @@ public final class Main {
     }
 
     private static int runVerify(String[] arguments, Gson gson) throws IOException, InterruptedException {
+        arguments = expandConfig(arguments);
         Map<String, String> options = workflowOptions(arguments, true, false, false, false);
         String staged = required(options, "--staged");
         Coverage coverage = analyzeCoverage(arguments, gson);
         var report = Workflow.verify(coverage.config.input(), Path.of(staged), coverage.methods,
-            verificationTargets(coverage.config));
+            verificationTargets(coverage.config), coverage.config.paddingCount(), coverage.config.paddingSeed(), coverage.config.markers(), coverage.config.markerSeed());
         System.out.println(gson.toJson(Map.of("status", report.structurallyValid() ? "verified" : "verification-failed",
             "verification", report,
             "nextSteps", report.structurallyValid()
@@ -137,12 +141,13 @@ public final class Main {
     }
 
     private static int runApply(String[] arguments, Gson gson) throws IOException, InterruptedException {
+        arguments = expandConfig(arguments);
         Map<String, String> options = workflowOptions(arguments, true, true, true, true);
         String staged = required(options, "--staged");
         String release = required(options, "--output");
         Coverage coverage = analyzeCoverage(arguments, gson);
         var verification = Workflow.verify(coverage.config.input(), Path.of(staged), coverage.methods,
-            verificationTargets(coverage.config));
+            verificationTargets(coverage.config), coverage.config.paddingCount(), coverage.config.paddingSeed(), coverage.config.markers(), coverage.config.markerSeed());
         if (!verification.structurallyValid()) {
             System.out.println(gson.toJson(Map.of("status", "verification-failed", "verification", verification,
                 "nextSteps", "Fix the reported structural issues before applying this JAR.")));
@@ -160,11 +165,17 @@ public final class Main {
     }
 
     private static int runRestore(String[] arguments, Gson gson) throws IOException {
+        arguments = expandConfig(arguments);
         Map<String, String> options = workflowOptions(arguments, false, true, true, false);
         String release = required(options, "--output");
         var result = Workflow.restore(Path.of(release), stateRoot(options));
         System.out.println(gson.toJson(Map.of("status", result.status(), "promotion", result)));
         return 0;
+    }
+
+    private static String[] expandConfig(String[] arguments) throws IOException {
+        return arguments.length == 3 && arguments[1].equals("--config")
+            ? loadConfig(arguments[0], Path.of(arguments[2])) : arguments;
     }
 
     private static Coverage analyzeCoverage(String[] arguments, Gson gson)
@@ -188,10 +199,10 @@ public final class Main {
         var filtered = new ArrayList<String>();
         filtered.add("analyze");
         Set<String> retained = Set.of("--input", "--include", "--exclude", "--target",
-            "--unsupported", "--min-instructions");
+            "--unsupported", "--min-instructions", "--padding", "--padding-count", "--padding-seed", "--markers", "--marker-seed");
         Set<String> ignoredValues = Set.of("--output", "--staged", "--state-dir", "--zig",
             "--clang", "--llvm-opt", "--llvm-plugin", "--llvm-passes", "--profile", "--seed",
-            "--max-growth", "--padding", "--markers", "--marker-seed");
+            "--max-growth");
         Set<String> ignoredFlags = Set.of("--dry-run", "--confirm-overwrite", "--emit-c",
             "--report-native-sizes");
         for (int i = 1; i < source.length; i++) {
@@ -215,10 +226,9 @@ public final class Main {
             boolean allowOutput, boolean allowStateDir, boolean allowConfirm) {
         var options = new HashMap<String, String>();
         Set<String> coverageValues = Set.of("--input", "--include", "--exclude", "--target",
-            "--unsupported", "--min-instructions");
+            "--unsupported", "--min-instructions", "--padding", "--padding-count", "--padding-seed", "--markers", "--marker-seed");
         Set<String> ignoredValues = Set.of("--zig", "--clang", "--llvm-opt", "--llvm-plugin",
-            "--llvm-passes", "--profile", "--seed", "--max-growth", "--padding", "--markers",
-            "--marker-seed");
+            "--llvm-passes", "--profile", "--seed", "--max-growth");
         for (int i = 1; i < arguments.length; i++) {
             String key = arguments[i];
             if (coverageValues.contains(key) || ignoredValues.contains(key)) {
@@ -307,7 +317,7 @@ public final class Main {
                     else targets.add(NativeTarget.parse(value));
                 }
                 case "--input", "--output", "--zig", "--unsupported", "--clang", "--llvm-opt", "--llvm-plugin",
-                     "--llvm-passes", "--min-instructions", "--profile", "--seed", "--max-growth", "--padding", "--markers", "--marker-seed" -> {
+                     "--llvm-passes", "--min-instructions", "--profile", "--seed", "--max-growth", "--padding", "--padding-count", "--padding-seed", "--markers", "--marker-seed" -> {
                     if (options.putIfAbsent(key, value) != null)
                         throw new IllegalArgumentException("Repeated option " + key);
                 }
@@ -364,37 +374,47 @@ public final class Main {
         long markerSeed = Long.parseUnsignedLong(options.getOrDefault("--marker-seed", "0"));
         if (markers < 0 || markers > 1000)
             throw new IllegalArgumentException("--markers must be between 0 and 1000");
-        if ((markers > 0 && (analyze || emitC)) || (markers == 0 && options.containsKey("--marker-seed")))
-            throw new IllegalArgumentException("Markers require protect JAR output and a positive --markers count");
+        if ((markers > 0 && emitC) || (markers == 0 && options.containsKey("--marker-seed")))
+            throw new IllegalArgumentException("Markers require JAR output or analyze and a positive --markers count");
         int minInstructions = Integer.parseInt(options.getOrDefault("--min-instructions", "0"));
         if (minInstructions < 0) throw new IllegalArgumentException("--min-instructions must be non-negative");
         if (reportNativeSizes && (analyze || emitC || targets.stream().noneMatch(t -> t.key.endsWith("-linux"))))
             throw new IllegalArgumentException("--report-native-sizes requires at least one Linux JAR target");
-        boolean padding = parsePadding(options.get("--padding"), !analyze && !emitC);
+        int paddingCount = parsePadding(options, !emitC, !analyze);
+        long paddingSeed;
+        try { paddingSeed = Long.parseLong(options.getOrDefault("--padding-seed", "0")); }
+        catch (NumberFormatException invalid) { throw new IllegalArgumentException("--padding-seed must be a signed 64-bit integer"); }
         return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), List.copyOf(targets),
             options.get("--zig"), skip, analyze, emitC, options.get("--clang"), options.get("--llvm-opt"),
-            plugin, plugin == null ? null : passes, growth, markers, markerSeed, padding, minInstructions, reportNativeSizes);
+            plugin, plugin == null ? null : passes, growth, markers, markerSeed, paddingCount, paddingSeed, minInstructions, reportNativeSizes);
     }
 
-    private static boolean parsePadding(String mode, boolean jarOutput) {
-        if (!jarOutput) {
-            if (mode != null) throw new IllegalArgumentException("--padding requires protect JAR output");
-            return false;
+    private static int parsePadding(Map<String, String> options, boolean supported, boolean prompt) {
+        String mode = options.get("--padding");
+        String countText = options.get("--padding-count");
+        if (!supported && (mode != null || countText != null || options.containsKey("--padding-seed")))
+            throw new IllegalArgumentException("Padding requires JAR output or analyze");
+        if (mode != null && !mode.equals("on") && !mode.equals("off"))
+            throw new IllegalArgumentException("--padding must be on or off");
+        Integer count = null;
+        if (countText != null) {
+            try { count = Integer.valueOf(countText); }
+            catch (NumberFormatException invalid) {
+                throw new IllegalArgumentException("--padding-count must be an integer between 0 and 1000");
+            }
+            if (count < 0 || count > 1000)
+                throw new IllegalArgumentException("--padding-count must be between 0 and 1000");
+            if (mode != null && (mode.equals("on") != (count > 0)))
+                throw new IllegalArgumentException("Conflicting --padding " + mode + " and --padding-count " + count);
         }
-        if (mode != null) {
-            return switch (mode) {
-                case "on" -> true;
-                case "off" -> false;
-                default -> throw new IllegalArgumentException("--padding must be on or off");
-            };
-        }
-
+        if (count != null) return count;
+        if (mode != null) return mode.equals("on") ? 12 : 0;
         Console console = System.console();
-        if (!isTerminal(console)) return false;
-        System.err.printf("Add %d standalone utility classes as file padding? [y/N] ", FilePadding.classCount());
+        if (!prompt || !isTerminal(console)) return 0;
+        System.err.print("Add 12 utility classes as file padding? [y/N] ");
         System.err.flush();
         String answer = console.readLine();
-        return answer != null && (answer.strip().equalsIgnoreCase("y") || answer.strip().equalsIgnoreCase("yes"));
+        return answer != null && (answer.strip().equalsIgnoreCase("y") || answer.strip().equalsIgnoreCase("yes")) ? 12 : 0;
     }
 
     private static boolean isTerminal(Console console) {
@@ -426,13 +446,17 @@ public final class Main {
             for (var field : fields.entrySet()) {
                 String key = field.getKey();
                 JsonElement value = field.getValue();
-                String flag = "--" + key;
+                String flag = "--" + switch (key) {
+                    case "paddingCount" -> "padding-count";
+                    case "paddingSeed" -> "padding-seed";
+                    default -> key;
+                };
                 if (key.equals("include") || key.equals("exclude") || key.equals("target")) {
                     for (JsonElement item : value.getAsJsonArray()) {
                         args.add(flag);
                         args.add(stringValue(item));
                     }
-                } else if (key.equals("emit-c") || key.equals("report-native-sizes")) {
+                } else if (Set.of("emit-c", "report-native-sizes", "dry-run", "confirm-overwrite").contains(key)) {
                     if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean())
                         throw new IllegalArgumentException(key + " must be a boolean");
                     if (value.getAsBoolean()) args.add(flag);

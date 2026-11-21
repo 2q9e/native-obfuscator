@@ -51,9 +51,11 @@ javap -p -s -classpath input.jar my.mod.Math
 
 ## Optional file padding
 
-Interactive `protect` runs ask whether to add 12 standalone utility class files. Press Enter to skip padding. Use `--padding on` or `--padding off` to choose in advance. Non-interactive builds default to off. In JSON configuration, set `"padding": "on"` or `"padding": "off"`.
+Use `--padding-count N` to add between 0 and 1,000 utility classes. A positive count enables padding. `--padding on` defaults to 12 classes when no count is supplied. `--padding off` and `--padding-count 0` disable it. Conflicting combinations are rejected. Interactive JAR builds prompt when neither option is supplied, and non-interactive builds default to off. JSON accepts `"paddingCount": 12` and `"paddingSeed": 42`, as well as the legacy `"padding": "on"` or `"off"`.
 
-The classes contain working routines such as binary search, checksums, and moving averages. Their 300-character internal class and method names include double spaces and punctuation. The class name is split across its package and a 200-character filename stem. Debug metadata is omitted. The protected JAR stores them as resources outside its application classpath, so the application does not load or execute them. Padding increases the size of the output JAR.
+`--padding-seed 42` reproduces the generated class set from the same input and selection options independently of the LLVM `--seed`. The generator adds utility classes before the final native plan. At least one meaningful method per generated class must complete native conversion, registration, and the target build with the selected LLVM profile. Generated classes have normal classpath entries. Classpath scanners can discover them.
+
+Use the same padding count and seed with `protect`, `harden`, `verify`, and `apply`. Verification regenerates expected classes from the original JAR and these trusted options, checks their resulting bytecode and native registrations, and rejects missing classes, extra classes, and unexpected native methods. The verification report includes the expected generated entry names for a local inventory. [Padding details](docs/padding.md)
 
 ## Staged release workflow
 
@@ -67,7 +69,7 @@ Use harden to create a protected staging JAR and run structural checks on its me
       --include 'my/mod/Math#mix(II)I' --confirm-overwrite
     "$tool" restore --output release.jar
 
-When replacing an existing release, apply saves a backup under ~/.native-obfuscator/state by default and restricts its permissions on POSIX systems; set --state-dir PATH to choose another location. Restore checks the promoted file hash before replacing or removing it. Repeat any --target options from harden during verify and apply; when omitted, they expect the host target. Verification is structural and does not execute application code; it cannot prove runtime equivalence. Run your application checks before release.
+When replacing an existing release, apply saves a backup under `~/.native-obfuscator/state` by default and restricts its permissions on POSIX systems. Use `--state-dir PATH` to choose another location. Restore checks the promoted file hash before replacing or removing it. Repeat target, selection, padding, and marker options from harden during verify and apply. The default target is the host. Run application checks separately to verify runtime equivalence.
 
 ## Minecraft Fabric
 
@@ -106,7 +108,7 @@ Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `c
 
 ## Bytecode support
 
-The translator handles primitive numeric instructions, branches, loops, switches, primitive returns, and reference identity checks in static and instance methods. Constructors, interface methods, calls, field access, array operations, reference returns, and exception handlers stay in JVM bytecode. The tool preserves the input classfile version and Java names used by callers. It generates 300-character internal native function names with a `method_` prefix.
+The translator supports numeric instructions, branches, loops, switches, typed array access and length, and reference identity in static and instance methods. It also handles supported field accesses and direct calls within the declaring class. It preserves input classfile versions and the Java names used by callers. It retains or rejects unsupported methods according to `--unsupported` and reports the reason per method. [Verified JNI coverage and limits](docs/native-coverage.md)
 
 GitHub Actions runs Java 21 and 25 differential tests, Kotlin tests, and JNI runtime checks on all four targets. See the [verification report](docs/verification.md) for the results and the scope of the Fabric smoke test. For local differential tests, set `JAVA_HOME` and `JAVA_RELEASE` to the matching JDK and run `bash src/test/integration.sh "$tool"`. Set `GRADLE_HOME` to Gradle 9.3.1 to run `bash src/test/kotlin/verify.sh "$tool"`.
 
