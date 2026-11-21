@@ -107,18 +107,18 @@ public final class Main {
             throw new IllegalArgumentException("harden requires a staged JAR output and cannot use --emit-c");
         if (flags.contains("--confirm-overwrite"))
             throw new IllegalArgumentException("--confirm-overwrite requires apply");
-        if (flags.contains("--dry-run")) {
-            Coverage coverage = analyzeCoverage(arguments, gson);
-            System.err.println("Eligible methods: " + coverage.methods.size());
+        boolean dryRun = flags.contains("--dry-run");
+        String[] protectArguments = arguments.clone();
+        protectArguments[0] = "protect";
+        var config = parse(protectArguments, dryRun);
+        if (dryRun) {
+            int count = runProtection(config, gson, decision -> {});
+            System.err.println("Eligible methods: " + count);
             System.out.println(gson.toJson(Map.of("status", "dry-run-complete",
-                "eligibleMethods", coverage.methods.size(), "writesOutput", false,
+                "eligibleMethods", count, "writesOutput", false,
                 "nextSteps", "Run harden without --dry-run to create and verify a staged JAR.")));
             return 0;
         }
-
-        String[] protectArguments = arguments.clone();
-        protectArguments[0] = "protect";
-        var config = parse(protectArguments);
         Path candidate = Files.createTempFile(config.output().getParent(), ".native-obfuscator-stage-", ".jar");
         Workflow.VerificationReport report;
         int count;
@@ -326,6 +326,10 @@ public final class Main {
     }
 
     private static Protector.Config parse(String[] arguments) throws IOException {
+        return parse(arguments, false);
+    }
+
+    private static Protector.Config parse(String[] arguments, boolean dryRun) throws IOException {
         if (arguments.length == 3 && arguments[1].equals("--config")) {
             arguments = loadConfig(arguments[0], Path.of(arguments[2]));
         }
@@ -342,6 +346,7 @@ public final class Main {
         boolean reportNativeSizes = false;
         for (int i = 1; i < arguments.length; i++) {
             String key = arguments[i];
+            if (dryRun && key.equals("--dry-run")) continue;
             if (key.equals("--emit-c")) {
                 if (emitC) throw new IllegalArgumentException("Repeated option " + key);
                 emitC = true;
@@ -373,7 +378,7 @@ public final class Main {
         }
         if (includes.isEmpty()) throw new IllegalArgumentException("Select at least one --include pattern");
         Path input = path(options, "--input");
-        Path output = analyze ? null : path(options, "--output");
+        Path output = analyze || dryRun && !options.containsKey("--output") ? null : path(options, "--output");
         if (analyze && (options.containsKey("--output") || emitC))
             throw new IllegalArgumentException("Output options require protect");
         if (output != null && (input.equals(output) || (Files.exists(output) && Files.isSameFile(input, output))))
@@ -429,13 +434,13 @@ public final class Main {
             throw new IllegalArgumentException("--report-native-sizes requires at least one Linux JAR target");
         AnalysisConfig analysis = AnalysisConfig.resolve(options.get("--analysis-resistance"),
             options.get("--analysis-seed"), options.get("--analysis-resource-budget"), options.get("--analysis-entry-budget"));
-        int paddingCount = parsePadding(options, !emitC, !analyze);
+        int paddingCount = parsePadding(options, !emitC, !analyze && !dryRun);
         long paddingSeed;
         try { paddingSeed = Long.parseLong(options.getOrDefault("--padding-seed", "0")); }
         catch (NumberFormatException invalid) { throw new IllegalArgumentException("--padding-seed must be a signed 64-bit integer"); }
         List<NativeTarget> orderedTargets = analysis.enabled() ? targets.stream().sorted().toList() : List.copyOf(targets);
         return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), orderedTargets,
-            options.get("--zig"), skip, analyze, emitC, options.get("--clang"), options.get("--llvm-opt"),
+            options.get("--zig"), skip, analyze || dryRun, emitC, options.get("--clang"), options.get("--llvm-opt"),
             plugin, plugin == null ? null : passes, growth, markers, markerSeed, paddingCount, paddingSeed,
             minInstructions, reportNativeSizes, analysis);
     }
