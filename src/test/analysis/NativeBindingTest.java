@@ -40,6 +40,7 @@ public final class NativeBindingTest {
     public static void main(String[] args) throws IOException {
         checkElf();
         checkPe();
+        checkExecutableSections();
         System.out.println("Native binding section checks passed");
     }
 
@@ -109,6 +110,29 @@ public final class NativeBindingTest {
         reject(x64, target, "PE payload outside file", image -> image.putInt(PE_ANCHOR + 20, -4));
         reject(Arrays.copyOf(x64, PE_ANCHOR + PE_SECTION_SIZE - 1), target, "truncated PE section table");
         reject(Arrays.copyOf(x64, PE_PAYLOAD + PE_RAW_SIZE - 1), target, "truncated PE raw section");
+    }
+
+    private static void checkExecutableSections() throws IOException {
+        var elfCode = ByteBuffer.wrap(elf(62)).order(ByteOrder.LITTLE_ENDIAN);
+        elfCode.putLong(ELF_ANCHOR + 8, 6).putInt(ELF_PROGRAM + 4, 5);
+        var peCode = ByteBuffer.wrap(pe(0xaa64)).order(ByteOrder.LITTLE_ENDIAN);
+        peCode.putInt(PE_ANCHOR + 36, 0x60000020);
+        if (NativeImage.requireCodeSection(elfCode.array(), NativeTarget.LINUX_X64, SECTION_NAME) != ANCHOR.length
+            || NativeImage.requireCodeSection(peCode.array(), NativeTarget.WINDOWS_ARM64, SECTION_NAME) != ANCHOR.length)
+            throw new AssertionError("Incorrect executable section length");
+        rejectCode(elf(62), NativeTarget.LINUX_X64);
+        rejectCode(pe(0xaa64), NativeTarget.WINDOWS_ARM64);
+        rejectCode(elfCode.putInt(ELF_PROGRAM + 4, 7).array(), NativeTarget.LINUX_X64);
+        rejectCode(peCode.putInt(PE_ANCHOR + 36, 0xe0000020).array(), NativeTarget.WINDOWS_ARM64);
+    }
+
+    private static void rejectCode(byte[] contents, NativeTarget target) throws IOException {
+        try {
+            NativeImage.requireCodeSection(contents, target, SECTION_NAME);
+        } catch (IOException expected) {
+            return;
+        }
+        throw new AssertionError("Expected rejection of a section without read-only executable mapping");
     }
 
     private static byte[] elf(int machine) {

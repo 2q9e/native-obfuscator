@@ -85,23 +85,33 @@ final class NativeImage {
 
     static void requireReadOnlySection(byte[] binary, NativeTarget target, String name, byte[] expected)
             throws IOException {
-        if (!name.matches("[.][a-z0-9]{1,6}") || expected.length == 0)
-            throw new IllegalArgumentException("Invalid native section expectation");
+        if (expected.length == 0) throw new IllegalArgumentException("Missing read-only section contents");
+        requireSection(binary, target, name, expected);
+    }
+
+    static long requireCodeSection(byte[] binary, NativeTarget target, String name) throws IOException {
+        return requireSection(binary, target, name, null);
+    }
+
+    private static long requireSection(byte[] binary, NativeTarget target, String name, byte[] expected)
+            throws IOException {
+        if (!name.matches("[.][a-z0-9]{1,6}"))
+            throw new IllegalArgumentException("Invalid native section name");
         ByteBuffer image = ByteBuffer.wrap(binary).order(ByteOrder.LITTLE_ENDIAN);
         byte[] sectionName = name.getBytes(StandardCharsets.US_ASCII);
         try {
-            switch (target) {
-                case LINUX_X64 -> requireElfData(image, 62, sectionName, expected);
-                case LINUX_ARM64 -> requireElfData(image, 183, sectionName, expected);
-                case WINDOWS_X64 -> requirePeData(image, 0x8664, sectionName, expected);
-                case WINDOWS_ARM64 -> requirePeData(image, 0xaa64, sectionName, expected);
-            }
+            return switch (target) {
+                case LINUX_X64 -> elfSection(image, 62, sectionName, expected);
+                case LINUX_ARM64 -> elfSection(image, 183, sectionName, expected);
+                case WINDOWS_X64 -> peSection(image, 0x8664, sectionName, expected);
+                case WINDOWS_ARM64 -> peSection(image, 0xaa64, sectionName, expected);
+            };
         } catch (IndexOutOfBoundsException | ArithmeticException failure) {
             throw new IOException("Invalid native section table for " + target.key, failure);
         }
     }
 
-    private static void requireElfData(ByteBuffer image, int machine, byte[] name, byte[] expected)
+    private static long elfSection(ByteBuffer image, int machine, byte[] name, byte[] expected)
             throws IOException {
         requireElfHeader(image, machine);
         long table = image.getLong(40);
@@ -117,26 +127,30 @@ final class NativeImage {
         if (image.getInt(names + 4) != 3 || namesSize <= 0)
             throw new IOException("Invalid ELF section name table");
         requireRange(image, namesOffset, namesSize);
-        int matches = 0;
+        boolean executable = expected == null;
+        long sectionLength = 0;
         for (int i = 0; i < count; i++) {
             int row = Math.toIntExact(table + (long) i * stride);
             long nameIndex = Integer.toUnsignedLong(image.getInt(row));
             if (nameIndex >= namesSize) throw new IOException("ELF section name is out of bounds");
             if (name.length >= namesSize - nameIndex
                 || !matchesName(image, Math.toIntExact(namesOffset + nameIndex), name, name.length + 1)) continue;
-            matches++;
-            if (image.getInt(row + 4) != 1 || (image.getLong(row + 8) & 7) != 2
-                || image.getLong(row + 32) != expected.length)
+            if (sectionLength != 0) throw new IOException("Duplicate ELF section");
+            long length = image.getLong(row + 32);
+            if (image.getInt(row + 4) != 1 || (image.getLong(row + 8) & 7) != (executable ? 6 : 2)
+                || length <= 0 || (!executable && length != expected.length))
                 throw new IOException("ELF section has unexpected type, flags, or size");
             long offset = image.getLong(row + 24);
-            requireRange(image, offset, expected.length);
-            requireElfReadOnlyLoad(image, image.getLong(row + 16), offset, expected.length);
-            requirePayload(image, (int) offset, expected);
+            requireRange(image, offset, length);
+            requireElfLoad(image, image.getLong(row + 16), offset, (int) length, executable ? 5 : 4);
+            if (!executable) requirePayload(image, (int) offset, expected);
+            sectionLength = length;
         }
-        if (matches != 1) throw new IOException("Expected exactly one ELF analysis binding section");
+        if (sectionLength == 0) throw new IOException("Missing ELF section");
+        return sectionLength;
     }
 
-    private static void requireElfReadOnlyLoad(ByteBuffer image, long address, long offset, int length)
+    private static void requireElfLoad(ByteBuffer image, long address, long offset, int length, int permissions)
             throws IOException {
         long table = image.getLong(32);
         int stride = unsignedShort(image, 54);
@@ -158,14 +172,14 @@ final class NativeImage {
             long relative = address - virtual;
             if (relative >= memorySize || relative <= -length) continue;
             if (relative < 0 || length > fileSize - relative || offset - file != relative
-                || (image.getInt(row + 4) & 7) != 4)
-                throw new IOException("ELF analysis binding is not mapped as read-only data");
+                || (image.getInt(row + 4) & 7) != permissions)
+                throw new IOException("ELF section is not mapped with the expected permissions");
             mappings++;
         }
-        if (mappings != 1) throw new IOException("ELF analysis binding does not have a unique load segment");
+        if (mappings != 1) throw new IOException("ELF section does not have a unique load segment");
     }
 
-    private static void requirePeData(ByteBuffer image, int machine, byte[] name, byte[] expected)
+    private static long peSection(ByteBuffer image, int machine, byte[] name, byte[] expected)
             throws IOException {
         int header = requirePeHeader(image, machine);
         int count = unsignedShort(image, header + 6);
@@ -175,26 +189,33 @@ final class NativeImage {
         requireRange(image, table, (long) count * 40);
         long imageSize = Integer.toUnsignedLong(image.getInt(header + 24 + 56));
         long headers = Integer.toUnsignedLong(image.getInt(header + 24 + 60));
-        int matches = 0;
+        boolean executable = expected == null;
+        long sectionLength = 0;
         for (int i = 0; i < count; i++) {
             int row = Math.toIntExact(table + i * 40L);
             if (!matchesName(image, row, name, 8)) continue;
-            matches++;
+            if (sectionLength != 0) throw new IOException("Duplicate PE section");
             long logical = Integer.toUnsignedLong(image.getInt(row + 8));
             long address = Integer.toUnsignedLong(image.getInt(row + 12));
             long raw = Integer.toUnsignedLong(image.getInt(row + 16));
             long offset = Integer.toUnsignedLong(image.getInt(row + 20));
             int flags = image.getInt(row + 36);
-            if ((flags & 0xe00000e0) != 0x40000040 || logical != expected.length || raw < logical
-                || address < headers || logical > imageSize - address || offset < headers || offset < table + count * 40L)
+            int expectedFlags = executable ? 0x60000020 : 0x40000040;
+            if ((flags & 0xe00000e0) != expectedFlags || logical <= 0 || raw < logical
+                || (!executable && logical != expected.length) || address < headers || logical > imageSize - address
+                || offset < headers || offset < table + count * 40L)
                 throw new IOException("PE section has unexpected mapped range, flags, or size");
             requireRange(image, offset, raw);
-            requirePayload(image, (int) offset, expected);
-            for (long iPadding = logical; iPadding < raw; iPadding++)
-                if (image.get((int) (offset + iPadding)) != 0)
-                    throw new IOException("PE analysis binding padding is not zero");
+            if (!executable) {
+                requirePayload(image, (int) offset, expected);
+                for (long iPadding = logical; iPadding < raw; iPadding++)
+                    if (image.get((int) (offset + iPadding)) != 0)
+                        throw new IOException("PE analysis binding padding is not zero");
+            }
+            sectionLength = logical;
         }
-        if (matches != 1) throw new IOException("Expected exactly one PE analysis binding section");
+        if (sectionLength == 0) throw new IOException("Missing PE section");
+        return sectionLength;
     }
 
     private static boolean matchesName(ByteBuffer image, int offset, byte[] name, int paddedLength) {
