@@ -23,6 +23,8 @@ import dev.nativeobfuscator.AnalysisNative.Selection;
 /** Checks direct control-flow edges in the exact stripped image supplied by the native link. */
 final class AnalysisNativeEvidence {
     private static final int MAX_DISASSEMBLY = 4 * 1024 * 1024;
+    private static final int MAX_ROOT_BYTES = 64 * 1024;
+    private static final int MAX_HELPER_BYTES = 1024;
     private static final Pattern SECTION = Pattern.compile(
         "^\\s*\\d+\\s+(\\.\\w+)\\s+([\\da-fA-F]+)\\s+([\\da-fA-F]+)\\s+TEXT(?:\\s.*)?$");
     private static final String DISASSEMBLY = "Disassembly of section ";
@@ -86,6 +88,11 @@ final class AnalysisNativeEvidence {
             if (root == null || helper == null) {
                 String absent = root == null && helper == null ? "root and helper" : root == null ? "root" : "helper";
                 result.add(new Evidence(site.root(), "unverified", absent + " executable section missing",
+                    rootBytes, helperBytes, null));
+                continue;
+            }
+            if (root.bytes() > MAX_ROOT_BYTES || helper.bytes() > MAX_HELPER_BYTES) {
+                result.add(new Evidence(site.root(), "unverified", "native helper or root exceeds its section size limit",
                     rootBytes, helperBytes, null));
                 continue;
             }
@@ -161,7 +168,7 @@ final class AnalysisNativeEvidence {
         }
     }
 
-    private static Map<String, Section> parse(String disassembled) {
+    private static Map<String, Section> parse(String disassembled) throws IOException {
         Map<String, Section> sections = new HashMap<>();
         Section active = null;
         for (String line : disassembled.split("\\R")) {
@@ -169,7 +176,9 @@ final class AnalysisNativeEvidence {
             if (entry.matches()) {
                 long address = hex(entry.group(3));
                 long bytes = hex(entry.group(2));
-                if (bytes > 0) sections.put(entry.group(1), new Section(address, bytes));
+                if (bytes <= 0) continue;
+                if (sections.putIfAbsent(entry.group(1), new Section(address, bytes)) != null)
+                    throw new IOException("Duplicate executable section in linked disassembly: " + entry.group(1));
                 continue;
             }
             if (line.startsWith(DISASSEMBLY) && line.endsWith(":")) {
@@ -189,7 +198,8 @@ final class AnalysisNativeEvidence {
                 var operand = ADDRESS.matcher(decoded.group(4));
                 if (operand.find()) target = hex(operand.group(1));
             }
-            active.instructions().put(address, new Instruction(address, bytes, mnemonic, target));
+            if (active.instructions().putIfAbsent(address, new Instruction(address, bytes, mnemonic, target)) != null)
+                throw new IOException("Duplicate instruction address in linked disassembly");
         }
         return sections;
     }
