@@ -36,7 +36,18 @@ final class Protector {
     record Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
                   boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed,
-                  int paddingCount, long paddingSeed, int minInstructions, boolean reportNativeSizes) {}
+                  int paddingCount, long paddingSeed, int minInstructions, boolean reportNativeSizes,
+                  AnalysisConfig analysis) {
+        Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
+               List<NativeTarget> targets, String zig, boolean skipUnsupported, boolean analyze,
+               boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses,
+               int maxGrowth, int markers, long markerSeed, int paddingCount, long paddingSeed,
+               int minInstructions, boolean reportNativeSizes) {
+            this(input, output, includes, excludes, targets, zig, skipUnsupported, analyze, emitC, clang,
+                llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount, paddingSeed,
+                minInstructions, reportNativeSizes, AnalysisConfig.OFF);
+        }
+    }
     record Decision(String method, String result, String reason, Integer instructions,
                     Integer branches, String target, Long nativeBytes) {
         Decision(String method, String result, String reason) {
@@ -200,6 +211,15 @@ final class Protector {
             + "\n" + config.llvmPasses + "\nformat 2").getBytes(StandardCharsets.UTF_8));
         if (config.minInstructions != 0)
             digest.update(("minimum instructions " + config.minInstructions).getBytes(StandardCharsets.UTF_8));
+        if (config.analysis.enabled()) {
+            digest.update("\nanalysis resistance format 1\n".getBytes(StandardCharsets.US_ASCII));
+            digest.update(ByteBuffer.allocate(6 * Integer.BYTES + 3 * Long.BYTES + 1)
+                .putInt(config.analysis.profile().id).putLong(config.analysis.seed())
+                .putInt(config.analysis.resourceBudget()).putInt(config.analysis.entryBudget())
+                .putInt(config.maxGrowth).putInt(config.markers).putLong(config.markerSeed)
+                .putInt(config.paddingCount).putLong(config.paddingSeed)
+                .put((byte) (config.skipUnsupported ? 1 : 0)).array());
+        }
         return "Runtime" + HexFormat.of().formatHex(digest.digest(), 0, 16);
     }
 
