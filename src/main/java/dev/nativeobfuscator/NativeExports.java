@@ -10,7 +10,16 @@ final class NativeExports {
 
     private NativeExports() {}
 
-    static void requireElfFunction(byte[] binary, int machine, String name) throws IOException {
+    static void requireFunction(byte[] binary, NativeTarget target, String name) throws IOException {
+        switch (target) {
+            case LINUX_X64 -> requireElfFunction(binary, 62, name);
+            case LINUX_ARM64 -> requireElfFunction(binary, 183, name);
+            case WINDOWS_X64 -> requirePeFunction(binary, 0x8664, name);
+            case WINDOWS_ARM64 -> requirePeFunction(binary, 0xaa64, name);
+        }
+    }
+
+    private static void requireElfFunction(byte[] binary, int machine, String name) throws IOException {
         var image = ByteBuffer.wrap(binary).order(ByteOrder.LITTLE_ENDIAN);
         byte[] expected = name.getBytes(StandardCharsets.US_ASCII);
         try {
@@ -88,6 +97,75 @@ final class NativeExports {
                 return;
         }
         throw new IOException("ELF registration export is not in an executable load segment");
+    }
+
+    private static void requirePeFunction(byte[] binary, int machine, String name) throws IOException {
+        var image = ByteBuffer.wrap(binary).order(ByteOrder.LITTLE_ENDIAN);
+        byte[] expected = name.getBytes(StandardCharsets.US_ASCII);
+        try {
+            int pe = image.getInt(60);
+            range(image, pe, 24);
+            int optional = pe + 24;
+            int optionalSize = u16(image, pe + 20);
+            int sections = u16(image, pe + 6);
+            range(image, optional, optionalSize + sections * 40L);
+            if (u16(image, 0) != 0x5a4d || image.getInt(pe) != 0x4550 || u16(image, pe + 4) != machine
+                || (u16(image, pe + 22) & 0x2000) == 0 || optionalSize < 120 || u16(image, optional) != 0x20b
+                || u32(image, optional + 108) < 1 || sections == 0 || sections > 96)
+                throw new IOException("Expected a matching PE32+ DLL with exports");
+
+            int table = optional + optionalSize;
+            long exportRva = u32(image, optional + 112);
+            long exportLength = u32(image, optional + 116);
+            if (exportRva == 0 || exportLength < 40) throw new IOException("Missing PE export directory");
+            var exports = peRange(image, table, sections, exportRva, exportLength);
+            int directory = exports.offset;
+            long functionCount = u32(image, directory + 20);
+            long nameCount = u32(image, directory + 24);
+            if (functionCount > MAX_EXPORTS || nameCount > MAX_EXPORTS || functionCount == 0 || nameCount == 0)
+                throw new IOException("Invalid PE export count");
+            int functions = peRange(image, table, sections, u32(image, directory + 28), functionCount * 4).offset;
+            int names = peRange(image, table, sections, u32(image, directory + 32), nameCount * 4).offset;
+            int ordinals = peRange(image, table, sections, u32(image, directory + 36), nameCount * 2).offset;
+            int matches = 0;
+            for (int i = 0; i < nameCount; i++) {
+                var entry = peRange(image, table, sections, u32(image, names + i * 4), 1);
+                if (!matchesName(image, entry.offset, entry.available, expected)) continue;
+                int ordinal = u16(image, ordinals + i * 2);
+                if (ordinal >= functionCount) throw new IOException("Invalid PE export ordinal");
+                long rva = u32(image, functions + ordinal * 4);
+                if (rva >= exportRva && rva - exportRva < exportLength)
+                    throw new IOException("PE registration export is a forwarder");
+                var code = peRange(image, table, sections, rva, 1);
+                if ((code.flags & 0x20000020) != 0x20000020)
+                    throw new IOException("PE registration export is outside executable code");
+                matches++;
+            }
+            if (matches != 1) throw new IOException("Expected exactly one native export " + name);
+        } catch (IndexOutOfBoundsException | ArithmeticException failure) {
+            throw new IOException("Invalid PE export metadata", failure);
+        }
+    }
+
+    private record PeRange(int offset, long available, int flags) {}
+
+    private static PeRange peRange(ByteBuffer image, int table, int count, long rva, long length)
+            throws IOException {
+        PeRange match = null;
+        for (int i = 0; i < count; i++) {
+            int row = table + i * 40;
+            long relative = rva - u32(image, row + 12);
+            long raw = u32(image, row + 16);
+            long virtual = u32(image, row + 8);
+            long available = Math.min(raw, virtual) - relative;
+            if (relative < 0 || available < length) continue;
+            long offset = u32(image, row + 20) + relative;
+            range(image, offset, available);
+            if (match != null) throw new IOException("PE export address has multiple section mappings");
+            match = new PeRange((int) offset, available, image.getInt(row + 36));
+        }
+        if (match == null) throw new IOException("PE export address is outside file-backed sections");
+        return match;
     }
 
     private static boolean matchesName(ByteBuffer image, long offset, long length, byte[] name) {
