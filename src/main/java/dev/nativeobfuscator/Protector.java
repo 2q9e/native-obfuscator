@@ -1,5 +1,6 @@
 package dev.nativeobfuscator;
 
+import dev.nativeobfuscator.runtime.AnalysisManifest;
 import dev.nativeobfuscator.runtime.NativeRuntime;
 import dev.nativeobfuscator.translate.MethodCompiler;
 import java.io.ByteArrayOutputStream;
@@ -59,10 +60,19 @@ final class Protector {
         }
     }
 
+    record AnalysisReport(String analysisResistance, String analysisSeed, int resourceBudget, int entryBudget,
+                          String status, String binding, int resourceBytes, int resourceEntries,
+                          int selectedApplicationMethods) {}
+
     private record MethodMetrics(int instructions, int branches) {}
     private record Binding(MethodNode method, String symbol, String c) {}
 
     static int run(Config config, Consumer<Decision> report) throws IOException, InterruptedException {
+        return run(config, report, analysis -> {});
+    }
+
+    static int run(Config config, Consumer<Decision> report, Consumer<AnalysisReport> analysisReport)
+            throws IOException, InterruptedException {
         var files = Archive.read(config.input);
         if (files.keySet().stream().anyMatch(name -> name.startsWith(RESOURCE)))
             throw new IOException("Input already uses the native-obfuscator resource namespace");
@@ -71,6 +81,10 @@ final class Protector {
         var generated = FilePadding.generate(files, config.paddingCount, config.paddingSeed,
             config.paddingCount == 0 ? Set.of() : paddingReferencePlan(files, config, exclusions, versioned));
         files.putAll(generated.classes());
+        var analysisPlan = config.analysis.enabled() ? AnalysisCorpus.plan(config.analysis.profile().id,
+            config.analysis.seed(), config.analysis.resourceBudget(), config.analysis.entryBudget()) : null;
+        if (analysisPlan != null && !config.emitC)
+            Archive.preflight(files, analysisPlan.byteCount(), analysisPlan.entryCount() + 2);
         String id = runtimeId(files, config);
         String loader = RUNTIME.substring(0, RUNTIME.lastIndexOf('/') + 1) + id;
         var source = new StringBuilder(MethodCompiler.runtimeSupport()).append(registrationSupport());
@@ -79,6 +93,7 @@ final class Protector {
         var outputs = new LinkedHashMap<String, byte[]>();
         var selectedSymbols = new LinkedHashMap<String, String>();
         int ordinal = 0;
+        int applicationMethods = 0;
         int unsupported = 0;
         for (var file : files.entrySet()) {
             String entry = file.getKey();
@@ -112,6 +127,7 @@ final class Protector {
                                 + " profile=compatibility transformed=0");
                         if (!config.analyze) selectedSymbols.put(symbol, name);
                         ordinal++;
+                        if (!required) applicationMethods++;
                         report.accept(new Decision(name, config.analyze ? "eligible" : "selected", "", metrics));
                     } catch (MethodCompiler.Unsupported failure) {
                         if (required) throw new IOException("Generated utility method cannot be converted: " + name
@@ -133,13 +149,36 @@ final class Protector {
         }
         if (unsupported != 0 && !config.skipUnsupported)
             throw new IOException(unsupported + " selected methods require JVM bytecode; see method diagnostics");
-        if (config.analyze) return ordinal;
+        if (config.analyze) {
+            if (analysisPlan != null)
+                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
+                    applicationMethods == 0 ? "skipped-no-eligible-application-methods" : "planned",
+                    "planned-native-registration"));
+            return ordinal;
+        }
         if (outputs.isEmpty()) throw new IOException("No supported methods were selected");
+        if (analysisPlan != null && applicationMethods == 0)
+            throw new IOException("Analysis resistance requires a supported application method");
         if (files.containsKey(loader + ".class")) throw new IOException("Injected runtime path collides with input");
-        source.append("JNIEXPORT void JNICALL Java_").append(jniMangle(loader))
-            .append("_register0(JNIEnv *env, jclass runtime, jclass owner, jint index, jbyteArray metadata, jbyteArray digest) {\n")
-            .append("    (void)runtime;\n")
-            .append("    unsigned char actual_digest[32];\n")
+        String manifestClass = AnalysisRuntime.manifestClass(loader) + ".class";
+        if (analysisPlan != null && files.containsKey(manifestClass))
+            throw new IOException("Injected analysis manifest class collides with input");
+        if (analysisPlan != null && !config.emitC) {
+            var current = new LinkedHashMap<>(files);
+            current.putAll(outputs);
+            current.putAll(registrationResources);
+            Archive.preflight(current, analysisPlan.byteCount(),
+                analysisPlan.entryCount() + 2 + config.targets.size() * 2 + (config.markers > 0 ? 1 : 0));
+        }
+        var analysisResources = analysisPlan == null ? Map.<String, byte[]>of() : AnalysisCorpus.generate(analysisPlan);
+        if (analysisPlan != null) source.append(AnalysisBinding.source(analysisResources.get(AnalysisManifest.PATH)));
+        source.append("JNIEXPORT void JNICALL Java_").append(jniMangle(loader)).append('_')
+            .append(analysisPlan == null ? "register0" : AnalysisRuntime.REGISTER)
+            .append("(JNIEnv *env, jclass runtime, jclass owner, jint index, jbyteArray metadata, jbyteArray digest");
+        if (analysisPlan != null) source.append(", jbyteArray analysis_digest");
+        source.append(") {\n").append("    (void)runtime;\n");
+        if (analysisPlan != null) source.append("    if (!check_analysis_binding(env, analysis_digest)) return;\n");
+        source.append("    unsigned char actual_digest[32];\n")
             .append("    (*env)->GetByteArrayRegion(env, digest, 0, 32, (jbyte *)actual_digest);\n")
             .append("    if ((*env)->ExceptionCheck(env)) return;\n")
             .append("    switch (index) {\n").append(registrations)
@@ -150,6 +189,9 @@ final class Protector {
             .append("    }\n}\n");
         if (config.emitC) {
             Files.writeString(config.output, source);
+            if (analysisPlan != null)
+                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
+                    "c-emitted-resources-omitted", "requires-packaged-jar-runtime"));
             return ordinal;
         }
         Path workspace = Files.createTempDirectory("native-obfuscator-build-");
@@ -157,7 +199,11 @@ final class Protector {
             Path c = Files.writeString(workspace.resolve("translated.c"), source);
             files.putAll(outputs);
             files.putAll(registrationResources);
-            files.put(loader + ".class", runtime(loader));
+            files.put(loader + ".class", analysisPlan == null ? runtime(loader) : AnalysisRuntime.loader(loader));
+            if (analysisPlan != null) {
+                files.put(manifestClass, AnalysisRuntime.manifest(loader));
+                analysisResources.forEach((path, data) -> files.put(RESOURCE + id + "/" + path, data));
+            }
             var nativeSizes = new ArrayList<Decision>();
             for (NativeTarget target : config.targets) {
                 Consumer<Map<String, Long>> sizes = config.reportNativeSizes
@@ -176,12 +222,22 @@ final class Protector {
             }
             Archive.write(files, config.output);
             nativeSizes.forEach(report);
+            if (analysisPlan != null)
+                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
+                    "packaged", "native-registration"));
         } finally {
             try (var paths = Files.walk(workspace)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
             }
         }
         return ordinal;
+    }
+
+    private static AnalysisReport analysisReport(AnalysisConfig config, AnalysisCorpus.Plan plan,
+                                                  int applicationMethods, String status, String binding) {
+        return new AnalysisReport(config.profile().option, Long.toUnsignedString(config.seed()),
+            config.resourceBudget(), config.entryBudget(), status, binding, plan.byteCount(), plan.entryCount(),
+            applicationMethods);
     }
 
     static byte[] markers(String id, int count, long seed) {
