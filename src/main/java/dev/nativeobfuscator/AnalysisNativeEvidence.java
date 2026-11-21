@@ -122,7 +122,7 @@ final class AnalysisNativeEvidence {
 
     private static String disassemble(Path library, String objdump, List<Selection> selected)
             throws IOException, InterruptedException {
-        var command = new ArrayList<>(List.of(objdump, "-h", "-d", "--no-symbolize-operands"));
+        var command = new ArrayList<>(List.of(objdump, "-h", "-d"));
         for (Selection site : selected) {
             command.add("--section=" + site.rootSection());
             command.add("--section=" + site.helperSection());
@@ -153,9 +153,14 @@ final class AnalysisNativeEvidence {
             byte[] bytes = output.get(30, TimeUnit.SECONDS);
             if (!process.waitFor(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS))
                 throw new IOException("linked disassembly timed out");
-            if (process.exitValue() != 0)
-                throw new IOException("linked disassembly exited with status " + process.exitValue());
-            return new String(bytes, StandardCharsets.UTF_8);
+            String disassembly = new String(bytes, StandardCharsets.UTF_8);
+            if (process.exitValue() != 0) {
+                String detail = disassembly.lines().filter(line -> !line.isBlank()).findFirst().orElse("").strip();
+                if (detail.length() > 320) detail = detail.substring(0, 320);
+                throw new IOException("linked disassembly exited with status " + process.exitValue()
+                    + (detail.isEmpty() ? "" : ": " + detail));
+            }
+            return disassembly;
         } catch (TimeoutException failure) {
             throw new IOException("linked disassembly timed out", failure);
         } catch (ExecutionException failure) {
