@@ -182,6 +182,14 @@ def check_mutations(cli, execute, work, original, common, protected, donor):
     reject_case("changed-anchor", {**protected, library: updated, library + ".sha256": checksum},
                 "Native analysis binding", "Native analysis binding")
 
+    registration = ("Java_dev_nativeobfuscator_runtime_" + root.rstrip("/").rsplit("/", 1)[1]
+                    + "_registerBoundV1").encode("ascii")
+    assert binary.count(registration) == 1, "Expected one stripped JNI registration export"
+    renamed = binary.replace(registration, registration[:-1] + b"2")
+    renamed_checksum = hashlib.sha256(renamed).hexdigest().encode("ascii")
+    reject_case("renamed-export", {**protected, library: renamed, library + ".sha256": renamed_checksum},
+                "native export", "registerBoundV1")
+
     alternate = {name: data for name, data in protected.items() if not name.startswith(root + "analysis/")}
     alternate.update({root + name: data for name, data in donor_corpus.items()})
     candidate = reject_case("alternate-corpus", alternate, "Analysis resources", "Native analysis binding")
