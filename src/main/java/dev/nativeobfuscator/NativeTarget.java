@@ -48,10 +48,15 @@ enum NativeTarget {
         throw new IllegalArgumentException("Unsupported host OS, specify --target");
     }
 
+    Path linkedLibrary(Path workspace) {
+        return workspace.resolve(key).resolve(file);
+    }
+
     byte[] compile(Path workspace, Path source, Protector.Config config,
                    Map<String, String> selectedSymbols, Consumer<Map<String, Long>> sizes)
             throws IOException, InterruptedException {
-        Path output = Files.createDirectory(workspace.resolve(key)).resolve(file);
+        Path output = linkedLibrary(workspace);
+        Files.createDirectory(output.getParent());
         Path headers = Path.of(System.getProperty("java.home"), "include");
         if (!Files.isRegularFile(headers.resolve("jni.h")))
             throw new IOException("Run the tool with a JDK containing include/jni.h");
