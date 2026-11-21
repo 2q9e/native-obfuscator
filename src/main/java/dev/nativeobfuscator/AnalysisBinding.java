@@ -16,9 +16,8 @@ final class AnalysisBinding {
         return payload;
     }
 
-    static String source(byte[] manifest) {
-        String payload = HexFormat.ofDelimiter(", ").withPrefix("0x")
-            .formatHex(payload(Archive.sha256().digest(manifest)));
+    static String source(byte[] binding) {
+        String payload = HexFormat.ofDelimiter(", ").withPrefix("0x").formatHex(binding);
         return """
             static const unsigned char analysis_binding[] __attribute__((used, section("%s"))) = {
                 %s

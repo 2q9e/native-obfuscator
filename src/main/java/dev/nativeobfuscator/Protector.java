@@ -171,7 +171,9 @@ final class Protector {
                 analysisPlan.entryCount() + 2 + config.targets.size() * 2 + (config.markers > 0 ? 1 : 0));
         }
         var analysisResources = analysisPlan == null ? Map.<String, byte[]>of() : AnalysisCorpus.generate(analysisPlan);
-        if (analysisPlan != null) source.append(AnalysisBinding.source(analysisResources.get(AnalysisManifest.PATH)));
+        byte[] manifest = analysisResources.get(AnalysisManifest.PATH);
+        byte[] binding = manifest == null ? null : AnalysisBinding.payload(Archive.sha256().digest(manifest));
+        if (binding != null) source.append(AnalysisBinding.source(binding));
         source.append("JNIEXPORT void JNICALL Java_").append(jniMangle(loader)).append('_')
             .append(analysisPlan == null ? "register0" : AnalysisRuntime.REGISTER)
             .append("(JNIEnv *env, jclass runtime, jclass owner, jint index, jbyteArray metadata, jbyteArray digest");
@@ -212,6 +214,14 @@ final class Protector {
                             null, null, target.key, measured.get(symbol))))
                     : null;
                 byte[] binary = target.compile(workspace, c, config, selectedSymbols, sizes);
+                if (binding != null) {
+                    try {
+                        NativeImage.requireReadOnlySection(binary, target, AnalysisBinding.SECTION, binding);
+                    } catch (IOException failure) {
+                        throw new IOException("Native analysis binding invalid for " + target.key + ": "
+                            + failure.getMessage(), failure);
+                    }
+                }
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
                 files.put(base, binary);
                 files.put(base + ".sha256", HexFormat.of().formatHex(Archive.sha256().digest(binary))
