@@ -39,6 +39,8 @@ final class AnalysisNativeEvidence {
     private enum Flow { NEXT, CALL, TAIL_BRANCH, CONDITIONAL, STOP }
 
     static String objdump(String clang) {
+        String configuredObjdump = System.getenv("LLVM_OBJDUMP");
+        if (configuredObjdump != null && !configuredObjdump.isBlank()) return configuredObjdump;
         boolean windows = System.getProperty("os.name").toLowerCase(Locale.ROOT).startsWith("windows");
         String name = "llvm-objdump" + (windows ? ".exe" : "");
         if (clang != null) {
