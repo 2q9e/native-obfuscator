@@ -3,7 +3,9 @@
 param(
     [string]$Zig = "$PSScriptRoot/../../.tooling/zig-x86_64-windows-0.15.2/zig.exe",
     [string]$GradleHome = "$env:USERPROFILE/.gradle/wrapper/dists/gradle-9.3.1-bin/23ovyewtku6u96viwx3xl3oks/gradle-9.3.1",
-    [int[]]$Releases = @(21,25)
+    [int[]]$Releases = @(21,25),
+    [ValidateSet('off','balanced','maximum')]
+    [string]$KotlinAnalysisProfile = 'off'
 )
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath("$PSScriptRoot/../..")
@@ -172,9 +174,14 @@ $original = Join-Path $work 'kotlin.jar'
 $protected = Join-Path $work 'kotlin-native.jar'
 Jar $original $kotlin '' 'kotlin-jar'
 $baseline = Run $java @('-Xverify:all','-cp',"$original;$stdlib;$reflect",'fixture.kotlin.KotlinFixtureKt','original') 'kotlin-java'
-Tool @('protect','--input',$original,'--output',$protected,'--include','fixture/kotlin/KotlinFixture#calc*','--include','fixture/kotlin/KotlinFixtureKt#calcStatic*','--unsupported','retain','--zig',$Zig) 'kotlin-protect' | Out-Null
+$kotlinOptions = @('--include','fixture/kotlin/KotlinFixture#calc*','--include','fixture/kotlin/KotlinFixtureKt#calcStatic*',
+    '--unsupported','retain','--analysis-resistance',$KotlinAnalysisProfile)
+if ($KotlinAnalysisProfile -ne 'off') { $kotlinOptions += @('--analysis-seed','42') }
+Tool (@('protect','--input',$original,'--output',$protected,'--zig',$Zig) + $kotlinOptions) 'kotlin-protect' | Out-Null
+Tool (@('verify','--input',$original,'--staged',$protected) + $kotlinOptions) 'kotlin-verify' | Out-Null
 $native = Run $java @('-Xverify:all','-Xcheck:jni','--enable-native-access=ALL-UNNAMED','-cp',"$protected;$stdlib;$reflect",'fixture.kotlin.KotlinFixtureKt','protected') 'kotlin-native'
 Assert ($baseline -ceq $native) 'Kotlin results differ'
-$summary.Add(@{test='kotlin';version='2.2.21';output=$native.Trim();target='x86_64-windows';executed=$true})
+$summary.Add(@{test='kotlin';version='2.2.21';output=$native.Trim();target='x86_64-windows';executed=$true;
+    analysisProfile=$KotlinAnalysisProfile})
 $summary | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $work 'summary.json')
 Write-Host "Regression checks passed. Evidence: $work"
