@@ -1,5 +1,6 @@
 package dev.nativeobfuscator.translate;
 
+import java.util.Locale;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.*;
 import org.objectweb.asm.tree.analysis.*;
@@ -23,7 +24,7 @@ public final class MethodCompiler {
             throw new Unsupported("method exceeds translation limits");
         final Frame<BasicValue>[] frames;
         try {
-            frames = new Analyzer<>(new BasicVerifier()).analyze(owner.name, method);
+            frames = new Analyzer<>(new TypedVerifier()).analyze(owner.name, method);
         } catch (AnalyzerException | RuntimeException e) {
             throw new Unsupported("bytecode verification failed: " + e.getMessage());
         }
@@ -39,6 +40,9 @@ public final class MethodCompiler {
         code.append(") {\n    (void)env; (void)self;\n    Value s[").append(Math.max(1, method.maxStack))
             .append("] = {0}, l[").append(Math.max(1, method.maxLocals)).append("] = {0};\n")
             .append("    (void)s; (void)l;\n");
+        int capacity = referenceCapacity(method);
+        if (capacity > 16)
+            line(code, "if ((*env)->EnsureLocalCapacity(env, " + capacity + ") < 0) { " + zeroReturn(type.getReturnType()) + " }");
         int local = 0;
         if (!isStatic) {
             line(code, "l[0].r = self;");
@@ -70,7 +74,7 @@ public final class MethodCompiler {
             }
             if (insn.getOpcode() >= 0) {
                 try {
-                    emit(code, method, insn, frames[i], type.getReturnType());
+                    emit(code, owner, method, insn, frames[i], type.getReturnType());
                 } catch (Unsupported e) {
                     throw new Unsupported("instruction " + i + " (opcode " + insn.getOpcode() + "): " + e.getMessage());
                 }
@@ -79,7 +83,7 @@ public final class MethodCompiler {
         return code.append("}\n\n").toString();
     }
 
-    private static void emit(StringBuilder code, MethodNode method, AbstractInsnNode insn,
+    private static void emit(StringBuilder code, ClassNode owner, MethodNode method, AbstractInsnNode insn,
                              Frame<BasicValue> frame, Type result) throws Unsupported {
         int depth = frame.getStackSize();
         String out = "s[" + depth + "]";
@@ -87,7 +91,9 @@ public final class MethodCompiler {
         String b = "s[" + (depth - 2) + "]";
         int op = insn.getOpcode();
         switch (op) {
-            case NOP, POP, POP2 -> {}
+            case NOP -> {}
+            case POP -> startOfSlots(frame, depth, 1);
+            case POP2 -> startOfSlots(frame, depth, 2);
             case ICONST_M1, ICONST_0, ICONST_1, ICONST_2, ICONST_3, ICONST_4, ICONST_5 ->
                 line(code, out + ".i = " + (op - ICONST_0) + ";");
             case LCONST_0, LCONST_1 -> line(code, out + ".j = " + (op - LCONST_0) + ";");
@@ -111,7 +117,26 @@ public final class MethodCompiler {
             case DUP2 -> duplicate(code, frame, 2, 0);
             case DUP2_X1 -> duplicate(code, frame, 2, 1);
             case DUP2_X2 -> duplicate(code, frame, 2, 2);
-            case SWAP -> line(code, "{ Value tmp = " + a + "; " + a + " = " + b + "; " + b + " = tmp; }");
+            case SWAP -> {
+                startOfSlots(frame, depth, 1);
+                startOfSlots(frame, depth - 1, 1);
+                line(code, "{ Value tmp = " + a + "; " + a + " = " + b + "; " + b + " = tmp; }");
+            }
+            case ARRAYLENGTH -> {
+                Type array = frame.getStack(depth - 1).getType();
+                if (array == null || (array.getSort() != Type.ARRAY && !isNull(array)))
+                    throw new Unsupported("array length requires a proven array type");
+                nullCheck(code, a + ".r", result);
+                line(code, a + ".i = (*env)->GetArrayLength(env, (jarray)" + a + ".r);");
+                pending(code, result);
+            }
+            case IALOAD, LALOAD, FALOAD, DALOAD, AALOAD, BALOAD, CALOAD, SALOAD,
+                 IASTORE, LASTORE, FASTORE, DASTORE, AASTORE, BASTORE, CASTORE, SASTORE ->
+                arrayAccess(code, method, insn, frame, result);
+            case GETFIELD, PUTFIELD, GETSTATIC, PUTSTATIC ->
+                fieldAccess(code, owner, method, (FieldInsnNode)insn, frame, result);
+            case INVOKESTATIC, INVOKEVIRTUAL, INVOKESPECIAL, INVOKEINTERFACE ->
+                methodCall(code, owner, method, (MethodInsnNode)insn, frame, result);
             case IADD, ISUB, IMUL, IAND, IOR, IXOR, LADD, LSUB, LMUL, LAND, LOR, LXOR -> {
                 boolean wide = op == LADD || op == LSUB || op == LMUL || op == LAND || op == LOR || op == LXOR;
                 String f = wide ? ".j" : ".i";
@@ -222,8 +247,287 @@ public final class MethodCompiler {
                 line(code, "return " + value + ";");
             }
             case LRETURN, FRETURN, DRETURN, ARETURN -> line(code, "return " + a + "." + field(result) + ";");
+            case NEW -> throw new Unsupported("object allocation requires uninitialized-object tracking");
+            case NEWARRAY, ANEWARRAY, MULTIANEWARRAY -> throw new Unsupported("array allocation and dimension failure ordering are not verified");
+            case CHECKCAST, INSTANCEOF -> throw new Unsupported("reference type resolution is not verified");
+            case ATHROW -> throw new Unsupported("explicit throw and null-throw semantics are not verified");
+            case MONITORENTER, MONITOREXIT -> throw new Unsupported("explicit monitor ownership and exception cleanup are not verified");
+            case INVOKEDYNAMIC -> throw new Unsupported("dynamic call-site linkage is not verified");
             default -> throw new Unsupported("unsupported operation");
         }
+    }
+
+
+    /** Keeps exact descriptor types without loading application classes into the tool VM.
+     * Hierarchy-dependent assignments are deliberately rejected rather than guessed. */
+    private static final class TypedVerifier extends BasicVerifier {
+        TypedVerifier() { super(ASM9); }
+        @Override public BasicValue newValue(Type type) {
+            if (type != null && (type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT))
+                return new BasicValue(type);
+            return super.newValue(type);
+        }
+        @Override protected boolean isArrayValue(BasicValue value) {
+            return value.getType() != null && (value.getType().getSort() == Type.ARRAY || isNull(value.getType()));
+        }
+        @Override protected BasicValue getElementValue(BasicValue value) throws AnalyzerException {
+            Type type = value.getType();
+            if (type != null && isNull(type)) return value;
+            if (type != null && type.getSort() == Type.ARRAY)
+                return newValue(Type.getType(type.getDescriptor().substring(1)));
+            throw new AnalyzerException(null, "array operand requires a proven array type");
+        }
+        @Override protected boolean isSubTypeOf(BasicValue value, BasicValue expected) {
+            if (value.equals(expected)) return true;
+            if (value.isReference() && expected.isReference()) {
+                if (isNull(value.getType())) return true;
+                return referenceSubtype(value.getType(), expected.getType());
+            }
+            return false;
+        }
+        @Override public BasicValue merge(BasicValue left, BasicValue right) {
+            if (left.equals(right)) return left;
+            if (left.isReference() && right.isReference()) {
+                if (isNull(left.getType())) return right;
+                if (isNull(right.getType())) return left;
+                return newValue(Type.getObjectType("java/lang/Object"));
+            }
+            return BasicValue.UNINITIALIZED_VALUE;
+        }
+    }
+
+    private static boolean referenceSubtype(Type actual, Type expected) {
+        if (actual.equals(expected) || isNull(actual)) return true;
+        if (expected.equals(Type.getObjectType("java/lang/Object"))) return true;
+        if (actual.getSort() == Type.ARRAY && expected.getSort() == Type.ARRAY) {
+            Type left = Type.getType(actual.getDescriptor().substring(1));
+            Type right = Type.getType(expected.getDescriptor().substring(1));
+            if ((left.getSort() == Type.ARRAY || left.getSort() == Type.OBJECT)
+                && (right.getSort() == Type.ARRAY || right.getSort() == Type.OBJECT))
+                return referenceSubtype(left, right);
+        }
+        return false;
+    }
+
+    private static boolean isNull(Type type) {
+        return type != null && type.equals(BasicInterpreter.NULL_TYPE);
+    }
+
+    private static void pending(StringBuilder code, Type result) {
+        line(code, "if ((*env)->ExceptionCheck(env)) { " + zeroReturn(result) + " }");
+    }
+
+    private static void nullCheck(StringBuilder code, String reference, Type result) {
+        line(code, "if (" + reference + " == NULL) { null_error(env); " + zeroReturn(result) + " }");
+    }
+
+    private static int referenceCapacity(MethodNode method) {
+        int produced = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction.getOpcode() == AALOAD) produced++;
+            else if (instruction instanceof FieldInsnNode member
+                && (member.getOpcode() == GETFIELD || member.getOpcode() == GETSTATIC)) {
+                Type type = Type.getType(member.desc);
+                if (type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT) produced++;
+            } else if (instruction instanceof MethodInsnNode member) {
+                Type type = Type.getReturnType(member.desc);
+                if (type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT) produced++;
+            }
+        }
+        // One declaring-class lookup and one exception helper may coexist with the
+        // bounded reference results. Small methods use JNI's guaranteed 16 slots.
+        return produced + 2;
+    }
+
+    private static boolean hasCycle(MethodNode method) {
+        for (AbstractInsnNode instruction : method.instructions) {
+            int index = method.instructions.indexOf(instruction);
+            if (instruction instanceof JumpInsnNode jump && method.instructions.indexOf(jump.label) <= index) return true;
+            if (instruction instanceof TableSwitchInsnNode table &&
+                (method.instructions.indexOf(table.dflt) <= index || table.labels.stream().anyMatch(l -> method.instructions.indexOf(l) <= index))) return true;
+            if (instruction instanceof LookupSwitchInsnNode lookup &&
+                (method.instructions.indexOf(lookup.dflt) <= index || lookup.labels.stream().anyMatch(l -> method.instructions.indexOf(l) <= index))) return true;
+        }
+        return false;
+    }
+
+    private static void referenceResult(MethodNode method, Type type) throws Unsupported {
+        if ((type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT) && hasCycle(method))
+            throw new Unsupported("reference-producing operation in a cyclic method requires bounded JNI local-reference lifetime");
+    }
+
+    private static String stack(int index) { return "s[" + index + "]"; }
+
+    private static void arrayAccess(StringBuilder code, MethodNode method, AbstractInsnNode insn,
+                                    Frame<BasicValue> frame, Type result) throws Unsupported {
+        int op = insn.getOpcode();
+        boolean store = op >= IASTORE && op <= SASTORE;
+        int base = frame.getStackSize() - (store ? 3 : 2);
+        Type array = frame.getStack(base).getType();
+        if (array == null || array.getSort() != Type.ARRAY)
+            throw new Unsupported("array access requires an exact array descriptor (including byte versus boolean)");
+        Type element = Type.getType(array.getDescriptor().substring(1));
+        String kind = switch (element.getSort()) {
+            case Type.BOOLEAN -> "Boolean";
+            case Type.BYTE -> "Byte";
+            case Type.CHAR -> "Char";
+            case Type.SHORT -> "Short";
+            case Type.INT -> "Int";
+            case Type.LONG -> "Long";
+            case Type.FLOAT -> "Float";
+            case Type.DOUBLE -> "Double";
+            case Type.OBJECT, Type.ARRAY -> "Object";
+            default -> throw new Unsupported("unsupported array element descriptor");
+        };
+        int expected = switch (element.getSort()) {
+            case Type.BOOLEAN, Type.BYTE -> BALOAD;
+            case Type.CHAR -> CALOAD;
+            case Type.SHORT -> SALOAD;
+            case Type.INT -> IALOAD;
+            case Type.LONG -> LALOAD;
+            case Type.FLOAT -> FALOAD;
+            case Type.DOUBLE -> DALOAD;
+            default -> AALOAD;
+        };
+        if (op != expected + (store ? IASTORE - IALOAD : 0))
+            throw new Unsupported("array opcode disagrees with element descriptor " + array.getDescriptor());
+        if (!store) referenceResult(method, element);
+        String ref = stack(base) + ".r", index = stack(base + 1) + ".i";
+        nullCheck(code, ref, result);
+        line(code, "{ jsize length = (*env)->GetArrayLength(env, (jarray)" + ref + ");");
+        pending(code, result);
+        line(code, "if (" + index + " < 0 || " + index + " >= length) { bounds_error(env, " + index + ", length); " + zeroReturn(result) + " }");
+        if (kind.equals("Object")) {
+            if (store)
+                line(code, "(*env)->SetObjectArrayElement(env, (jobjectArray)" + ref + ", " + index + ", " + stack(base + 2) + ".r);");
+            else line(code, ref + " = (*env)->GetObjectArrayElement(env, (jobjectArray)" + ref + ", " + index + ");");
+        } else {
+            String arrayType = "j" + kind.toLowerCase(Locale.ROOT) + "Array";
+            line(code, jni(element) + " element;");
+            if (store) {
+                line(code, "element = " + narrowed(element, stack(base + 2) + "." + field(element)) + ";");
+                line(code, "(*env)->Set" + kind + "ArrayRegion(env, (" + arrayType + ")" + ref + ", " + index + ", 1, &element);");
+            } else {
+                line(code, "(*env)->Get" + kind + "ArrayRegion(env, (" + arrayType + ")" + ref + ", " + index + ", 1, &element);");
+                pending(code, result);
+                line(code, stack(base) + "." + field(element) + " = element;");
+            }
+        }
+        pending(code, result);
+        line(code, "}");
+    }
+
+    private static String narrowed(Type type, String expression) {
+        return switch (type.getSort()) {
+            case Type.BOOLEAN -> "(jboolean)((uint32_t)(" + expression + ") & 1U)";
+            case Type.BYTE -> "(jbyte)narrow_i(" + expression + ", 255U, 128U)";
+            case Type.CHAR -> "(jchar)((uint32_t)(" + expression + ") & 65535U)";
+            case Type.SHORT -> "(jshort)narrow_i(" + expression + ", 65535U, 32768U)";
+            default -> expression;
+        };
+    }
+
+    private static String suffix(Type type) {
+        return switch (type.getSort()) {
+            case Type.VOID -> "Void";
+            case Type.BOOLEAN -> "Boolean";
+            case Type.BYTE -> "Byte";
+            case Type.CHAR -> "Char";
+            case Type.SHORT -> "Short";
+            case Type.INT -> "Int";
+            case Type.LONG -> "Long";
+            case Type.FLOAT -> "Float";
+            case Type.DOUBLE -> "Double";
+            default -> "Object";
+        };
+    }
+
+    private static String literal(String value) {
+        // JNI takes modified UTF-8. Octal escapes prevent adjacent digits extending an escape.
+        var encoded = new StringBuilder("\"");
+        for (int i = 0; i < value.length(); i++) {
+            int c = value.charAt(i);
+            if (c >= 1 && c <= 127) encoded.append(String.format("\\%03o", c));
+            else if (c <= 2047) {
+                encoded.append(String.format("\\%03o\\%03o", 0xc0 | (c >> 6), 0x80 | (c & 63)));
+            } else encoded.append(String.format("\\%03o\\%03o\\%03o", 0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63)));
+        }
+        return encoded.append('"').toString();
+    }
+
+    private static void fieldAccess(StringBuilder code, ClassNode owner, MethodNode method, FieldInsnNode insn,
+                                    Frame<BasicValue> frame, Type result) throws Unsupported {
+        if (!insn.owner.equals(owner.name))
+            throw new Unsupported("field resolution outside the declaring class is not verified");
+        FieldNode declaration = owner.fields.stream().filter(f -> f.name.equals(insn.name) && f.desc.equals(insn.desc)).findFirst().orElse(null);
+        if (declaration == null) throw new Unsupported("field is not declared by the current class");
+        if ((declaration.access & ACC_VOLATILE) != 0)
+            throw new Unsupported("volatile field ordering requires verified JVM memory-model barriers");
+        boolean statik = insn.getOpcode() == GETSTATIC || insn.getOpcode() == PUTSTATIC;
+        boolean store = insn.getOpcode() == PUTFIELD || insn.getOpcode() == PUTSTATIC;
+        if (statik != ((declaration.access & ACC_STATIC) != 0)) throw new Unsupported("field staticness disagrees with opcode");
+        if (store && (declaration.access & ACC_FINAL) != 0) throw new Unsupported("writes to final fields require JVM initializer checks");
+        Type type = Type.getType(insn.desc);
+        if (!store) referenceResult(method, type);
+        int depth = frame.getStackSize();
+        String receiver = statik ? "declaring" : stack(depth - (store ? 2 : 1)) + ".r";
+        if (!statik) nullCheck(code, receiver, result);
+        line(code, "{ jclass declaring = (*env)->FindClass(env, " + literal(owner.name) + ");");
+        pending(code, result);
+        line(code, "jfieldID member = (*env)->Get" + (statik ? "Static" : "") + "FieldID(env, declaring, " + literal(insn.name) + ", " + literal(insn.desc) + ");");
+        line(code, "if ((*env)->ExceptionCheck(env)) { (*env)->DeleteLocalRef(env, declaring); " + zeroReturn(result) + " }");
+        String api = (store ? "Set" : "Get") + (statik ? "Static" : "") + suffix(type) + "Field";
+        String call = "(*env)->" + api + "(env, " + receiver + ", member" +
+            (store ? ", " + narrowed(type, stack(depth - 1) + "." + field(type)) : "") + ")";
+        if (store) line(code, call + ";");
+        else line(code, stack(depth - (statik ? 0 : 1)) + "." + field(type) + " = " + call + ";");
+        line(code, "(*env)->DeleteLocalRef(env, declaring);");
+        pending(code, result);
+        line(code, "}");
+    }
+
+    private static void methodCall(StringBuilder code, ClassNode owner, MethodNode method, MethodInsnNode insn,
+                                   Frame<BasicValue> frame, Type result) throws Unsupported {
+        if (!insn.owner.equals(owner.name))
+            throw new Unsupported("direct call resolution outside the declaring class is not verified");
+        if (insn.name.startsWith("<")) throw new Unsupported("constructor calls require uninitialized-object tracking");
+        MethodNode declaration = owner.methods.stream().filter(m -> m.name.equals(insn.name) && m.desc.equals(insn.desc)).findFirst().orElse(null);
+        if (declaration == null) throw new Unsupported("call target is not declared by the current class");
+        boolean statik = insn.getOpcode() == INVOKESTATIC;
+        boolean special = insn.getOpcode() == INVOKESPECIAL;
+        if (insn.itf || insn.getOpcode() == INVOKEINTERFACE)
+            throw new Unsupported("interface method resolution is not verified");
+        if (statik != ((declaration.access & ACC_STATIC) != 0)) throw new Unsupported("call staticness disagrees with opcode");
+        if (special && (declaration.access & ACC_PRIVATE) == 0)
+            throw new Unsupported("non-private invokespecial dispatch is not verified");
+        Type returned = Type.getReturnType(insn.desc);
+        referenceResult(method, returned);
+        Type[] parameters = Type.getArgumentTypes(insn.desc);
+        int base = frame.getStackSize() - parameters.length - (statik ? 0 : 1);
+        String receiver = statik ? "declaring" : stack(base) + ".r";
+        if (!statik) nullCheck(code, receiver, result);
+        line(code, "{ jclass declaring = (*env)->FindClass(env, " + literal(owner.name) + ");");
+        pending(code, result);
+        line(code, "jmethodID member = (*env)->Get" + (statik ? "Static" : "") + "MethodID(env, declaring, " + literal(insn.name) + ", " + literal(insn.desc) + ");");
+        // DeleteLocalRef is permitted while a Java exception is pending.
+        line(code, "if ((*env)->ExceptionCheck(env)) { (*env)->DeleteLocalRef(env, declaring); " + zeroReturn(result) + " }");
+        line(code, "jvalue arguments[" + Math.max(1, parameters.length) + "] = {{0}};");
+        for (int i = 0; i < parameters.length; i++) {
+            Type parameter = parameters[i];
+            char member = switch (parameter.getSort()) {
+                case Type.BOOLEAN -> 'z'; case Type.BYTE -> 'b'; case Type.CHAR -> 'c'; case Type.SHORT -> 's';
+                case Type.INT -> 'i'; case Type.LONG -> 'j'; case Type.FLOAT -> 'f'; case Type.DOUBLE -> 'd'; default -> 'l';
+            };
+            line(code, "arguments[" + i + "]." + member + " = " + narrowed(parameter, stack(base + (statik ? 0 : 1) + i) + "." + field(parameter)) + ";");
+        }
+        boolean nonvirtual = !statik && (declaration.access & ACC_PRIVATE) != 0;
+        String api = "Call" + (statik ? "Static" : nonvirtual ? "Nonvirtual" : "") + suffix(returned) + "MethodA";
+        String call = "(*env)->" + api + "(env, " + receiver + (nonvirtual ? ", declaring" : "") + ", member, arguments)";
+        if (returned.getSort() == Type.VOID) line(code, call + ";");
+        else line(code, stack(base) + "." + field(returned) + " = " + call + ";");
+        line(code, "(*env)->DeleteLocalRef(env, declaring);");
+        pending(code, result);
+        line(code, "}");
     }
 
     private static void duplicate(StringBuilder code, Frame<BasicValue> frame,
@@ -316,6 +620,7 @@ public final class MethodCompiler {
             #include <stdint.h>
             #include <math.h>
             #include <string.h>
+            #include <stdio.h>
             typedef union { jint i; jlong j; jfloat f; jdouble d; jobject r; } Value;
 
             static inline jint bits_i(uint32_t bits) { jint value; memcpy(&value, &bits, sizeof value); return value; }
@@ -344,9 +649,19 @@ public final class MethodCompiler {
                 if (x <= -0x1p63) return INT64_MIN;
                 return (jlong)x;
             }
+            static inline void null_error(JNIEnv *env) {
+                jclass error = (*env)->FindClass(env, "java/lang/NullPointerException");
+                if (error != NULL) { (*env)->ThrowNew(env, error, ""); (*env)->DeleteLocalRef(env, error); }
+            }
+            static inline void bounds_error(JNIEnv *env, jint index, jsize length) {
+                char message[96];
+                snprintf(message, sizeof message, "Index %d out of bounds for length %d", (int)index, (int)length);
+                jclass error = (*env)->FindClass(env, "java/lang/ArrayIndexOutOfBoundsException");
+                if (error != NULL) { (*env)->ThrowNew(env, error, message); (*env)->DeleteLocalRef(env, error); }
+            }
             static inline void arithmetic_error(JNIEnv *env) {
                 jclass error = (*env)->FindClass(env, "java/lang/ArithmeticException");
-                if (error != NULL) (*env)->ThrowNew(env, error, "/ by zero");
+                if (error != NULL) { (*env)->ThrowNew(env, error, "/ by zero"); (*env)->DeleteLocalRef(env, error); }
             }
 
             """;

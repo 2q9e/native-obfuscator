@@ -28,7 +28,7 @@ grep -q 'static native int calcOverload(int, int)' "$work/methods.txt"
 grep -q 'static native long calcOverload(long, long)' "$work/methods.txt"
 grep -q 'static native double calcDouble(double, double, int)' "$work/methods.txt"
 grep -q 'static int calcLambda(int)' "$work/methods.txt"
-grep -q 'static int calcArray(int\[\], int)' "$work/methods.txt"
+grep -q 'static native int calcArray(int\[\], int)' "$work/methods.txt"
 grep -q 'static int calcThrow()' "$work/methods.txt"
 
 printf 'existing output' > "$work/rejected.jar"
@@ -45,9 +45,9 @@ import json, pathlib, struct, sys, warnings, zipfile
 
 work = pathlib.Path(sys.argv[1])
 decisions = [json.loads(line) for line in (work / "report.jsonl").read_text().splitlines()]
-assert len([decision for decision in decisions if decision["result"] == "selected"]) == 18, decisions
+assert len([decision for decision in decisions if decision["result"] == "selected"]) == 19, decisions
 assert {decision["method"].split("(")[0] for decision in decisions if decision["result"] == "retained"} == {
-    "Arithmetic#calcLambda", "Arithmetic#calcArray", "Arithmetic#calcThrow"
+    "Arithmetic#calcLambda", "Arithmetic#calcThrow"
 }, decisions
 with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / "protected.jar") as protected:
     assert original.read("Arithmetic$Digest.class") == protected.read("Arithmetic$Digest.class")
@@ -133,24 +133,20 @@ assert selected["instructions"] >= 8 and "branches" in selected, selected
 assert skipped["method"] == "Arithmetic#calcFloatToInt(F)I" and skipped["instructions"] < 8, skipped
 assert size["target"].endswith("-linux") and size["nativeBytes"] > 0, size
 native_names = re.findall(r"^static \w+ JNICALL (method_[0-9a-f]{293})\(", (work / "translated.c").read_text(), re.M)
-assert len(set(native_names)) == len(native_names) == 18, native_names
-with zipfile.ZipFile(work / "protected.jar") as standard, zipfile.ZipFile(work / "padded.jar") as padded:
-    new_entries = set(padded.namelist()) - set(standard.namelist())
-    assert len(new_entries) == 12, new_entries
-    for unchanged in standard.namelist():
-        assert standard.read(unchanged) == padded.read(unchanged), unchanged
-    for entry in new_entries:
-        root, class_entry = entry.split("/padding/", 1)
-        assert re.fullmatch(r"META-INF/native-obfuscator/Runtime[0-9a-f]{32}", root), entry
-        assert class_entry.endswith(".class") and len(class_entry.removesuffix(".class")) == 300, entry
-        assert all(len(part) <= 255 for part in class_entry.split("/")), entry
-        leaf = class_entry.rsplit("/", 1)[1]
-        assert re.fullmatch(r"C[0-9a-f !$+_~\-]{199}\.class", leaf) and "  " in leaf, leaf
-        bytecode = padded.read(entry)
-        assert bytecode.startswith(bytes.fromhex("cafebabe")), entry
-        assert b"SourceFile" not in bytecode, entry
-        name = re.search(rb"m[0-9a-f !$+_~\-]{299}(?![0-9a-f !$+_~\-])", bytecode)
-        assert name and b"  " in name.group(), entry
+assert len(set(native_names)) == len(native_names) == 19, native_names
+with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / "padded.jar") as padded:
+    original_classes = {name for name in original.namelist() if name.endswith(".class")}
+    added_classes = {name for name in padded.namelist() if name.endswith(".class")} - original_classes
+    runtime = {name for name in added_classes if re.fullmatch(r"dev/nativeobfuscator/runtime/Runtime[0-9a-f]{32}\.class", name)}
+    generated = added_classes - runtime
+    assert len(runtime) == 1 and len(generated) == 12, added_classes
+    assert not any("/padding/" in name for name in padded.namelist())
+    for entry in generated:
+        assert not entry.startswith("META-INF/") and all(len(part) <= 255 for part in entry.split("/")), entry
+        assert padded.read(entry).startswith(bytes.fromhex("cafebabe")), entry
+    report = [json.loads(line) for line in (work / "padded.jsonl").read_text().splitlines()]
+    converted = {row["method"].split("#")[0] + ".class" for row in report if row["result"] == "selected"}
+    assert generated <= converted, (generated, converted)
 PYTHON
 fi
 printf 'Java %s differential test passed (%s)\n' "$release" "$(cat "$work/protected.txt")"
