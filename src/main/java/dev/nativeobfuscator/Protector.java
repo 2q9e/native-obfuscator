@@ -1,5 +1,6 @@
 package dev.nativeobfuscator;
 
+import dev.nativeobfuscator.runtime.AnalysisManifest;
 import dev.nativeobfuscator.runtime.NativeRuntime;
 import dev.nativeobfuscator.translate.MethodCompiler;
 import java.io.ByteArrayOutputStream;
@@ -36,7 +37,24 @@ final class Protector {
     record Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
                   boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed,
-                  int paddingCount, long paddingSeed, int minInstructions, boolean reportNativeSizes) {}
+                  int paddingCount, long paddingSeed, int minInstructions, boolean reportNativeSizes,
+                  AnalysisConfig analysis) {
+        Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
+               List<NativeTarget> targets, String zig, boolean skipUnsupported, boolean analyze,
+               boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses,
+               int maxGrowth, int markers, long markerSeed, int paddingCount, long paddingSeed,
+               int minInstructions, boolean reportNativeSizes) {
+            this(input, output, includes, excludes, targets, zig, skipUnsupported, analyze, emitC, clang,
+                llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount, paddingSeed,
+                minInstructions, reportNativeSizes, AnalysisConfig.OFF);
+        }
+
+        Config withOutput(Path replacement) {
+            return new Config(input, replacement, includes, excludes, targets, zig, skipUnsupported, analyze,
+                emitC, clang, llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount,
+                paddingSeed, minInstructions, reportNativeSizes, analysis);
+        }
+    }
     record Decision(String method, String result, String reason, Integer instructions,
                     Integer branches, String target, Long nativeBytes) {
         Decision(String method, String result, String reason) {
@@ -48,10 +66,31 @@ final class Protector {
         }
     }
 
+    record AnalysisReport(String analysisResistance, String analysisSeed, int resourceBudget, int entryBudget,
+                          String status, String binding, int resourceBytes, int resourceEntries,
+                          int selectedApplicationMethods, int nativeHelperMethods, List<TargetAnalysis> targets,
+                          Archive.WrittenJar artifact) {
+        AnalysisReport {
+            targets = List.copyOf(targets);
+        }
+    }
+
+    record TargetAnalysis(String target, int libraryBytes, long executableBytes,
+                          List<AnalysisNative.Evidence> helpers) {
+        TargetAnalysis {
+            helpers = List.copyOf(helpers);
+        }
+    }
+
     private record MethodMetrics(int instructions, int branches) {}
     private record Binding(MethodNode method, String symbol, String c) {}
 
     static int run(Config config, Consumer<Decision> report) throws IOException, InterruptedException {
+        return run(config, report, analysis -> {});
+    }
+
+    static int run(Config config, Consumer<Decision> report, Consumer<AnalysisReport> analysisReport)
+            throws IOException, InterruptedException {
         var files = Archive.read(config.input);
         if (files.keySet().stream().anyMatch(name -> name.startsWith(RESOURCE)))
             throw new IOException("Input already uses the native-obfuscator resource namespace");
@@ -60,6 +99,12 @@ final class Protector {
         var generated = FilePadding.generate(files, config.paddingCount, config.paddingSeed,
             config.paddingCount == 0 ? Set.of() : paddingReferencePlan(files, config, exclusions, versioned));
         files.putAll(generated.classes());
+        var analysisPlan = config.analysis.enabled() ? AnalysisCorpus.plan(config.analysis.profile().id,
+            config.analysis.seed(), config.analysis.resourceBudget(), config.analysis.entryBudget()) : null;
+        if (analysisPlan != null && !config.emitC)
+            Archive.preflight(files, analysisPlan.byteCount(), analysisPlan.entryCount() + 2);
+        var nativePlan = config.analysis.profile() == AnalysisConfig.Profile.MAXIMUM
+            ? new AnalysisNative(config.analysis.seed(), AnalysisNative.MAX_METHODS) : null;
         String id = runtimeId(files, config);
         String loader = RUNTIME.substring(0, RUNTIME.lastIndexOf('/') + 1) + id;
         var source = new StringBuilder(MethodCompiler.runtimeSupport()).append(registrationSupport());
@@ -68,6 +113,7 @@ final class Protector {
         var outputs = new LinkedHashMap<String, byte[]>();
         var selectedSymbols = new LinkedHashMap<String, String>();
         int ordinal = 0;
+        int applicationMethods = 0;
         int unsupported = 0;
         for (var file : files.entrySet()) {
             String entry = file.getKey();
@@ -88,12 +134,18 @@ final class Protector {
                 } else {
                     String symbol = GeneratedNames.nativeFunction(id, name);
                     try {
-                        String c = compile(node, method, symbol);
+                        var site = nativePlan != null && !required ? nativePlan.prepare(method, symbol, name) : null;
+                        String c = compile(node, method, symbol, site);
                         MethodMetrics metrics = measure(method);
                         if (!required && metrics.instructions < config.minInstructions) {
                             report.accept(new Decision(name, "excluded",
                                 "below minimum JVM instruction count " + config.minInstructions, metrics));
                             continue;
+                        }
+                        if (site != null) {
+                            nativePlan.accept(site);
+                            report.accept(new Decision(name, site.enabled() ? "native-helper-planned" : "native-helper-skipped",
+                                site.enabled() ? "one terminal wrapping operation" : site.reason(), metrics));
                         }
                         bindings.add(new Binding(method, symbol, c));
                         if (!config.analyze && config.llvmPlugin == null)
@@ -101,6 +153,7 @@ final class Protector {
                                 + " profile=compatibility transformed=0");
                         if (!config.analyze) selectedSymbols.put(symbol, name);
                         ordinal++;
+                        if (!required) applicationMethods++;
                         report.accept(new Decision(name, config.analyze ? "eligible" : "selected", "", metrics));
                     } catch (MethodCompiler.Unsupported failure) {
                         if (required) throw new IOException("Generated utility method cannot be converted: " + name
@@ -122,13 +175,37 @@ final class Protector {
         }
         if (unsupported != 0 && !config.skipUnsupported)
             throw new IOException(unsupported + " selected methods require JVM bytecode; see method diagnostics");
-        if (config.analyze) return ordinal;
+        if (config.analyze) {
+            if (analysisPlan != null)
+                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
+                    applicationMethods == 0 ? "skipped-no-eligible-application-methods" : "planned",
+                    "planned-native-registration", helperCount(nativePlan), List.of(), null));
+            return ordinal;
+        }
         if (outputs.isEmpty()) throw new IOException("No supported methods were selected");
+        if (analysisPlan != null && applicationMethods == 0)
+            throw new IOException("Analysis resistance requires a supported application method");
         if (files.containsKey(loader + ".class")) throw new IOException("Injected runtime path collides with input");
-        source.append("JNIEXPORT void JNICALL Java_").append(jniMangle(loader))
-            .append("_register0(JNIEnv *env, jclass runtime, jclass owner, jint index, jbyteArray metadata, jbyteArray digest) {\n")
-            .append("    (void)runtime;\n")
-            .append("    unsigned char actual_digest[32];\n")
+        String manifestClass = AnalysisRuntime.manifestClass(loader) + ".class";
+        if (analysisPlan != null && files.containsKey(manifestClass))
+            throw new IOException("Injected analysis manifest class collides with input");
+        if (analysisPlan != null && !config.emitC) {
+            var current = new LinkedHashMap<>(files);
+            current.putAll(outputs);
+            current.putAll(registrationResources);
+            Archive.preflight(current, analysisPlan.byteCount(),
+                analysisPlan.entryCount() + 2 + config.targets.size() * 2 + (config.markers > 0 ? 1 : 0));
+        }
+        var analysisResources = analysisPlan == null ? Map.<String, byte[]>of() : AnalysisCorpus.generate(analysisPlan);
+        byte[] manifest = analysisResources.get(AnalysisManifest.PATH);
+        byte[] binding = manifest == null ? null : AnalysisBinding.payload(Archive.sha256().digest(manifest));
+        if (binding != null) source.append(AnalysisBinding.source(binding));
+        source.append("JNIEXPORT void JNICALL ").append(registrationExport(loader, analysisPlan != null))
+            .append("(JNIEnv *env, jclass runtime, jclass owner, jint index, jbyteArray metadata, jbyteArray digest");
+        if (analysisPlan != null) source.append(", jbyteArray analysis_digest");
+        source.append(") {\n").append("    (void)runtime;\n");
+        if (analysisPlan != null) source.append("    if (!check_analysis_binding(env, analysis_digest)) return;\n");
+        source.append("    unsigned char actual_digest[32];\n")
             .append("    (*env)->GetByteArrayRegion(env, digest, 0, 32, (jbyte *)actual_digest);\n")
             .append("    if ((*env)->ExceptionCheck(env)) return;\n")
             .append("    switch (index) {\n").append(registrations)
@@ -139,6 +216,10 @@ final class Protector {
             .append("    }\n}\n");
         if (config.emitC) {
             Files.writeString(config.output, source);
+            if (analysisPlan != null)
+                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
+                    "c-emitted-resources-omitted", "requires-packaged-jar-runtime", helperCount(nativePlan), List.of(),
+                    null));
             return ordinal;
         }
         Path workspace = Files.createTempDirectory("native-obfuscator-build-");
@@ -146,8 +227,14 @@ final class Protector {
             Path c = Files.writeString(workspace.resolve("translated.c"), source);
             files.putAll(outputs);
             files.putAll(registrationResources);
-            files.put(loader + ".class", runtime(loader));
+            files.put(loader + ".class", analysisPlan == null ? runtime(loader) : AnalysisRuntime.loader(loader));
+            if (analysisPlan != null) {
+                files.put(manifestClass, AnalysisRuntime.manifest(loader));
+                analysisResources.forEach((path, data) -> files.put(RESOURCE + id + "/" + path, data));
+            }
             var nativeSizes = new ArrayList<Decision>();
+            var targetAnalysis = new ArrayList<TargetAnalysis>();
+            String objdump = nativePlan == null ? null : AnalysisNative.objdump(config.clang);
             for (NativeTarget target : config.targets) {
                 Consumer<Map<String, Long>> sizes = config.reportNativeSizes
                     ? measured -> selectedSymbols.forEach((symbol, method) -> nativeSizes.add(
@@ -155,6 +242,25 @@ final class Protector {
                             null, null, target.key, measured.get(symbol))))
                     : null;
                 byte[] binary = target.compile(workspace, c, config, selectedSymbols, sizes);
+                if (binding != null) {
+                    try {
+                        AnalysisBinding.require(binary, target, binding, loader);
+                    } catch (IOException failure) {
+                        throw new IOException("Native analysis binding invalid for " + target.key + ": "
+                            + failure.getMessage(), failure);
+                    }
+                }
+                if (analysisPlan != null) {
+                    List<AnalysisNative.Evidence> helpers = nativePlan == null ? List.of()
+                        : nativePlan.verify(target.linkedLibrary(workspace), target, objdump);
+                    for (var helper : helpers) {
+                        if (!helper.status().equals("verified"))
+                            throw new IOException("Native analysis helper " + helper.status() + " for " + target.key
+                                + " " + selectedSymbols.get(helper.root()) + ": " + helper.reason());
+                    }
+                    targetAnalysis.add(new TargetAnalysis(target.key, binary.length,
+                        NativeImage.executableBytes(binary, target), helpers));
+                }
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
                 files.put(base, binary);
                 files.put(base + ".sha256", HexFormat.of().formatHex(Archive.sha256().digest(binary))
@@ -163,14 +269,30 @@ final class Protector {
             if (config.markers > 0) {
                 files.put(RESOURCE + id + "/markers.txt", markers(id, config.markers, config.markerSeed));
             }
-            Archive.write(files, config.output);
+            var artifact = Archive.write(files, config.output, analysisPlan != null);
             nativeSizes.forEach(report);
+            if (analysisPlan != null)
+                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
+                    "packaged", "native-registration", helperCount(nativePlan), targetAnalysis, artifact));
         } finally {
             try (var paths = Files.walk(workspace)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
             }
         }
         return ordinal;
+    }
+
+    private static int helperCount(AnalysisNative nativePlan) {
+        return nativePlan == null ? 0 : nativePlan.selectedCount();
+    }
+
+    private static AnalysisReport analysisReport(AnalysisConfig config, AnalysisCorpus.Plan plan,
+                                                 int applicationMethods, String status, String binding,
+                                                 int helpers, List<TargetAnalysis> nativeTargets,
+                                                 Archive.WrittenJar artifact) {
+        return new AnalysisReport(config.profile().option, Long.toUnsignedString(config.seed()),
+            config.resourceBudget(), config.entryBudget(), status, binding, plan.byteCount(), plan.entryCount(),
+            applicationMethods, helpers, nativeTargets, artifact);
     }
 
     static byte[] markers(String id, int count, long seed) {
@@ -200,6 +322,15 @@ final class Protector {
             + "\n" + config.llvmPasses + "\nformat 2").getBytes(StandardCharsets.UTF_8));
         if (config.minInstructions != 0)
             digest.update(("minimum instructions " + config.minInstructions).getBytes(StandardCharsets.UTF_8));
+        if (config.analysis.enabled()) {
+            digest.update("\nanalysis resistance format 1\n".getBytes(StandardCharsets.US_ASCII));
+            digest.update(ByteBuffer.allocate(6 * Integer.BYTES + 3 * Long.BYTES + 1)
+                .putInt(config.analysis.profile().id).putLong(config.analysis.seed())
+                .putInt(config.analysis.resourceBudget()).putInt(config.analysis.entryBudget())
+                .putInt(config.maxGrowth).putInt(config.markers).putLong(config.markerSeed)
+                .putInt(config.paddingCount).putLong(config.paddingSeed)
+                .put((byte) (config.skipUnsupported ? 1 : 0)).array());
+        }
         return "Runtime" + HexFormat.of().formatHex(digest.digest(), 0, 16);
     }
 
@@ -278,10 +409,16 @@ final class Protector {
     }
 
     private static String compile(ClassNode node, MethodNode method, String symbol) throws MethodCompiler.Unsupported {
+        return compile(node, method, symbol, null);
+    }
+
+    private static String compile(ClassNode node, MethodNode method, String symbol, AnalysisNative.Selection site)
+            throws MethodCompiler.Unsupported {
         int sort = Type.getReturnType(method.desc).getSort();
         if (sort == Type.ARRAY || sort == Type.OBJECT)
             throw new MethodCompiler.Unsupported("reference-return assignability requires JVM resolution");
-        return MethodCompiler.compile(node, method, symbol);
+        if (site == null || !site.enabled()) return MethodCompiler.compile(node, method, symbol);
+        return site.support() + MethodCompiler.compile(node, method, symbol, site.rootAttribute(), site::lower);
     }
 
     private static boolean matches(List<Pattern> patterns, String method) {
@@ -418,6 +555,10 @@ final class Protector {
             }
 
             """;
+    }
+
+    static String registrationExport(String loader, boolean bound) {
+        return "Java_" + jniMangle(loader) + "_" + (bound ? AnalysisRuntime.REGISTER : "register0");
     }
 
     private static String jniMangle(String name) {

@@ -15,7 +15,17 @@ public final class MethodCompiler {
         public Unsupported(String message) { super(message); }
     }
 
+    @FunctionalInterface
+    public interface WrappingOperation {
+        String lower(int instructionIndex, int opcode, String left, String right);
+    }
+
     public static String compile(ClassNode owner, MethodNode method, String symbol) throws Unsupported {
+        return compile(owner, method, symbol, "", null);
+    }
+
+    public static String compile(ClassNode owner, MethodNode method, String symbol,
+                                 String methodAttribute, WrappingOperation wrappingOperation) throws Unsupported {
         if (method.name.startsWith("<") || (method.access & (ACC_ABSTRACT | ACC_NATIVE)) != 0)
             throw new Unsupported("initializer, abstract method, or already native");
         if (!method.tryCatchBlocks.isEmpty())
@@ -32,7 +42,8 @@ public final class MethodCompiler {
         var code = new StringBuilder();
         var type = Type.getMethodType(method.desc);
         boolean isStatic = (method.access & ACC_STATIC) != 0;
-        code.append("static ").append(jni(type.getReturnType())).append(" JNICALL ").append(symbol)
+        code.append("static ").append(methodAttribute).append(jni(type.getReturnType()))
+            .append(" JNICALL ").append(symbol)
             .append("(JNIEnv *env, ").append(isStatic ? "jclass" : "jobject").append(" self");
         Type[] args = type.getArgumentTypes();
         for (int i = 0; i < args.length; i++)
@@ -74,7 +85,7 @@ public final class MethodCompiler {
             }
             if (insn.getOpcode() >= 0) {
                 try {
-                    emit(code, owner, method, insn, frames[i], type.getReturnType());
+                    emit(code, owner, method, insn, frames[i], type.getReturnType(), i, wrappingOperation);
                 } catch (Unsupported e) {
                     throw new Unsupported("instruction " + i + " (opcode " + insn.getOpcode() + "): " + e.getMessage());
                 }
@@ -84,7 +95,8 @@ public final class MethodCompiler {
     }
 
     private static void emit(StringBuilder code, ClassNode owner, MethodNode method, AbstractInsnNode insn,
-                             Frame<BasicValue> frame, Type result) throws Unsupported {
+                             Frame<BasicValue> frame, Type result, int instructionIndex,
+                             WrappingOperation wrappingOperation) throws Unsupported {
         int depth = frame.getStackSize();
         String out = "s[" + depth + "]";
         String a = "s[" + (depth - 1) + "]";
@@ -149,8 +161,12 @@ public final class MethodCompiler {
                     case IOR, LOR -> "|";
                     default -> "^";
                 };
-                line(code, b + f + " = bits_" + f.charAt(1) + "((" + u + ")" + b + f
-                    + " " + arithmetic + " (" + u + ")" + a + f + ");");
+                String left = "(" + u + ")" + b + f;
+                String right = "(" + u + ")" + a + f;
+                String expression = wrappingOperation == null ? null
+                    : wrappingOperation.lower(instructionIndex, op, left, right);
+                if (expression == null) expression = left + " " + arithmetic + " " + right;
+                line(code, b + f + " = bits_" + f.charAt(1) + "(" + expression + ");");
             }
             case INEG -> line(code, a + ".i = bits_i(0U - (uint32_t)" + a + ".i);");
             case LNEG -> line(code, a + ".j = bits_j(UINT64_C(0) - (uint64_t)" + a + ".j);");

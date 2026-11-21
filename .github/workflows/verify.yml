@@ -52,6 +52,18 @@ jobs:
             src/test/padding/GeneratorChecks.java src/test/padding/ArchiveCheck.java
           java -Xverify:all -cp 'build/padding-tests:build/install/native-obfuscator/lib/*' dev.nativeobfuscator.GeneratorChecks
           java -cp 'build/padding-tests:build/install/native-obfuscator/lib/*' ArchiveCheck --self-test
+      - name: Verify analysis configuration, manifest, and archive limits
+        shell: bash
+        run: |
+          mkdir -p build/analysis-unit
+          libs='build/install/native-obfuscator/lib/*'
+          javac --release 21 -cp "$libs" -d build/analysis-unit \
+            src/test/analysis/{AnalysisConfigTest,AnalysisCorpusTest,AnalysisManifestTest,AnalysisNativeTest,ArchiveLimitsTest,NativeBindingTest}.java
+          classpath="build/analysis-unit:$libs"
+          for test in AnalysisConfigTest AnalysisCorpusTest AnalysisNativeTest ArchiveLimitsTest NativeBindingTest; do
+            java -Xverify:all -cp "$classpath" "dev.nativeobfuscator.$test"
+          done
+          java -Xverify:all -cp "$classpath" AnalysisManifestTest
       - name: Verify Kotlin compilation and runtime
         shell: bash
         run: |
@@ -81,6 +93,14 @@ jobs:
           path: native-obfuscator-cli.tar.gz
           if-no-files-found: error
           retention-days: 3
+      - name: Locate a supported LLVM disassembler
+        shell: bash
+        run: |
+          if ! command -v llvm-objdump >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y llvm
+          fi
+          printf 'LLVM_OBJDUMP=%s\n' "$(command -v llvm-objdump)" >> "$GITHUB_ENV"
       - name: Cross-compile the arithmetic fixture
         shell: bash
         run: |
@@ -94,6 +114,19 @@ jobs:
           build/install/native-obfuscator/bin/native-obfuscator protect \
             --input fixture/original.jar --output fixture/protected.jar --include 'Arithmetic#calc*' \
             --unsupported retain --target all --zig "$PWD/zig-x86_64-linux-0.15.2/zig"
+      - name: Verify and package the analysis profiles for the runtime matrix
+        shell: bash
+        run: |
+          zig="$PWD/zig-x86_64-linux-0.15.2/zig"
+          python3 src/test/analysis/verify.py --zig "$zig"
+          python3 src/test/analysis/verify-concurrent.py --zig "$zig"
+          python3 src/test/analysis/verify-targets.py --zig "$zig"
+          for profile in balanced maximum; do
+            common=(--input fixture/original.jar --include 'Arithmetic#calc*' --unsupported retain
+              --target all --analysis-resistance "$profile" --analysis-seed 42 --padding off)
+            build/install/native-obfuscator/bin/native-obfuscator harden "${common[@]}" \
+              --output "fixture/$profile.jar" --zig "$zig"
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cross-built-fixture
@@ -132,8 +165,10 @@ jobs:
         shell: bash
         run: |
           java -Xverify:all -jar fixture/original.jar > original.txt
-          java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED -jar fixture/protected.jar > protected.txt
-          cmp original.txt protected.txt
+          for artifact in protected balanced maximum; do
+            java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED -jar "fixture/$artifact.jar" > "$artifact.txt"
+            cmp original.txt "$artifact.txt"
+          done
       - if: runner.os == 'Windows'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
