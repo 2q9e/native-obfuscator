@@ -1,14 +1,17 @@
 package dev.nativeobfuscator;
 
+import dev.nativeobfuscator.runtime.AnalysisManifest;
+import java.util.Objects;
+
 record AnalysisConfig(Profile profile, long seed, int resourceBudget, int entryBudget) {
-    static final int MIN_RESOURCE_BUDGET = 256;
-    static final int MIN_ENTRY_BUDGET = 2;
+    private static final int MIN_RESOURCE_BUDGET = AnalysisCorpus.MIN_BYTE_BUDGET;
+    private static final int MIN_ENTRY_BUDGET = AnalysisCorpus.MIN_ENTRY_BUDGET;
     static final AnalysisConfig OFF = new AnalysisConfig(Profile.OFF, 0, 0, 0);
 
     enum Profile {
         OFF(0, "off", 0, 0),
-        BALANCED(1, "balanced", 256 * 1024, 32),
-        MAXIMUM(2, "maximum", 1024 * 1024, 128);
+        BALANCED(1, "balanced", AnalysisManifest.BALANCED_BYTES, AnalysisManifest.BALANCED_ENTRIES),
+        MAXIMUM(2, "maximum", AnalysisManifest.MAXIMUM_BYTES, AnalysisManifest.MAXIMUM_ENTRIES);
 
         final int id;
         final String option;
@@ -34,6 +37,7 @@ record AnalysisConfig(Profile profile, long seed, int resourceBudget, int entryB
     }
 
     AnalysisConfig {
+        Objects.requireNonNull(profile, "analysis profile");
         if (profile == Profile.OFF) {
             if (seed != 0 || resourceBudget != 0 || entryBudget != 0)
                 throw new IllegalArgumentException("Analysis settings require an enabled profile");
