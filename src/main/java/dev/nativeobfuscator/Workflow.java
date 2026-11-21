@@ -57,8 +57,10 @@ final class Workflow {
                               int nativeLibraryCount, List<String> nativeTargets,
                               List<String> expectedMethods, List<String> verifiedMethods,
                               List<String> expectedGeneratedClasses, List<String> errors,
-                              AnalysisVerification.Report analysis) {
+                              AnalysisVerification.Report analysis,
+                              List<AnalysisNativeVerification.TargetEvidence> nativeHelpers) {
         VerificationReport {
+            nativeHelpers = List.copyOf(nativeHelpers);
             nativeTargets = List.copyOf(nativeTargets);
             expectedMethods = List.copyOf(expectedMethods);
             verifiedMethods = List.copyOf(verifiedMethods);
@@ -71,28 +73,29 @@ final class Workflow {
 
     static VerificationReport verify(Path originalJar, Path stagedJar,
                                      Set<String> expectedNativeMethods,
-                                     Set<String> expectedTargets) throws IOException {
+                                     Set<String> expectedTargets) throws IOException, InterruptedException {
         return verify(originalJar, stagedJar, expectedNativeMethods, expectedTargets, 0, 0);
     }
 
     static VerificationReport verify(Path originalJar, Path stagedJar,
                                      Set<String> expectedNativeMethods, Set<String> expectedTargets,
-                                     int paddingCount, long paddingSeed) throws IOException {
+                                     int paddingCount, long paddingSeed) throws IOException, InterruptedException {
         return verify(originalJar, stagedJar, expectedNativeMethods, expectedTargets, paddingCount, paddingSeed, 0, 0);
     }
 
     static VerificationReport verify(Path originalJar, Path stagedJar,
                                      Set<String> expectedNativeMethods, Set<String> expectedTargets,
-                                     int paddingCount, long paddingSeed, int markers, long markerSeed) throws IOException {
+                                     int paddingCount, long paddingSeed, int markers, long markerSeed)
+            throws IOException, InterruptedException {
         return verify(originalJar, stagedJar, expectedNativeMethods, expectedTargets, paddingCount, paddingSeed,
-            markers, markerSeed, AnalysisConfig.OFF);
+            markers, markerSeed, AnalysisConfig.OFF, null);
     }
 
     static VerificationReport verify(Path originalJar, Path stagedJar,
                                      Set<String> expectedNativeMethods,
                                      Set<String> expectedTargets,
                                      int paddingCount, long paddingSeed, int markers, long markerSeed,
-                                     AnalysisConfig analysis) throws IOException {
+                                     AnalysisConfig analysis, String clang) throws IOException, InterruptedException {
         if (markers < 0 || markers > 1000) throw new IllegalArgumentException("markers must be between 0 and 1000");
         Path original = regularFile(originalJar, "Original JAR");
         Path staged = regularFile(stagedJar, "Staged JAR");
@@ -108,14 +111,14 @@ final class Workflow {
             originalEntries = Archive.read(original);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
-                List.of(), 0, List.of(), Set.of(), List.of("Original JAR: " + failure.getMessage()), null);
+                List.of(), 0, List.of(), Set.of(), List.of("Original JAR: " + failure.getMessage()), null, List.of());
         }
         try {
             Archive.checkFileSize(Files.size(staged));
             stagedEntries = Archive.read(staged);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
-                List.of(), 0, List.of(), Set.of(), List.of("Staged JAR: " + failure.getMessage()), null);
+                List.of(), 0, List.of(), Set.of(), List.of("Staged JAR: " + failure.getMessage()), null, List.of());
         }
         if (!sha256(original).equals(originalHash))
             errors.add("Original JAR changed during verification");
@@ -261,6 +264,7 @@ final class Workflow {
         }
 
         AnalysisVerification.Report analysisReport = null;
+        List<AnalysisNativeVerification.TargetEvidence> nativeHelpers = List.of();
         if (runtimeIds.size() == 1) {
             String runtimeId = runtimeIds.first();
             String loader = "dev/nativeobfuscator/runtime/" + runtimeId;
@@ -287,6 +291,8 @@ final class Workflow {
                 var verified = AnalysisVerification.verify(analysis, resourceRoot, stagedEntries, librariesByTarget, errors);
                 analysisReport = verified.report();
                 allowedAnalysisResources = verified.allowedEntries();
+                nativeHelpers = AnalysisNativeVerification.verify(analysis, originalEntries, expected, runtimeId,
+                    stagedEntries, librariesByTarget, errors, clang);
             }
             String markerPath = resourceRoot + "markers.txt";
             byte[] actualMarkers = stagedEntries.get(markerPath);
@@ -331,7 +337,7 @@ final class Workflow {
 
         return verification(originalHash, stagedHash, expected,
             new ArrayList<>(addedNative), librariesByTarget.size(),
-            new ArrayList<>(librariesByTarget.keySet()), generatedEntries.keySet(), errors, analysisReport);
+            new ArrayList<>(librariesByTarget.keySet()), generatedEntries.keySet(), errors, analysisReport, nativeHelpers);
     }
 
     private static boolean sameClass(byte[] expected, byte[] actual) {
@@ -518,10 +524,10 @@ final class Workflow {
     private static VerificationReport verification(String originalHash, String stagedHash,
             Set<String> expectedMethods, List<String> verifiedMethods, int libraryCount,
             List<String> targets, Set<String> generatedClasses, List<String> errors,
-            AnalysisVerification.Report analysis) {
+            AnalysisVerification.Report analysis, List<AnalysisNativeVerification.TargetEvidence> nativeHelpers) {
         return new VerificationReport(errors.isEmpty(), false, originalHash, stagedHash,
             libraryCount, targets, new ArrayList<>(new TreeSet<>(expectedMethods)),
-            verifiedMethods, generatedClasses.stream().sorted().toList(), errors, analysis);
+            verifiedMethods, generatedClasses.stream().sorted().toList(), errors, analysis, nativeHelpers);
     }
 
     private static void verifyRuntimeClass(byte[] bytes, String runtimeId, boolean analysis,

@@ -122,7 +122,7 @@ public final class Main {
         decisions.stream().filter(decision -> decision.result().equals("selected"))
             .map(Protector.Decision::method).forEach(expected::add);
         var report = Workflow.verify(config.input(), config.output(), expected, targetKeys(config.targets()),
-            config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis());
+            config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(), config.clang());
         System.out.println(gson.toJson(Map.of("status", report.structurallyValid() ? "staged" : "verification-failed",
             "generatedMethods", count, "verification", report,
             "nextSteps", report.structurallyValid()
@@ -138,7 +138,7 @@ public final class Main {
         Map<String, String> options = workflowOptions(arguments, true, false, false, false);
         String staged = required(options, "--staged");
         Coverage coverage = analyzeCoverage(arguments, gson);
-        var report = verifyCoverage(coverage, Path.of(staged));
+        var report = verifyCoverage(coverage, Path.of(staged), options.get("--clang"));
         System.out.println(gson.toJson(Map.of("status", report.structurallyValid() ? "verified" : "verification-failed",
             "verification", report,
             "nextSteps", report.structurallyValid()
@@ -153,7 +153,7 @@ public final class Main {
         String staged = required(options, "--staged");
         String release = required(options, "--output");
         Coverage coverage = analyzeCoverage(arguments, gson);
-        var verification = verifyCoverage(coverage, Path.of(staged));
+        var verification = verifyCoverage(coverage, Path.of(staged), options.get("--clang"));
         if (!verification.structurallyValid()) {
             System.out.println(gson.toJson(Map.of("status", "verification-failed", "verification", verification,
                 "nextSteps", "Fix the reported structural issues before applying this JAR.")));
@@ -184,10 +184,11 @@ public final class Main {
             ? loadConfig(arguments[0], Path.of(arguments[2])) : arguments;
     }
 
-    private static Workflow.VerificationReport verifyCoverage(Coverage coverage, Path staged) throws IOException {
+    private static Workflow.VerificationReport verifyCoverage(Coverage coverage, Path staged, String clang)
+            throws IOException, InterruptedException {
         var config = coverage.config;
         return Workflow.verify(config.input(), staged, coverage.methods, verificationTargets(config),
-            config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis());
+            config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(), clang);
     }
 
     private static int runProtection(Protector.Config config, Gson gson, Consumer<Protector.Decision> collect)
@@ -249,7 +250,7 @@ public final class Main {
             boolean allowOutput, boolean allowStateDir, boolean allowConfirm) {
         var options = new HashMap<String, String>();
         Set<String> coverageValues = coverageOptions();
-        Set<String> ignoredValues = Set.of("--zig", "--clang", "--llvm-opt", "--llvm-plugin",
+        Set<String> ignoredValues = Set.of("--zig", "--llvm-opt", "--llvm-plugin",
             "--llvm-passes", "--profile", "--seed", "--max-growth");
         for (int i = 1; i < arguments.length; i++) {
             String key = arguments[i];
@@ -259,7 +260,8 @@ public final class Main {
             }
             if (key.equals("--staged") && allowStaged
                 || key.equals("--output") && allowOutput
-                || key.equals("--state-dir") && allowStateDir) {
+                || key.equals("--state-dir") && allowStateDir
+                || key.equals("--clang") && allowStaged) {
                 if (++i == arguments.length) throw new IllegalArgumentException("Missing value for " + key);
                 if (options.putIfAbsent(key, arguments[i]) != null)
                     throw new IllegalArgumentException("Repeated option " + key);
