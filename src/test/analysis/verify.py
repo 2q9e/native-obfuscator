@@ -183,6 +183,10 @@ def check_mutations(cli, execute, work, original, common, protected, donor):
     reject_case("replaced-resource", {**protected, resource: replacement}, "Analysis resources", "checksum mismatch")
     reject_case("swapped-resources", {**protected, resource: protected[other], other: protected[resource]},
                 "Analysis resources", "Cannot verify")
+    oversize = b"x" * (32 * 1024 + 1)
+    reject_case("oversized-resource", {**protected, resource: oversize},
+                "Analysis resources exceed the configured entry or byte limits", "length mismatch")
+
     extra = root + "analysis/extra.txt"
     reject_case("extra-resource", {**protected, extra: b"unexpected\n"}, "analysis/extra.txt")
     extra_sidecar = library + ".extra.sha256"
