@@ -52,15 +52,22 @@ jobs:
             src/test/padding/GeneratorChecks.java src/test/padding/ArchiveCheck.java
           java -Xverify:all -cp 'build/padding-tests:build/install/native-obfuscator/lib/*' dev.nativeobfuscator.GeneratorChecks
           java -cp 'build/padding-tests:build/install/native-obfuscator/lib/*' ArchiveCheck --self-test
+      - name: Verify array joins in renamed and adversarial classfiles
+        shell: bash
+        run: |
+          mkdir -p build/array-join-unit
+          libs="$PWD/build/install/native-obfuscator/lib/*"
+          javac --release 21 -Xlint:all -Werror -cp "$libs" -d build/array-join-unit src/test/modern/ArrayJoinTest.java
+          java -Xverify:all -cp "$PWD/build/array-join-unit:$libs" ArrayJoinTest build/array-join-runtime
       - name: Verify analysis configuration, manifest, and archive limits
         shell: bash
         run: |
           mkdir -p build/analysis-unit
           libs='build/install/native-obfuscator/lib/*'
           javac --release 21 -cp "$libs" -d build/analysis-unit \
-            src/test/analysis/{AnalysisConfigTest,AnalysisCorpusTest,AnalysisManifestTest,AnalysisNativeTest,ArchiveLimitsTest,NativeBindingTest}.java
+            src/test/analysis/{AnalysisConfigTest,AnalysisCorpusTest,AnalysisDecoysTest,AnalysisManifestTest,AnalysisNativeTest,ArchiveLimitsTest,NativeBindingTest}.java
           classpath="build/analysis-unit:$libs"
-          for test in AnalysisConfigTest AnalysisCorpusTest AnalysisNativeTest ArchiveLimitsTest NativeBindingTest; do
+          for test in AnalysisConfigTest AnalysisCorpusTest AnalysisDecoysTest AnalysisNativeTest ArchiveLimitsTest NativeBindingTest; do
             java -Xverify:all -cp "$classpath" "dev.nativeobfuscator.$test"
           done
           java -Xverify:all -cp "$classpath" AnalysisManifestTest
