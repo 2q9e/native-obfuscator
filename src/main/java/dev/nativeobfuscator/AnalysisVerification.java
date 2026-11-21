@@ -28,6 +28,26 @@ final class AnalysisVerification {
 
     private AnalysisVerification() {}
 
+    static Archive.EntryCheck archiveLimits(AnalysisConfig config) {
+        return new Archive.EntryCheck() {
+            private long bytes;
+            private int entries;
+
+            @Override
+            public void accept(String name, long expandedBytes) throws IOException {
+                String prefix = "META-INF/native-obfuscator/";
+                if (!name.startsWith(prefix)) return;
+                int scopeEnd = name.indexOf('/', prefix.length());
+                if (scopeEnd < 0 || !name.startsWith(AnalysisManifest.PREFIX, scopeEnd + 1)) return;
+                if (expandedBytes == 0 || expandedBytes > AnalysisManifest.MAX_ENTRY_BYTES
+                    || expandedBytes > config.resourceBudget() - bytes || entries == config.entryBudget())
+                    throw new IOException("Analysis resources exceed the configured entry or byte limits: " + name);
+                bytes += expandedBytes;
+                entries++;
+            }
+        };
+    }
+
     static Result verify(AnalysisConfig config, String loader, String root, Map<String, byte[]> staged,
                          Map<String, String> librariesByTarget, List<String> errors) throws IOException {
         var plan = AnalysisCorpus.plan(config.profile().id, config.seed(), config.resourceBudget(), config.entryBudget());

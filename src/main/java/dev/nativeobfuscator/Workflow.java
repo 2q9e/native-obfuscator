@@ -115,7 +115,8 @@ final class Workflow {
         }
         try {
             Archive.checkFileSize(Files.size(staged));
-            stagedEntries = Archive.read(staged);
+            stagedEntries = analysis.enabled() ? Archive.read(staged, AnalysisVerification.archiveLimits(analysis))
+                : Archive.read(staged);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
                 List.of(), 0, List.of(), Set.of(), List.of("Staged JAR: " + failure.getMessage()), null, List.of());

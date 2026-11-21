@@ -31,7 +31,16 @@ final class Archive {
 
     private Archive() {}
 
+    @FunctionalInterface
+    interface EntryCheck {
+        void accept(String name, long expandedBytes) throws IOException;
+    }
+
     static Map<String, byte[]> read(Path path) throws IOException {
+        return read(path, (name, size) -> {});
+    }
+
+    static Map<String, byte[]> read(Path path, EntryCheck additionalCheck) throws IOException {
         var files = new LinkedHashMap<String, byte[]>();
         long total = 0;
         try (var zip = new ZipFile(path.toFile())) {
@@ -45,6 +54,7 @@ final class Archive {
                 if (name.toUpperCase(Locale.ROOT).matches("META-INF/([^/]+\\.(SF|RSA|DSA|EC)|SIG-[^/]+)"))
                     throw new IOException("Signed input JAR must be supplied before signing: " + name);
                 checkExpandedSize(name, entry.getSize(), total);
+                additionalCheck.accept(name, entry.getSize());
                 try (var input = zip.getInputStream(entry)) {
                     byte[] data = input.readNBytes((int) entry.getSize() + 1);
                     if (data.length != entry.getSize())
