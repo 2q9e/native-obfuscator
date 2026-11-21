@@ -40,10 +40,14 @@ public final class AnalysisManifest {
     private AnalysisManifest() {}
 
     public static int encodedSize(Collection<String> relativePaths) {
+        if (relativePaths.size() >= MAXIMUM_ENTRIES)
+            throw new IllegalArgumentException("Analysis manifest entry count exceeds its limit");
         int size = HEADER_BYTES;
         for (String path : relativePaths) {
             if (!isResourcePath(path)) throw new IllegalArgumentException("Invalid analysis resource path " + path);
-            size = Math.addExact(size, RECORD_BYTES + path.length());
+            size += RECORD_BYTES + path.length();
+            if (size > MAX_ENTRY_BYTES)
+                throw new IllegalArgumentException("Analysis manifest exceeds per-entry size limit");
         }
         return size;
     }
@@ -60,6 +64,7 @@ public final class AnalysisManifest {
             if (bytes == null) throw new IOException("Missing analysis resource " + path);
             checkLength(path, bytes.length);
             manifestSize += RECORD_BYTES + path.length();
+            checkManifestSize(manifestSize);
             total += RECORD_BYTES + path.length() + bytes.length;
             checkTotal(total, byteBudget);
         }
@@ -103,10 +108,13 @@ public final class AnalysisManifest {
             lengths = new int[entries];
             checksums = new byte[entries][DIGEST_BYTES];
             long total = HEADER_BYTES;
+            int manifestSize = HEADER_BYTES;
             String previous = "";
             for (int i = 0; i < entries; i++) {
                 int pathLength = input.readUnsignedByte();
                 if (pathLength < MIN_PATH_BYTES) throw new IOException("Invalid analysis resource path length");
+                manifestSize += RECORD_BYTES + pathLength;
+                checkManifestSize(manifestSize);
                 total += RECORD_BYTES + pathLength;
                 checkTotal(total, byteBudget);
 
@@ -178,6 +186,10 @@ public final class AnalysisManifest {
     private static void checkLength(String path, int length) throws IOException {
         if (length <= 0 || length > MAX_ENTRY_BYTES)
             throw new IOException("Invalid analysis resource length for " + path);
+    }
+
+    private static void checkManifestSize(int bytes) throws IOException {
+        if (bytes > MAX_ENTRY_BYTES) throw new IOException("Analysis manifest exceeds per-entry size limit");
     }
 
     private static void checkTotal(long total, int byteBudget) throws IOException {
