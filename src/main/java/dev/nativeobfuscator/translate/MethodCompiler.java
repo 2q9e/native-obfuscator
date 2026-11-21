@@ -263,9 +263,46 @@ public final class MethodCompiler {
     private static final class TypedVerifier extends BasicVerifier {
         TypedVerifier() { super(ASM9); }
         @Override public BasicValue newValue(Type type) {
-            if (type != null && (type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT))
+            if (type != null && (type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT || isNarrow(type)))
                 return new BasicValue(type);
             return super.newValue(type);
+        }
+        @Override public BasicValue copyOperation(AbstractInsnNode insn, BasicValue value) throws AnalyzerException {
+            if ((insn.getOpcode() == ILOAD || insn.getOpcode() == ISTORE) && isNarrow(value.getType())) return value;
+            return super.copyOperation(insn, value);
+        }
+        @Override public BasicValue newOperation(AbstractInsnNode insn) throws AnalyzerException {
+            BasicValue result = super.newOperation(insn);
+            int opcode = insn.getOpcode();
+            if (opcode >= ICONST_M1 && opcode <= ICONST_5) return integralConstant(opcode - ICONST_0);
+            if (opcode == BIPUSH || opcode == SIPUSH) return integralConstant(((IntInsnNode) insn).operand);
+            if (insn instanceof LdcInsnNode constant && constant.cst instanceof Integer number) return integralConstant(number);
+            return result;
+        }
+        @Override public BasicValue unaryOperation(AbstractInsnNode insn, BasicValue value) throws AnalyzerException {
+            BasicValue result = super.unaryOperation(insn, value);
+            return switch (insn.getOpcode()) {
+                case I2B -> newValue(Type.BYTE_TYPE);
+                case I2C -> newValue(Type.CHAR_TYPE);
+                case I2S -> newValue(Type.SHORT_TYPE);
+                default -> result;
+            };
+        }
+        @Override public BasicValue binaryOperation(AbstractInsnNode insn, BasicValue left, BasicValue right) throws AnalyzerException {
+            BasicValue result = super.binaryOperation(insn, left, right);
+            return switch (insn.getOpcode()) {
+                case BALOAD -> newValue(Type.getType("[Z").equals(left.getType()) ? Type.BOOLEAN_TYPE : Type.BYTE_TYPE);
+                case CALOAD -> newValue(Type.CHAR_TYPE);
+                case SALOAD -> newValue(Type.SHORT_TYPE);
+                default -> result;
+            };
+        }
+        private BasicValue integralConstant(int value) {
+            if (value == 0 || value == 1) return newValue(Type.BOOLEAN_TYPE);
+            if (value == (byte) value) return newValue(Type.BYTE_TYPE);
+            if (value == (short) value) return newValue(Type.SHORT_TYPE);
+            if (value == (char) value) return newValue(Type.CHAR_TYPE);
+            return BasicValue.INT_VALUE;
         }
         @Override protected boolean isArrayValue(BasicValue value) {
             return value.getType() != null && (value.getType().getSort() == Type.ARRAY || isNull(value.getType()));
@@ -279,6 +316,7 @@ public final class MethodCompiler {
         }
         @Override protected boolean isSubTypeOf(BasicValue value, BasicValue expected) {
             if (value.equals(expected)) return true;
+            if (isStackInt(value.getType()) && isStackInt(expected.getType())) return true;
             if (value.isReference() && expected.isReference()) {
                 if (isNull(value.getType())) return true;
                 return referenceSubtype(value.getType(), expected.getType());
@@ -287,6 +325,7 @@ public final class MethodCompiler {
         }
         @Override public BasicValue merge(BasicValue left, BasicValue right) {
             if (left.equals(right)) return left;
+            if (isStackInt(left.getType()) && isStackInt(right.getType())) return BasicValue.INT_VALUE;
             if (left.isReference() && right.isReference()) {
                 if (isNull(left.getType())) return right;
                 if (isNull(right.getType())) return left;
@@ -294,6 +333,14 @@ public final class MethodCompiler {
             }
             return BasicValue.UNINITIALIZED_VALUE;
         }
+    }
+
+    private static boolean isNarrow(Type type) {
+        return type != null && type.getSort() >= Type.BOOLEAN && type.getSort() <= Type.SHORT;
+    }
+
+    private static boolean isStackInt(Type type) {
+        return Type.INT_TYPE.equals(type) || isNarrow(type);
     }
 
     private static boolean referenceSubtype(Type actual, Type expected) {
@@ -504,6 +551,14 @@ public final class MethodCompiler {
         referenceResult(method, returned);
         Type[] parameters = Type.getArgumentTypes(insn.desc);
         int base = frame.getStackSize() - parameters.length - (statik ? 0 : 1);
+        // JVM int-stack arguments can contain values the corresponding JNI type would truncate.
+        for (int i = 0; i < parameters.length; i++) {
+            Type parameter = parameters[i];
+            Type actual = frame.getStack(base + (statik ? 0 : 1) + i).getType();
+            if (isNarrow(parameter) && !parameter.equals(actual) && !Type.BOOLEAN_TYPE.equals(actual)
+                && !(Type.SHORT_TYPE.equals(parameter) && Type.BYTE_TYPE.equals(actual)))
+                throw new Unsupported("argument " + (i + 1) + " is not proven to fit JNI descriptor " + parameter);
+        }
         String receiver = statik ? "declaring" : stack(base) + ".r";
         if (!statik) nullCheck(code, receiver, result);
         line(code, "{ jclass declaring = (*env)->FindClass(env, " + literal(owner.name) + ");");

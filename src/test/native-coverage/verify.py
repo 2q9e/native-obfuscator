@@ -38,7 +38,7 @@ original = work / "original.jar"
 protected = work / "protected.jar"
 run([executable("jar"), "--create", "--file", original, "--main-class", "Coverage", "-C", classes, "."])
 tool = [executable("java"), "-cp", args.distribution.resolve() / "lib" / "*", "dev.nativeobfuscator.Main"]
-report = run(tool + ["protect", "--input", original, "--output", protected, "--include", "Coverage#cov*", "--include", "RawOps#cov*", "--include", "Coverage#reject*", "--unsupported", "retain", "--padding", "off"] + flags)
+report = run(tool + ["protect", "--input", original, "--output", protected, "--include", "Coverage#cov*", "--include", "RawOps#cov*", "--include", "Coverage#reject*", "--include", "RawOps#reject*", "--unsupported", "retain", "--padding", "off"] + flags)
 (work / "report.jsonl").write_text(report.stdout)
 (work / "build.log").write_text(report.stderr)
 decisions = [json.loads(line) for line in report.stdout.splitlines()]
@@ -50,11 +50,12 @@ native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declaratio
 assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d["result"] == "retained"}
-assert set(retained) == {"rejectExternal", "rejectAllocation", "rejectHandler", "rejectReferenceLoop", "rejectVolatile", "rejectExternalField"}, retained
+assert set(retained) == {"rejectExternal", "rejectAllocation", "rejectHandler", "rejectReferenceLoop", "rejectVolatile", "rejectExternalField", "rejectRawCall"}, retained
 assert "outside the declaring class" in retained["rejectExternal"]
 assert "memory-model barriers" in retained["rejectVolatile"]
 assert "exception handlers" in retained["rejectHandler"]
 assert "local-reference lifetime" in retained["rejectReferenceLoop"]
+assert "not proven to fit JNI descriptor B" in retained["rejectRawCall"]
 original_result = run([executable("java"), "-Xverify:all", "-jar", original])
 protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED", "-jar", protected])
 (work / "original.txt").write_text(original_result.stdout)
