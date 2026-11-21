@@ -127,6 +127,7 @@ public class Coverage {
         show(() -> RawOps.covReferenceCapacity(null));
         show(() -> RawOps.covReferenceCapacity(new Object[0]));
         show(() -> new RawOps().covSpecial(Integer.MIN_VALUE));
+        show(() -> RawOps.rejectRawCall(257));
         show(() -> covCallArray(new int[]{-17}, 0));
         show(() -> covCallArray(null, 0));
         show(() -> covCallArray(new int[0], 0));
