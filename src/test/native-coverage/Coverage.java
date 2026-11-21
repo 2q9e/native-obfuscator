@@ -1,0 +1,171 @@
+import java.util.Random;
+
+/** Differential fixture: helper targets remain Java unless explicitly selected. */
+public class Coverage {
+    private int count = 7;
+    private long wide = Long.MIN_VALUE;
+    private Object object;
+    private static long total = 9;
+    private static volatile int published;
+    private static Object shared;
+    private static int effects;
+    private byte signedByte;
+    private char unsignedChar;
+    private short signedShort;
+    private boolean flag;
+    private float fraction;
+    private double precise;
+
+    public static long covSummary(int[] values) {
+        long sum = 0;
+        for (int i = 0; i < values.length; i++) sum += values[i];
+        return sum;
+    }
+    public static int covInt(int[] a, int i, int v) { a[i] = v; return a[i]; }
+    public static long covLong(long[] a, int i, long v) { return a[i] += v; }
+    public static float covFloat(float[] a, int i, float v) { a[i] = v; return a[i]; }
+    public static double covDouble(double[] a, int i, double v) { return a[i] += v; }
+    public static int covByte(byte[] a, int i, int v) { a[i] = (byte)v; return a[i]; }
+    public static int covBoolean(boolean[] a, int i, boolean v) { a[i] = v; return a[i] ? 1 : 0; }
+    public static int covChar(char[] a, int i, int v) { a[i] = (char)v; return a[i]; }
+    public static int covShort(short[] a, int i, int v) { a[i] = (short)v; return a[i]; }
+    public static boolean covReference(Object[] a, int i, Object v) { a[i] = v; return a[i] == v; }
+    public static boolean covNested(int[][] a, int i, int[] v) { a[i] = v; return a[i] == v; }
+    public static int covLength(Object[] a) { return a.length; }
+    public int covFields(Object v, int delta) { object = v; count += delta; wide += delta; return object == v ? count + (int)wide : -1; }
+    public static boolean covStaticFields(Object v, long delta) { shared = v; total += delta; return shared == v && total != 0; }
+    public static int covReceiverField(Coverage receiver) { return receiver.count; }
+    public double covTypedFields(byte b, char c, short s, boolean z, float f, double d) {
+        signedByte = b; unsignedChar = c; signedShort = s; flag = z; fraction = f; precise = d;
+        return signedByte + unsignedChar + signedShort + (flag ? 1 : 0) + fraction + precise;
+    }
+    public static int covNarrowCalls(byte b, char c, short s, boolean z) { return byteCall(b) + charCall(c) + shortCall(s) + (booleanCall(z) ? 1 : 0); }
+    private static byte byteCall(byte b) { return b; }
+    private static char charCall(char c) { return c; }
+    private static short shortCall(short s) { return s; }
+    private static boolean booleanCall(boolean z) { return z; }
+    public static float covFloatCall(float f) { return floatCall(f); }
+    private static float floatCall(float f) { return f; }
+    public static double covDoubleCall(double d) { return doubleCall(d); }
+    private static double doubleCall(double d) { return d; }
+    public static long covStaticCall(long a, double b, byte c, char d, short e, boolean f) { return helper(a, b, c, d, e, f); }
+    private static long helper(long a, double b, byte c, char d, short e, boolean f) { return a + (long)b + c + d + e + (f ? 1 : 0); }
+    public int covVirtualCall(Coverage receiver, int a) { return receiver.dispatch(a); }
+    public int dispatch(int a) { return count + a; }
+    public int covPrivateCall(int a) { return privateCall(a); }
+    private int privateCall(int a) { return count - a; }
+    public static int covCallArray(int[] v, int i) { return arrayIdentity(v)[i]; }
+    private static int[] arrayIdentity(int[] v) { return v; }
+    public static boolean covCallIdentity(Object v) { return identity(v) == v; }
+    private static Object identity(Object v) { return v; }
+    public static int covPending(int denominator) { throwing(denominator); effects++; return effects; }
+    private static void throwing(int denominator) { effects += 10 / denominator; }
+    public static int covPendingArray(int[] a, int i) { int value = a[i]; effects++; return value; }
+
+    // These must be retained, with explicit diagnostics.
+    public static int rejectExternalField() { return System.out == null ? 0 : 1; }
+    public static int rejectVolatile() { return published; }
+    public static int rejectExternal(String value) { return value.length(); }
+    public static Object rejectAllocation() { return new Object(); }
+    public static int rejectHandler(int[] a) { try { return a[0]; } catch (NullPointerException e) { return 3; } }
+    public static int rejectReferenceLoop(Object[] a) { int n = 0; for (int i = 0; i < a.length; i++) if (a[i] != null) n++; return n; }
+
+    interface Attempt { Object run() throws Throwable; }
+    private static void show(Attempt attempt) {
+        try { System.out.println("value:" + attempt.run() + ":effects=" + effects); }
+        catch (Throwable error) { System.out.println("exception:" + error.getClass().getName() + ":effects=" + effects); }
+    }
+    public static void main(String[] args) {
+        Object token = new Object();
+        Coverage instance = new Coverage();
+        Coverage child = new Coverage() {
+            @Override public int dispatch(int a) { return 100 + a; }
+            public int privateCall(int a) { return 200 + a; }
+        };
+        show(() -> covSummary(new int[]{Integer.MIN_VALUE, -7, 0, Integer.MAX_VALUE}));
+        show(() -> covSummary(null));
+        show(() -> covSummary(new int[0]));
+        for (int index : new int[]{-1, 0, 1, Integer.MAX_VALUE}) {
+            show(() -> covInt(new int[1], index, Integer.MIN_VALUE));
+            show(() -> covLong(new long[]{Long.MAX_VALUE}, index, 1));
+            show(() -> covFloat(new float[1], index, Float.NaN));
+            show(() -> covDouble(new double[]{-0.0}, index, -0.0));
+            show(() -> covByte(new byte[1], index, 255));
+            show(() -> covBoolean(new boolean[1], index, true));
+            show(() -> covChar(new char[1], index, -1));
+            show(() -> covShort(new short[1], index, 65535));
+            show(() -> covReference(new Object[1], index, token));
+            show(() -> covNested(new int[1][], index, new int[]{1}));
+        }
+        show(() -> covInt(null, 0, 1));
+        show(() -> covLong(null, 0, 1));
+        show(() -> covFloat(null, 0, 1));
+        show(() -> covDouble(null, 0, 1));
+        show(() -> covByte(null, 0, 1));
+        show(() -> covBoolean(null, 0, true));
+        show(() -> covChar(null, 0, 1));
+        show(() -> covShort(null, 0, 1));
+        show(() -> covReference(null, 0, token));
+        show(() -> covNested(null, 0, null));
+        show(() -> covReference(new String[1], 0, token));
+        show(() -> covReference(new String[0], 0, token));
+        show(() -> covReference(new String[1], 0, null));
+        show(() -> covLength(null));
+        show(() -> covLength(new Object[4]));
+        show(() -> instance.covFields(token, Integer.MAX_VALUE));
+        show(() -> instance.covFields(null, 1));
+        show(() -> covStaticFields(token, Long.MAX_VALUE));
+        show(() -> covStaticFields(null, 1));
+        show(() -> covReceiverField(null));
+        show(() -> covReceiverField(instance));
+        show(() -> covStaticCall(Long.MAX_VALUE, Double.NaN, (byte)-128, (char)65535, (short)-32768, true));
+        show(() -> instance.covVirtualCall(child, 4));
+        show(() -> instance.covVirtualCall(null, 4));
+        show(() -> instance.covPrivateCall(10));
+        show(() -> child.covPrivateCall(10));
+        show(() -> RawOps.covReferenceCapacity(new Object[]{token}));
+        show(() -> RawOps.covReferenceCapacity(null));
+        show(() -> RawOps.covReferenceCapacity(new Object[0]));
+        show(() -> new RawOps().covSpecial(Integer.MIN_VALUE));
+        show(() -> covCallArray(new int[]{-17}, 0));
+        show(() -> covCallArray(null, 0));
+        show(() -> covCallArray(new int[0], 0));
+        show(() -> covCallIdentity(token));
+        show(() -> covCallIdentity(null));
+        show(() -> covPending(0));
+        show(() -> covPending(2));
+        show(() -> covPendingArray(null, 0));
+        show(() -> covPendingArray(new int[0], 0));
+        show(() -> covPendingArray(new int[]{42}, 0));
+        show(() -> instance.covTypedFields((byte)-128, (char)65535, (short)-32768, true, -0.0f, -0.0));
+        show(() -> covNarrowCalls((byte)-128, (char)65535, (short)-32768, true));
+        show(() -> covFloatCall(Float.NaN));
+        show(() -> covDoubleCall(-0.0));
+        for (int value : new int[]{0, 1, 2, 3, -1, 255, 65535, Integer.MIN_VALUE, Integer.MAX_VALUE}) {
+            show(() -> RawOps.covRawZ(new boolean[1], 0, value));
+            show(() -> RawOps.covRawB(new byte[1], 0, value));
+            show(() -> RawOps.covRawC(new char[1], 0, value));
+            show(() -> RawOps.covRawS(new short[1], 0, value));
+        }
+        Random random = new Random(9347351L);
+        long digest = 0;
+        for (int i = 0; i < 2000; i++) {
+            int value = random.nextInt();
+            long wideValue = random.nextLong();
+            digest = digest * 31 + covInt(new int[1], 0, value);
+            digest = digest * 31 + covLong(new long[]{wideValue}, 0, wideValue);
+            digest = digest * 31 + RawOps.covRawZ(new boolean[1], 0, value);
+            digest = digest * 31 + RawOps.covRawB(new byte[1], 0, value);
+            digest = digest * 31 + RawOps.covRawC(new char[1], 0, value);
+            digest = digest * 31 + RawOps.covRawS(new short[1], 0, value);
+            float f = Float.intBitsToFloat(value);
+            double d = Double.longBitsToDouble(wideValue);
+            digest = digest * 31 + Float.floatToIntBits(covFloat(new float[1], 0, f));
+            digest = digest * 31 + Double.doubleToLongBits(covDouble(new double[]{-0.0}, 0, d));
+            digest = digest * 31 + (covReference(new Object[1], 0, token) ? 1 : 0);
+            digest = digest * 31 + (covCallIdentity(token) ? 1 : 0);
+        }
+        System.out.println("random:" + Long.toHexString(digest));
+        System.out.println("state:" + instance.count + ":" + instance.wide + ":" + total);
+    }
+}
