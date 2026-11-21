@@ -286,9 +286,31 @@ public:
                               llvm::ModuleAnalysisManager &) {
     bool Changed = false;
     RewriteStatistics Statistics;
-    for (llvm::Function &Function : Module)
-      if (!Function.isDeclaration())
+    for (llvm::Function &Function : Module) {
+      if (!Function.isDeclaration()) {
+        RewriteStatistics Before = Statistics;
         Changed |= rewriteFunction(Function, Config, Statistics);
+        if (Function.getName().starts_with(Config.Prefix))
+          llvm::errs()
+              << "native-obfuscator-function: pass="
+              << (Config.Kind == Transform::Encode ? "native-encode" :
+                                                    "native-diversify")
+              << " function=" << Function.getName()
+              << " candidates=" << Statistics.CandidateSites - Before.CandidateSites
+              << " eligible=" << Statistics.EligibleSites - Before.EligibleSites
+              << " transformed="
+              << Statistics.TransformedSites - Before.TransformedSites
+              << " skipped_guard="
+              << Statistics.GuardFilteredSites - Before.GuardFilteredSites
+              << " skipped_cap="
+              << Statistics.CapSkippedSites - Before.CapSkippedSites
+              << " skipped_optnone="
+              << Statistics.OptimizeNoneFunctions - Before.OptimizeNoneFunctions
+              << " skipped_unsafe_control_flow="
+              << Statistics.UnsafeControlFlowFunctions - Before.UnsafeControlFlowFunctions
+              << "\n";
+      }
+    }
     llvm::errs() << "native-obfuscator: "
                  << (Config.Kind == Transform::Encode ? "native-encode" :
                                                        "native-diversify")

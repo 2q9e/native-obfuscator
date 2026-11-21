@@ -102,7 +102,7 @@ enum NativeTarget {
             execute(frontend, "LLVM frontend for " + key);
             execute(List.of(config.llvmOpt(), "-load-pass-plugin=" + config.llvmPlugin(),
                 "-passes=" + config.llvmPasses() + ",verify", optimized.toString(), "-o", transformed.toString()),
-                "LLVM protection for " + key);
+                "LLVM protection for " + key, output.resolveSibling("llvm-protection.log"), "target=" + key + " ");
             lower(config, transformed, output, clangTriple, linux, sizes);
             if (config.maxGrowth() >= 0) {
                 baseline = output.resolveSibling("baseline-" + file);
@@ -180,7 +180,14 @@ enum NativeTarget {
     }
 
     private static void execute(List<String> command, String stage) throws IOException, InterruptedException {
-        Process compiler = new ProcessBuilder(command).inheritIO().start();
+        execute(command, stage, null, "");
+    }
+
+    private static void execute(List<String> command, String stage, Path errorLog, String prefix)
+            throws IOException, InterruptedException {
+        ProcessBuilder builder = new ProcessBuilder(command).inheritIO();
+        if (errorLog != null) builder.redirectError(errorLog.toFile());
+        Process compiler = builder.start();
         try {
             if (!compiler.waitFor(180, TimeUnit.SECONDS))
                 throw new IOException(stage + " timed out");
@@ -190,6 +197,11 @@ enum NativeTarget {
             if (compiler.isAlive()) {
                 compiler.descendants().forEach(ProcessHandle::destroyForcibly);
                 compiler.destroyForcibly();
+            }
+            if (errorLog != null && Files.exists(errorLog)) {
+                try (var lines = Files.lines(errorLog)) {
+                    lines.forEach(line -> System.err.println(prefix + line));
+                }
             }
         }
     }
