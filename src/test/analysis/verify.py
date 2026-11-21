@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -72,6 +73,10 @@ def check_invalid_options(cli, work, original, common):
         (["--analysis-entry-budget", "1"], "--analysis-entry-budget"),
         (["--analysis-entry-budget", "33"], "--analysis-entry-budget"),
         (["--analysis-seed", "18446744073709551616"], "--analysis-seed"),
+        (["--analysis-helper-methods", "5"], "--analysis-helper-methods"),
+        (["--analysis-helpers-per-method", "2"], "--analysis-helpers-per-method"),
+        (["--analysis-decoy-methods", "5"], "--analysis-decoy-methods"),
+        (["--analysis-llvm-sites", "3"], "--analysis-llvm-sites"),
     )
     for arguments, diagnostic in invalid:
         require_text(cli(*base, "--analysis-resistance", "balanced", *arguments, expected=2).stderr, diagnostic)
@@ -127,7 +132,7 @@ def check_workflow(cli, execute, work, original, common, compiler, baseline, bal
     harden = last_report(cli("harden", "--input", original, "--output", staged, *composed, *compiler))
     assert harden["status"] == "staged" and harden["verification"]["structurallyValid"], harden
     generated = harden["verification"]["expectedGeneratedClasses"]
-    assert len(generated) == 1, harden
+    assert len(generated) == 3, harden
     staged_entries = entries(staged)
     root, corpus = analysis_resources(staged_entries)
     assert corpus == balanced_corpus, "Padding or markers changed the analysis corpus"
@@ -204,14 +209,26 @@ def check_mutations(cli, execute, work, original, common, protected, donor):
     reject_case("changed-anchor", {**protected, library: updated, library + ".sha256": checksum},
                 "Native analysis binding", "Native analysis binding")
 
-    registration_metadata = protected[root + "registration/0.bin"]
-    registration_binding = b"NOAR\x01" + (1).to_bytes(4, "big") + hashlib.sha256(registration_metadata).digest()
+    registrations = sorted(
+        (int(name.rsplit("/", 1)[1].removesuffix(".bin")), data)
+        for name, data in protected.items() if name.startswith(root + "registration/"))
+    assert [index for index, _ in registrations] == list(range(len(registrations))), registrations
+    registration_binding = (b"NOAR\x01" + len(registrations).to_bytes(4, "big")
+                            + b"".join(hashlib.sha256(data).digest() for _, data in registrations))
     assert binary.count(registration_binding) == 1, "Expected exactly one registration digest table"
-    changed_registration = registration_binding[:-1] + bytes([registration_binding[-1] ^ 1])
+    changed_registration = (registration_binding[:9] + bytes([registration_binding[9] ^ 1])
+                            + registration_binding[10:])
     bound_library = binary.replace(registration_binding, changed_registration)
     bound_checksum = hashlib.sha256(bound_library).hexdigest().encode("ascii")
     reject_case("changed-registration-binding", {**protected, library: bound_library, library + ".sha256": bound_checksum},
                 "Native analysis binding", "Native method registration failed")
+
+    utility_sections = sorted(set(re.findall(rb"\.nou[0-9a-f]{3}\0", binary)))
+    assert len(utility_sections) == 2, utility_sections
+    missing_utility = binary.replace(utility_sections[0], b".bad000\0")
+    utility_checksum = hashlib.sha256(missing_utility).hexdigest().encode("ascii")
+    reject_case("missing-utility-section", {**protected, library: missing_utility, library + ".sha256": utility_checksum},
+                "Native utility section")
 
     registration = ("Java_dev_nativeobfuscator_runtime_" + root.rstrip("/").rsplit("/", 1)[1]
                     + "_registerBoundV1").encode("ascii")
@@ -284,6 +301,12 @@ def main():
     root, corpus = analysis_resources(protected)
     assert root + "markers.txt" not in protected, "Analysis enabled markers without an option"
     assert any(name.endswith(".txt") for name in corpus) and any(name.endswith(".tsv") for name in corpus), corpus.keys()
+    catalog = corpus["analysis/component-index.tsv"].decode("ascii").splitlines()
+    assert catalog[0] == "# Synthetic utility catalog v1" and len(catalog) == 4, catalog
+    for row in catalog[2:]:
+        component, family, prototype, raw_digest, sample = row.split("\t")
+        assert len(component) == 16 and raw_digest.startswith(component), row
+        assert family and prototype.startswith("(") and "analysis/" + sample in corpus, row
     for name, data in corpus.items():
         if name != MANIFEST:
             assert data.decode("ascii").endswith("\n"), name
@@ -306,7 +329,9 @@ def main():
     config = work / "maximum.json"
     options = {"input": str(original), "output": str(maximum), "include": ["Arithmetic#calc*"],
                "unsupported": "retain", "padding": "off", "analysisResistance": "maximum",
-               "analysisSeed": int(MAX_SEED), "analysisResourceBudget": 256, "analysisEntryBudget": 2}
+               "analysisSeed": int(MAX_SEED), "analysisResourceBudget": 256, "analysisEntryBudget": 2,
+               "analysisHelperMethods": 1, "analysisHelpersPerMethod": 2, "analysisDecoyMethods": 1,
+               "analysisLlvmSites": 0}
     if zig:
         options["zig"] = zig
     config.write_text(json.dumps(options), encoding="utf-8")

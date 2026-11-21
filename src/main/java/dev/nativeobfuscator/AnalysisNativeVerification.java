@@ -34,9 +34,10 @@ final class AnalysisNativeVerification {
                                        Set<String> expectedMethods, String runtimeId, Map<String, byte[]> staged,
                                        Map<String, String> librariesByTarget, List<String> errors, String clang)
             throws IOException, InterruptedException {
-        if (analysis.profile() != AnalysisConfig.Profile.MAXIMUM) return List.of();
-        var nativeHelpers = new AnalysisNative(analysis.seed(), AnalysisNative.MAX_METHODS);
-        Map<String, String> methodsByRoot = plan(nativeHelpers, original, expectedMethods, runtimeId, errors);
+        if (analysis.nativeMethodLimit() == 0 || analysis.nativeHelpersPerRoot() == 0) return List.of();
+        var nativeHelpers = new AnalysisNative(analysis.seed(), analysis.nativeMethodLimit(), analysis.nativeHelpersPerRoot());
+        Map<String, String> methodsByRoot = plan(nativeHelpers, analysis.nativeMethodLimit(), original, expectedMethods,
+            runtimeId, errors);
         if (methodsByRoot.isEmpty()) return List.of();
         if (librariesByTarget.isEmpty()) {
             errors.add("No staged libraries are available to verify planned native helpers");
@@ -56,15 +57,15 @@ final class AnalysisNativeVerification {
             String entry = librariesByTarget.get(targetKey);
             String expectedEntry = "META-INF/native-obfuscator/" + runtimeId + "/" + target.key + "/" + target.file;
             var helpers = expectedEntry.equals(entry)
-                ? verifyLibrary(nativeHelpers, methodsByRoot, target, entry, staged.get(entry), objdump)
-                : unavailable(methodsByRoot, "staged library path does not match the expected runtime and target");
+                ? verifyLibrary(nativeHelpers, target, entry, staged.get(entry), objdump)
+                : nativeHelpers.unavailable("staged library path does not match the expected runtime and target");
             requirePlannedEvidence(target, helpers, methodsByRoot, errors);
             results.add(new TargetEvidence(targetKey, helpers));
         }
         return List.copyOf(results);
     }
 
-    private static Map<String, String> plan(AnalysisNative nativeHelpers, Map<String, byte[]> original,
+    private static Map<String, String> plan(AnalysisNative nativeHelpers, int methodLimit, Map<String, byte[]> original,
                                             Set<String> expectedMethods, String runtimeId, List<String> errors) {
         var classPaths = new HashSet<String>();
         for (String signature : expectedMethods) {
@@ -94,16 +95,16 @@ final class AnalysisNativeVerification {
                 if (!site.enabled()) continue;
                 nativeHelpers.accept(site);
                 methodsByRoot.put(root, signature);
-                if (nativeHelpers.selectedCount() == AnalysisNative.MAX_METHODS) return methodsByRoot;
+                if (nativeHelpers.selectedCount() == methodLimit) return methodsByRoot;
             }
         }
         return methodsByRoot;
     }
 
-    private static List<AnalysisNative.Evidence> verifyLibrary(AnalysisNative nativeHelpers, Map<String, String> planned,
-                                                                NativeTarget target, String entry, byte[] binary,
-                                                                String objdump) throws InterruptedException {
-        if (binary == null) return unavailable(planned, "staged library bytes are missing");
+    private static List<AnalysisNative.Evidence> verifyLibrary(AnalysisNative nativeHelpers, NativeTarget target,
+                                                               String entry, byte[] binary, String objdump)
+            throws InterruptedException {
+        if (binary == null) return nativeHelpers.unavailable("staged library bytes are missing");
         try {
             Archive.checkExpandedSize(entry, binary.length, 0);
             NativeImage.executableBytes(binary, target);
@@ -115,13 +116,8 @@ final class AnalysisNativeVerification {
                 Files.deleteIfExists(image);
             }
         } catch (IOException failure) {
-            return unavailable(planned, failure.getMessage());
+            return nativeHelpers.unavailable(failure.getMessage());
         }
-    }
-
-    private static List<AnalysisNative.Evidence> unavailable(Map<String, String> planned, String reason) {
-        return planned.keySet().stream().map(root ->
-            new AnalysisNative.Evidence(root, "unavailable", reason, null, null, null)).toList();
     }
 
     private static void requirePlannedEvidence(NativeTarget target, List<AnalysisNative.Evidence> helpers,

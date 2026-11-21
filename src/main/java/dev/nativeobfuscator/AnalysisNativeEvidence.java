@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 
+import dev.nativeobfuscator.AnalysisNative.EdgeEvidence;
 import dev.nativeobfuscator.AnalysisNative.Evidence;
 import dev.nativeobfuscator.AnalysisNative.Selection;
 
@@ -81,43 +82,71 @@ final class AnalysisNativeEvidence {
 
         var result = new ArrayList<Evidence>(selected.size());
         for (Selection site : selected) {
-            Section root = sections.get(site.rootSection());
-            Section helper = sections.get(site.helperSection());
-            Long rootBytes = root == null ? null : root.bytes();
-            Long helperBytes = helper == null ? null : helper.bytes();
-            if (root == null || helper == null) {
-                String absent = root == null && helper == null ? "root and helper" : root == null ? "root" : "helper";
-                result.add(new Evidence(site.root(), "unverified", absent + " executable section missing",
-                    rootBytes, helperBytes, null));
-                continue;
+            var edges = new ArrayList<EdgeEvidence>(site.helperCount());
+            String source = site.rootSection();
+            for (var helper : site.helpers()) {
+                edges.add(checkEdge(source, helper.section(), sections, edges.isEmpty(), arm));
+                source = helper.section();
             }
-            if (root.bytes() > MAX_ROOT_BYTES || helper.bytes() > MAX_HELPER_BYTES) {
-                result.add(new Evidence(site.root(), "unverified", "native helper or root exceeds its section size limit",
-                    rootBytes, helperBytes, null));
-                continue;
+            EdgeEvidence first = edges.getFirst();
+            EdgeEvidence failed = edges.stream().filter(edge -> !edge.status().equals("verified")).findFirst().orElse(null);
+            String status = failed == null ? "verified" : "unverified";
+            String reason;
+            if (edges.size() == 1) {
+                reason = first.reason();
+            } else if (failed == null) {
+                reason = "All " + edges.size() + " direct helper edges are statically reachable from their section entries";
+            } else {
+                reason = failed.sourceSection() + " to " + failed.targetSection() + " failed because " + failed.reason();
             }
-            if (!root.instructions().containsKey(root.address()) || !helper.instructions().containsKey(helper.address())) {
-                result.add(new Evidence(site.root(), "unverified", "root or helper entry could not be disassembled",
-                    rootBytes, helperBytes, null));
-                continue;
-            }
-            Instruction transfer = reachableTransfer(root, helper.address(), arm);
-            if (transfer == null) {
-                result.add(new Evidence(site.root(), "unverified",
-                    "no direct transfer to the helper entry was found from the root entry",
-                    rootBytes, helperBytes, null));
-                continue;
-            }
-            String transferType = flow(transfer.mnemonic(), arm) == Flow.CALL ? "call" : "tail branch";
-            result.add(new Evidence(site.root(), "verified",
-                "direct " + transferType + " to the helper is statically reachable from the root entry",
-                rootBytes, helperBytes, transfer.address() - root.address()));
+            result.add(new Evidence(site.root(), status, reason, first.sourceBytes(), first.targetBytes(),
+                first.edgeOffset(), edges));
         }
         return List.copyOf(result);
     }
 
-    private static List<Evidence> unavailable(List<Selection> selected, String reason) {
-        return selected.stream().map(site -> new Evidence(site.root(), "unavailable", reason, null, null, null)).toList();
+    private static EdgeEvidence checkEdge(String sourceName, String targetName, Map<String, Section> sections,
+                                          boolean root, boolean arm) {
+        Section source = sections.get(sourceName);
+        Section target = sections.get(targetName);
+        Long sourceBytes = source == null ? null : source.bytes();
+        Long targetBytes = target == null ? null : target.bytes();
+        String sourceRole = root ? "root" : "source helper";
+        if (source == null || target == null) {
+            String absent = source == null && target == null ? sourceRole + " and destination helper"
+                : source == null ? sourceRole : "destination helper";
+            return new EdgeEvidence(sourceName, targetName, "unverified", absent + " executable section missing",
+                sourceBytes, targetBytes, null);
+        }
+        if (source.bytes() > (root ? MAX_ROOT_BYTES : MAX_HELPER_BYTES) || target.bytes() > MAX_HELPER_BYTES)
+            return new EdgeEvidence(sourceName, targetName, "unverified", "native helper or root exceeds its section size limit",
+                sourceBytes, targetBytes, null);
+        if (!source.instructions().containsKey(source.address()) || !target.instructions().containsKey(target.address()))
+            return new EdgeEvidence(sourceName, targetName, "unverified", "source or helper entry could not be disassembled",
+                sourceBytes, targetBytes, null);
+        Instruction transfer = reachableTransfer(source, target.address(), arm);
+        if (transfer == null)
+            return new EdgeEvidence(sourceName, targetName, "unverified",
+                "no direct transfer to the helper entry was found from the " + sourceRole + " entry",
+                sourceBytes, targetBytes, null);
+        String transferType = flow(transfer.mnemonic(), arm) == Flow.CALL ? "call" : "tail branch";
+        return new EdgeEvidence(sourceName, targetName, "verified",
+            "direct " + transferType + " to the helper is statically reachable from the " + sourceRole + " entry",
+            sourceBytes, targetBytes, transfer.address() - source.address());
+    }
+
+    static List<Evidence> unavailable(List<Selection> selected, String reason) {
+        var result = new ArrayList<Evidence>(selected.size());
+        for (Selection site : selected) {
+            var edges = new ArrayList<EdgeEvidence>(site.helperCount());
+            String source = site.rootSection();
+            for (var helper : site.helpers()) {
+                edges.add(new EdgeEvidence(source, helper.section(), "unavailable", reason, null, null, null));
+                source = helper.section();
+            }
+            result.add(new Evidence(site.root(), "unavailable", reason, null, null, null, edges));
+        }
+        return List.copyOf(result);
     }
 
     private static String disassemble(Path library, String objdump, List<Selection> selected)
@@ -125,7 +154,7 @@ final class AnalysisNativeEvidence {
         var command = new ArrayList<>(List.of(objdump, "-h", "-d"));
         for (Selection site : selected) {
             command.add("--section=" + site.rootSection());
-            command.add("--section=" + site.helperSection());
+            for (var helper : site.helpers()) command.add("--section=" + helper.section());
         }
         Path image = library.toAbsolutePath();
         command.add(image.toString());

@@ -127,7 +127,12 @@ final class Workflow {
             errors.add("Staged JAR changed during verification");
 
         var generation = FilePadding.generate(originalEntries, paddingCount, paddingSeed, expectedNativeMethods);
-        Map<String, byte[]> generatedEntries = generation.classes();
+        var utilities = AnalysisDecoys.generate(originalEntries, analysis.decoyMethods(), analysis.seed(),
+            generation.classes().keySet());
+        var generatedEntries = new LinkedHashMap<>(generation.classes());
+        generatedEntries.putAll(utilities.classes());
+        var generatedMethods = new HashSet<>(generation.nativeMethods().keySet());
+        generatedMethods.addAll(utilities.nativeMethods().keySet());
         for (String name : generatedEntries.keySet()) {
             if (!stagedEntries.containsKey(name)) errors.add("Missing expected generated class " + name);
         }
@@ -136,10 +141,10 @@ final class Workflow {
         var addedNative = new TreeSet<>(stagedNative);
         addedNative.removeAll(originalNative);
         var expected = new TreeSet<>(expectedNativeMethods);
-        if (!expected.containsAll(generation.nativeMethods().keySet()))
+        if (!expected.containsAll(generatedMethods))
             errors.add("Expected method plan omits required generated native methods");
         if (expected.isEmpty()) errors.add("No eligible methods were supplied for coverage verification");
-        if (analysis.enabled() && generation.nativeMethods().keySet().containsAll(expected))
+        if (analysis.enabled() && generatedMethods.containsAll(expected))
             errors.add("Analysis resistance requires a supported application method");
         var expectedByClass = new LinkedHashMap<String, Set<String>>();
         for (String method : expected) {
@@ -149,7 +154,7 @@ final class Workflow {
             } else {
                 String path = method.substring(0, separator) + ".class";
                 expectedByClass.computeIfAbsent(path, ignored -> new TreeSet<>()).add(method.substring(separator + 1));
-                if (generatedEntries.containsKey(path) && !generation.nativeMethods().containsKey(method))
+                if (generatedEntries.containsKey(path) && !generatedMethods.contains(method))
                     errors.add("Expected method plan includes an unplanned generated native method: " + method);
             }
         }
@@ -290,7 +295,7 @@ final class Workflow {
                     || !sameClass(AnalysisRuntime.manifest(loader), actualManifestClass))
                     errors.add("Generated analysis manifest class does not match trusted implementation");
                 var verified = AnalysisVerification.verify(analysis, loader, resourceRoot, stagedEntries, librariesByTarget,
-                    registrationResources.getOrDefault(runtimeId, Map.of()), errors);
+                    registrationResources.getOrDefault(runtimeId, Map.of()), utilities, errors);
                 analysisReport = verified.report();
                 allowedAnalysisResources = verified.allowedEntries();
                 nativeHelpers = AnalysisNativeVerification.verify(analysis, originalEntries, expected, runtimeId,

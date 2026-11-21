@@ -62,6 +62,10 @@ public final class Main {
                 --analysis-seed UINT64      Independent deterministic seed (default 0).
                 --analysis-resource-budget BYTES  Cap additional uncompressed analysis resources.
                 --analysis-entry-budget COUNT    Cap generated analysis resource entries.
+                --analysis-helper-methods COUNT  Cap application methods with native helpers.
+                --analysis-helpers-per-method COUNT  Cap linked helper depth per eligible method.
+                --analysis-decoy-methods COUNT   Cap independently generated native utility methods.
+                --analysis-llvm-sites COUNT      Cap extra preset LLVM sites per function.
                 --padding MODE        on (12 classes) or off. Interactive JAR builds prompt.
                 --padding-count N     Generate 0-1000 utility classes; positive enables padding.
                 --padding-seed INT64  Reproduce generated classes independently of --seed (default 0).
@@ -254,7 +258,8 @@ public final class Main {
         return Set.of("--input", "--include", "--exclude", "--target", "--unsupported",
             "--min-instructions", "--padding", "--padding-count", "--padding-seed", "--markers",
             "--marker-seed", "--analysis-resistance", "--analysis-seed", "--analysis-resource-budget",
-            "--analysis-entry-budget");
+            "--analysis-entry-budget", "--analysis-helper-methods", "--analysis-helpers-per-method",
+            "--analysis-decoy-methods", "--analysis-llvm-sites");
     }
 
     private static Map<String, String> workflowOptions(String[] arguments, boolean allowStaged,
@@ -369,7 +374,9 @@ public final class Main {
                 case "--input", "--output", "--zig", "--unsupported", "--clang", "--llvm-opt", "--llvm-plugin",
                      "--llvm-passes", "--min-instructions", "--profile", "--seed", "--max-growth", "--padding",
                      "--padding-count", "--padding-seed", "--markers", "--marker-seed", "--analysis-resistance",
-                     "--analysis-seed", "--analysis-resource-budget", "--analysis-entry-budget" -> {
+                     "--analysis-seed", "--analysis-resource-budget", "--analysis-entry-budget",
+                     "--analysis-helper-methods", "--analysis-helpers-per-method", "--analysis-decoy-methods",
+                     "--analysis-llvm-sites" -> {
                     if (options.putIfAbsent(key, value) != null)
                         throw new IllegalArgumentException("Repeated option " + key);
                 }
@@ -388,6 +395,10 @@ public final class Main {
             case "retain" -> true;
             default -> throw new IllegalArgumentException("Expected --unsupported fail or retain");
         };
+        AnalysisConfig analysis = AnalysisConfig.resolve(options.get("--analysis-resistance"),
+            options.get("--analysis-seed"), options.get("--analysis-resource-budget"), options.get("--analysis-entry-budget"),
+            options.get("--analysis-helper-methods"), options.get("--analysis-helpers-per-method"),
+            options.get("--analysis-decoy-methods"), options.get("--analysis-llvm-sites"));
         boolean llvm = options.containsKey("--clang") || options.containsKey("--llvm-opt")
             || options.containsKey("--llvm-plugin") || options.containsKey("--llvm-passes");
         String profile = options.getOrDefault("--profile", llvm ? "balanced" : "compatibility");
@@ -419,6 +430,12 @@ public final class Main {
         };
         String preset = branches == 0 ? arithmetic
             : "native-diversify<seed=" + seed + ";max=" + branches + ";prefix=method_>," + arithmetic;
+        boolean customPasses = options.containsKey("--llvm-passes");
+        if (!analyze && options.containsKey("--analysis-llvm-sites") && analysis.llvmSites() > 0
+            && (!llvm || sites == 0 || customPasses))
+            throw new IllegalArgumentException("--analysis-llvm-sites needs the preset LLVM pipeline and its toolchain");
+        if (llvm && sites > 0 && !customPasses && analysis.llvmSites() > 0)
+            preset = extendedAnalysisPasses(preset, analysis);
         String passes = options.getOrDefault("--llvm-passes", preset);
         if (targets.isEmpty() && !analyze && !emitC) targets.add(NativeTarget.host());
         Path plugin = llvm && sites > 0 ? path(options, "--llvm-plugin") : null;
@@ -432,8 +449,6 @@ public final class Main {
         if (minInstructions < 0) throw new IllegalArgumentException("--min-instructions must be non-negative");
         if (reportNativeSizes && (analyze || emitC || targets.stream().noneMatch(t -> t.key.endsWith("-linux"))))
             throw new IllegalArgumentException("--report-native-sizes requires at least one Linux JAR target");
-        AnalysisConfig analysis = AnalysisConfig.resolve(options.get("--analysis-resistance"),
-            options.get("--analysis-seed"), options.get("--analysis-resource-budget"), options.get("--analysis-entry-budget"));
         int paddingCount = parsePadding(options, !emitC, !analyze && !dryRun);
         long paddingSeed;
         try { paddingSeed = Long.parseLong(options.getOrDefault("--padding-seed", "0")); }
@@ -443,6 +458,17 @@ public final class Main {
             options.get("--zig"), skip, analyze || dryRun, emitC, options.get("--clang"), options.get("--llvm-opt"),
             plugin, plugin == null ? null : passes, growth, markers, markerSeed, paddingCount, paddingSeed,
             minInstructions, reportNativeSizes, analysis);
+    }
+
+    private static String extendedAnalysisPasses(String legacy, AnalysisConfig analysis) {
+        String seed = Long.toUnsignedString(analysis.seed());
+        boolean route = analysis.profile() == AnalysisConfig.Profile.MAXIMUM;
+        int mixSites = analysis.llvmSites() - (route ? 1 : 0);
+        StringBuilder pipeline = new StringBuilder();
+        if (route) pipeline.append("native-route<seed=").append(seed).append(";max=1;prefix=method_>,");
+        if (mixSites > 0)
+            pipeline.append("native-mix<seed=").append(seed).append(";max=").append(mixSites).append(";prefix=method_>,");
+        return pipeline.append(legacy).toString();
     }
 
     private static int parsePadding(Map<String, String> options, boolean supported, boolean prompt) {
@@ -509,6 +535,10 @@ public final class Main {
                     case "analysisSeed" -> "analysis-seed";
                     case "analysisResourceBudget" -> "analysis-resource-budget";
                     case "analysisEntryBudget" -> "analysis-entry-budget";
+                    case "analysisHelperMethods" -> "analysis-helper-methods";
+                    case "analysisHelpersPerMethod" -> "analysis-helpers-per-method";
+                    case "analysisDecoyMethods" -> "analysis-decoy-methods";
+                    case "analysisLlvmSites" -> "analysis-llvm-sites";
                     default -> key;
                 };
                 if (key.equals("include") || key.equals("exclude") || key.equals("target")) {

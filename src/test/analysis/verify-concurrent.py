@@ -40,6 +40,8 @@ def check_protection(report, jar, work):
     rows = [json.loads(line) for line in report.splitlines() if line.strip()]
     selected = sorted(row["method"] for row in rows if row.get("result") == "selected")
     expected = sorted(f"{owner}#{method}" for owner in OWNERS for method in METHODS)
+    generated = {row["method"] for row in rows if row.get("result") == "analysis-utility"}
+    selected = [method for method in selected if method not in generated]
     if selected != expected:
         raise AssertionError(f"Selected methods differ from the expected overloads: {selected}")
 
@@ -59,8 +61,9 @@ def check_protection(report, jar, work):
         raise AssertionError(f"Expected one balanced runtime manifest: {manifests}")
     registration_root = manifests[0].removesuffix(manifest) + "registration/"
     registrations = sorted(name for name in names if name.startswith(registration_root) and name.endswith(".bin"))
-    if registrations != [registration_root + "0.bin", registration_root + "1.bin"]:
-        raise AssertionError(f"Expected two class registrations in the same runtime: {registrations}")
+    expected_registrations = [registration_root + f"{index}.bin" for index in range(len(OWNERS) + len(generated))]
+    if registrations != expected_registrations:
+        raise AssertionError(f"Expected application and utility registrations in one runtime: {registrations}")
 
 
 def main():

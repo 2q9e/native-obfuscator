@@ -68,17 +68,20 @@ final class Protector {
 
     record AnalysisReport(String analysisResistance, String analysisSeed, int resourceBudget, int entryBudget,
                           String status, String binding, int resourceBytes, int resourceEntries,
-                          int selectedApplicationMethods, int nativeHelperMethods, List<TargetAnalysis> targets,
-                          Archive.WrittenJar artifact) {
+                          int selectedApplicationMethods, int nativeHelperMethods, int nativeHelperFunctions,
+                          int nativeMethodLimit, int nativeHelpersPerMethod, int generatedUtilityMethods,
+                          boolean utilityCatalogIncluded, int plannedLlvmSites,
+                          String llvmPipeline, List<TargetAnalysis> targets, Archive.WrittenJar artifact) {
         AnalysisReport {
             targets = List.copyOf(targets);
         }
     }
 
     record TargetAnalysis(String target, int libraryBytes, long executableBytes,
-                          List<AnalysisNative.Evidence> helpers) {
+                          List<AnalysisNative.Evidence> helpers, Map<String, Long> utilityCodeBytes) {
         TargetAnalysis {
             helpers = List.copyOf(helpers);
+            utilityCodeBytes = Map.copyOf(utilityCodeBytes);
         }
     }
 
@@ -98,13 +101,18 @@ final class Protector {
         var versioned = versionedClasses(files.keySet());
         var generated = FilePadding.generate(files, config.paddingCount, config.paddingSeed,
             config.paddingCount == 0 ? Set.of() : paddingReferencePlan(files, config, exclusions, versioned));
+        var utilities = AnalysisDecoys.generate(files, config.analysis.decoyMethods(), config.analysis.seed(),
+            generated.classes().keySet());
+        var utilitySections = AnalysisUtilitySections.names(utilities);
         files.putAll(generated.classes());
-        var analysisPlan = config.analysis.enabled() ? AnalysisCorpus.plan(config.analysis.profile().id,
-            config.analysis.seed(), config.analysis.resourceBudget(), config.analysis.entryBudget()) : null;
+        files.putAll(utilities.classes());
+        var analysisPlan = config.analysis.enabled() ? AnalysisCorpus.withUtilities(AnalysisCorpus.plan(
+            config.analysis.profile().id, config.analysis.seed(), config.analysis.resourceBudget(),
+            config.analysis.entryBudget()), utilities) : null;
         if (analysisPlan != null && !config.emitC)
             Archive.preflight(files, analysisPlan.byteCount(), analysisPlan.entryCount() + 2);
-        var nativePlan = config.analysis.profile() == AnalysisConfig.Profile.MAXIMUM
-            ? new AnalysisNative(config.analysis.seed(), AnalysisNative.MAX_METHODS) : null;
+        var nativePlan = config.analysis.nativeMethodLimit() == 0 ? null
+            : new AnalysisNative(config.analysis.seed(), config.analysis.nativeMethodLimit(), config.analysis.nativeHelpersPerRoot());
         String id = runtimeId(files, config);
         String loader = RUNTIME.substring(0, RUNTIME.lastIndexOf('/') + 1) + id;
         var source = new StringBuilder(MethodCompiler.runtimeSupport()).append(registrationSupport());
@@ -122,10 +130,11 @@ final class Protector {
             String owner = node.name;
             String exclusion = classExclusion(node, exclusions, versioned);
             var bindings = new ArrayList<Binding>();
-            boolean generatedClass = generated.classes().containsKey(entry);
+            boolean generatedClass = generated.classes().containsKey(entry) || utilities.classes().containsKey(entry);
             for (MethodNode method : node.methods) {
                 String name = owner + "#" + method.name + method.desc;
-                boolean required = generated.nativeMethods().containsKey(name);
+                String utilityFamily = utilities.nativeMethods().get(name);
+                boolean required = utilityFamily != null || generated.nativeMethods().containsKey(name);
                 if (!required && (generatedClass || !matches(config.includes, name))) continue;
                 if (!required && matches(config.excludes, name)) {
                     report.accept(new Decision(name, "excluded", "matched --exclude"));
@@ -135,7 +144,7 @@ final class Protector {
                     String symbol = GeneratedNames.nativeFunction(id, name);
                     try {
                         var site = nativePlan != null && !required ? nativePlan.prepare(method, symbol, name) : null;
-                        String c = compile(node, method, symbol, site);
+                        String c = compile(node, method, symbol, site, utilitySections.get(name));
                         MethodMetrics metrics = measure(method);
                         if (!required && metrics.instructions < config.minInstructions) {
                             report.accept(new Decision(name, "excluded",
@@ -145,7 +154,7 @@ final class Protector {
                         if (site != null) {
                             nativePlan.accept(site);
                             report.accept(new Decision(name, site.enabled() ? "native-helper-planned" : "native-helper-skipped",
-                                site.enabled() ? "one terminal wrapping operation" : site.reason(), metrics));
+                                site.enabled() ? site.helperCount() + " helpers for the terminal wrapping operation" : site.reason(), metrics));
                         }
                         bindings.add(new Binding(method, symbol, c));
                         if (!config.analyze && config.llvmPlugin == null)
@@ -155,6 +164,8 @@ final class Protector {
                         ordinal++;
                         if (!required) applicationMethods++;
                         report.accept(new Decision(name, config.analyze ? "eligible" : "selected", "", metrics));
+                        if (utilityFamily != null)
+                            report.accept(new Decision(name, "analysis-utility", utilityFamily, metrics));
                     } catch (MethodCompiler.Unsupported failure) {
                         if (required) throw new IOException("Generated utility method cannot be converted: " + name
                             + ": " + failure.getMessage());
@@ -177,9 +188,9 @@ final class Protector {
             throw new IOException(unsupported + " selected methods require JVM bytecode; see method diagnostics");
         if (config.analyze) {
             if (analysisPlan != null)
-                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
+                analysisReport.accept(analysisReport(config, analysisPlan, applicationMethods,
                     applicationMethods == 0 ? "skipped-no-eligible-application-methods" : "planned",
-                    "planned-native-registration", helperCount(nativePlan), List.of(), null));
+                    "planned-native-registration", nativePlan, List.of(), null));
             return ordinal;
         }
         if (outputs.isEmpty()) throw new IOException("No supported methods were selected");
@@ -221,9 +232,8 @@ final class Protector {
         if (config.emitC) {
             Files.writeString(config.output, source);
             if (analysisPlan != null)
-                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
-                    "c-emitted-resources-omitted", "requires-packaged-jar-runtime", helperCount(nativePlan), List.of(),
-                    null));
+                analysisReport.accept(analysisReport(config, analysisPlan, applicationMethods,
+                    "c-emitted-resources-omitted", "requires-packaged-jar-runtime", nativePlan, List.of(), null));
             return ordinal;
         }
         Path workspace = Files.createTempDirectory("native-obfuscator-build-");
@@ -264,7 +274,8 @@ final class Protector {
                                 + " " + selectedSymbols.get(helper.root()) + ": " + helper.reason());
                     }
                     targetAnalysis.add(new TargetAnalysis(target.key, binary.length,
-                        NativeImage.executableBytes(binary, target), helpers));
+                        NativeImage.executableBytes(binary, target), helpers,
+                        AnalysisUtilitySections.require(binary, target, utilitySections)));
                 }
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
                 files.put(base, binary);
@@ -277,8 +288,8 @@ final class Protector {
             var artifact = Archive.write(files, config.output, analysisPlan != null);
             nativeSizes.forEach(report);
             if (analysisPlan != null)
-                analysisReport.accept(analysisReport(config.analysis, analysisPlan, applicationMethods,
-                    "packaged", "native-registration", helperCount(nativePlan), targetAnalysis, artifact));
+                analysisReport.accept(analysisReport(config, analysisPlan, applicationMethods,
+                    "packaged", "native-registration", nativePlan, targetAnalysis, artifact));
         } finally {
             try (var paths = Files.walk(workspace)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
@@ -287,17 +298,17 @@ final class Protector {
         return ordinal;
     }
 
-    private static int helperCount(AnalysisNative nativePlan) {
-        return nativePlan == null ? 0 : nativePlan.selectedCount();
-    }
-
-    private static AnalysisReport analysisReport(AnalysisConfig config, AnalysisCorpus.Plan plan,
+    private static AnalysisReport analysisReport(Config config, AnalysisCorpus.Plan plan,
                                                  int applicationMethods, String status, String binding,
-                                                 int helpers, List<TargetAnalysis> nativeTargets,
+                                                 AnalysisNative nativePlan, List<TargetAnalysis> nativeTargets,
                                                  Archive.WrittenJar artifact) {
-        return new AnalysisReport(config.profile().option, Long.toUnsignedString(config.seed()),
-            config.resourceBudget(), config.entryBudget(), status, binding, plan.byteCount(), plan.entryCount(),
-            applicationMethods, helpers, nativeTargets, artifact);
+        var analysis = config.analysis;
+        return new AnalysisReport(analysis.profile().option, Long.toUnsignedString(analysis.seed()),
+            analysis.resourceBudget(), analysis.entryBudget(), status, binding, plan.byteCount(), plan.entryCount(),
+            applicationMethods, nativePlan == null ? 0 : nativePlan.selectedCount(),
+            nativePlan == null ? 0 : nativePlan.helperCount(), analysis.nativeMethodLimit(), analysis.nativeHelpersPerRoot(),
+            analysis.decoyMethods(), plan.componentIndex() != null, analysis.llvmSites(), config.llvmPasses,
+            nativeTargets, artifact);
     }
 
     static byte[] markers(String id, int count, long seed) {
@@ -329,11 +340,13 @@ final class Protector {
             digest.update(("minimum instructions " + config.minInstructions).getBytes(StandardCharsets.UTF_8));
         if (config.analysis.enabled()) {
             digest.update("\nanalysis resistance format 2\n".getBytes(StandardCharsets.US_ASCII));
-            digest.update(ByteBuffer.allocate(6 * Integer.BYTES + 3 * Long.BYTES + 1)
+            digest.update(ByteBuffer.allocate(10 * Integer.BYTES + 3 * Long.BYTES + 1)
                 .putInt(config.analysis.profile().id).putLong(config.analysis.seed())
                 .putInt(config.analysis.resourceBudget()).putInt(config.analysis.entryBudget())
                 .putInt(config.maxGrowth).putInt(config.markers).putLong(config.markerSeed)
                 .putInt(config.paddingCount).putLong(config.paddingSeed)
+                .putInt(config.analysis.nativeMethodLimit()).putInt(config.analysis.nativeHelpersPerRoot())
+                .putInt(config.analysis.decoyMethods()).putInt(config.analysis.llvmSites())
                 .put((byte) (config.skipUnsupported ? 1 : 0)).array());
         }
         return "Runtime" + HexFormat.of().formatHex(digest.digest(), 0, 16);
@@ -414,14 +427,16 @@ final class Protector {
     }
 
     private static String compile(ClassNode node, MethodNode method, String symbol) throws MethodCompiler.Unsupported {
-        return compile(node, method, symbol, null);
+        return compile(node, method, symbol, null, null);
     }
 
-    private static String compile(ClassNode node, MethodNode method, String symbol, AnalysisNative.Selection site)
-            throws MethodCompiler.Unsupported {
+    private static String compile(ClassNode node, MethodNode method, String symbol, AnalysisNative.Selection site,
+                                  String utilitySection) throws MethodCompiler.Unsupported {
         int sort = Type.getReturnType(method.desc).getSort();
         if (sort == Type.ARRAY || sort == Type.OBJECT)
             throw new MethodCompiler.Unsupported("reference-return assignability requires JVM resolution");
+        if (utilitySection != null)
+            return MethodCompiler.compile(node, method, symbol, "__attribute__((section(\"" + utilitySection + "\"))) ", null);
         if (site == null || !site.enabled()) return MethodCompiler.compile(node, method, symbol);
         return site.support() + MethodCompiler.compile(node, method, symbol, site.rootAttribute(), site::lower);
     }

@@ -24,7 +24,7 @@ TARGETS = {
     "aarch64-windows": ("protected.dll", "coff-arm64"),
 }
 SECTION = re.compile(r"\s*\d+\s+(\S+)\s+([0-9a-fA-F]+)\s+[0-9a-fA-F]+\s+TEXT(?:\s.*)?")
-PASS_TOTAL = re.compile(r"^target=(\S+) native-obfuscator: \S+ .*?\btransformed=([0-9]+)", re.MULTILINE)
+PASS_TOTAL = re.compile(r"^target=(\S+) native-obfuscator: (\S+) .*?\btransformed=([0-9]+)", re.MULTILINE)
 
 
 def require(condition, message):
@@ -166,11 +166,13 @@ def check_analysis(profile, seed, build_reports, verification, jar_metrics, nati
     planned = sorted({item["method"] for item in build_reports if item.get("result") == "native-helper-planned"})
     helper_count = report["nativeHelperMethods"]
     require(len(planned) == helper_count and set(planned) <= set(selected), "Protect helper planning report")
-    if profile == "maximum":
-        require(helper_count > 0 and set(verify_targets) == set(TARGETS),
-                "Maximum must outline and verify helpers for every target")
-    else:
-        require(helper_count == 0 and not any(verify_targets.values()), "Balanced must not outline helpers")
+    helper_functions = report["nativeHelperFunctions"]
+    expected_depth = 1 if profile == "balanced" else 3
+    require(helper_count > 0 and set(verify_targets) == set(TARGETS),
+            f"{profile} must outline and verify helpers for every target")
+    require(helper_functions == expected_depth * helper_count, f"Unexpected linked helper depth for {profile}")
+    require(report["generatedUtilityMethods"] == (2 if profile == "balanced" else 6)
+            and report["utilityCatalogIncluded"], f"Missing native utility catalog for {profile}")
 
     observed_roots = None
     for target, metrics in native_metrics.items():
@@ -182,19 +184,32 @@ def check_analysis(profile, seed, build_reports, verification, jar_metrics, nati
         require(len(helpers) == helper_count and helpers == verify_targets.get(target, []),
                 f"Protect and verify helper evidence differ for {target}")
         sections = metrics["executableSections"]
+        utility_sections = [size for name, size in sections.items() if name.startswith(".nou")]
+        utility_sizes = measured["utilityCodeBytes"]
+        require(len(utility_sizes) == report["generatedUtilityMethods"]
+                and utility_sizes == analysis["utilityCodeBytes"][target]
+                and sorted(utility_sections) == sorted(utility_sizes.values()),
+                f"Native utility links differ from build or staged measurements for {target}")
+        metrics["utilityCodeBytes"] = utility_sizes
         root_sections = [size for name, size in sections.items() if name.startswith(".nar")]
         helper_sections = [size for name, size in sections.items() if name.startswith(".nah")]
-        require(len(root_sections) == len(helper_sections) == helper_count, f"Helper section count for {target}")
+        require(len(root_sections) == helper_count and len(helper_sections) == helper_functions,
+                f"Helper section count for {target}")
         require(sorted(root_sections) == sorted(item["rootBytes"] for item in helpers)
-                and sorted(helper_sections) == sorted(item["helperBytes"] for item in helpers),
+                and sorted(helper_sections) == sorted(edge["targetBytes"] for item in helpers for edge in item["edges"]),
                 f"Helper section measurements differ from disassembly for {target}")
         roots = {item["root"] for item in helpers}
         require(len(roots) == helper_count, f"Duplicate native helper roots for {target}")
         require(observed_roots is None or observed_roots == roots, f"Outlined methods differ across targets for {profile}")
         observed_roots = roots
         for item in helpers:
-            require(item["status"] == "verified" and 0 <= item["edgeOffset"] < item["rootBytes"],
-                    f"Final linked helper edge is unverified for {target}: {item}")
+            edges = item["edges"]
+            require(item["status"] == "verified" and len(edges) == expected_depth
+                    and item["edgeOffset"] == edges[0]["edgeOffset"], f"Linked helper graph for {target}: {item}")
+            for index, edge in enumerate(edges):
+                require(edge["status"] == "verified" and 0 <= edge["edgeOffset"] < edge["sourceBytes"]
+                        and (index == 0 or edges[index - 1]["targetSection"] == edge["sourceSection"]),
+                        f"Broken linked helper edge for {target}: {edge}")
         metrics["helpers"] = helpers
     return planned
 
@@ -230,6 +245,8 @@ def measure_case(profile, compiler_args, *, work, tool, java, java_tmp, original
     with zipfile.ZipFile(jar) as archive:
         jar_metrics = jar_stats(jar, archive)
         native_metrics = native_stats(archive, directory, args.llvm_objdump)
+    utilities = sorted(row["method"] for row in build_reports if row.get("result") == "analysis-utility")
+    require(set(utilities) <= set(selected), f"Utility methods were omitted for {label}")
     planned = check_analysis(profile, args.analysis_seed, build_reports, verification, jar_metrics, native_metrics,
                              selected)
     output = run_application(java, java_tmp, jar, directory / "application")
@@ -238,7 +255,8 @@ def measure_case(profile, compiler_args, *, work, tool, java, java_tmp, original
         "analysisProfile": profile,
         "compileSeconds": round(build_seconds, 3),
         "verifySeconds": round(verify_seconds, 3),
-        "selectedMethods": selected,
+        "selectedMethods": sorted(set(selected) - set(utilities)),
+        "generatedUtilityMethods": utilities,
         "nativeHelperMethods": len(planned),
         "plannedHelperMethods": planned,
         "verifiedNativeTargets": sorted(verification["nativeTargets"]),
@@ -248,11 +266,15 @@ def measure_case(profile, compiler_args, *, work, tool, java, java_tmp, original
         "nativeTargets": native_metrics,
     }
     if compiler_args:
-        transformed = dict.fromkeys(TARGETS, 0)
-        for target, sites in PASS_TOTAL.findall(build.stderr.decode("utf-8", errors="replace")):
-            transformed[target] += int(sites)
-        require(all(transformed.values()), f"LLVM emitted no transforms for at least one target: {transformed}")
-        result["llvmTransformedSites"] = transformed
+        transformed = {target: {} for target in TARGETS}
+        for target, pass_name, sites in PASS_TOTAL.findall(build.stderr.decode("utf-8", errors="replace")):
+            transformed[target][pass_name] = transformed[target].get(pass_name, 0) + int(sites)
+        require(all(sum(passes.values()) for passes in transformed.values()),
+                f"LLVM emitted no transforms for at least one target: {transformed}")
+        if profile == "maximum" and args.llvm_passes is None:
+            require(all(passes.get("native-mix", 0) > 0 and passes.get("native-route", 0) > 0
+                        for passes in transformed.values()), f"Advanced passes did not transform each target: {transformed}")
+        result["llvmTransformedSitesByPass"] = transformed
     print(f"{label}: verified all {len(TARGETS)} targets; matched runtime on {host}; {len(planned)} helper methods", flush=True)
     return result
 
@@ -307,7 +329,7 @@ def arguments():
     parser.add_argument("--clang", help="Clang executable for an optional maximum profile LLVM build")
     parser.add_argument("--llvm-opt", help="opt executable for the optional LLVM build")
     parser.add_argument("--llvm-plugin", help="trusted native pass plugin for the optional LLVM build")
-    parser.add_argument("--llvm-passes", default="native-encode<seed=42;max=4;prefix=method_>")
+    parser.add_argument("--llvm-passes", help="override the profile-selected LLVM pipeline")
     args = parser.parse_args()
     args.distribution = args.distribution.resolve()
     if not (args.distribution / "lib" / "native-obfuscator.jar").is_file():
@@ -354,7 +376,11 @@ def main():
         versions["llvmOpt"]["sha256"] = hashlib.sha256(args.llvm_opt.read_bytes()).hexdigest()
         versions["llvmPluginSha256"] = hashlib.sha256(args.llvm_plugin.read_bytes()).hexdigest()
         compiler_args = ["--clang", args.clang, "--llvm-opt", args.llvm_opt, "--llvm-plugin", args.llvm_plugin,
-                         "--profile", "balanced", "--llvm-passes", args.llvm_passes]
+                         "--profile", "balanced"]
+        if args.llvm_passes:
+            compiler_args.extend(["--llvm-passes", args.llvm_passes])
+        else:
+            compiler_args.extend(["--seed", "42"])
 
     classes = work / "classes"
     classes.mkdir()
@@ -399,7 +425,7 @@ def main():
         "profiles": results,
     }
     if compiler_args:
-        summary["llvmPasses"] = args.llvm_passes
+        summary["llvmPasses"] = args.llvm_passes or "profile presets"
     output = work / "summary.json"
     output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(f"Cross-target analysis checks passed. Summary at {output}")

@@ -3,6 +3,8 @@ package dev.nativeobfuscator;
 import dev.nativeobfuscator.translate.MethodCompiler;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.objectweb.asm.tree.ClassNode;
@@ -20,6 +22,7 @@ public final class AnalysisNativeTest {
         MethodNode narrow = subtraction();
         MethodNode wide = multiplication();
         checkSelection(narrow, wide);
+        checkGraphPlans(narrow);
         if (args.length != 0) {
             require(args.length == 3, "usage: AnalysisNativeTest [zig llvm-objdump scratch-directory]");
             checkLinked(Path.of(args[2]), args[0], args[1], narrow, wide);
@@ -86,6 +89,45 @@ public final class AnalysisNativeTest {
             "method compiler did not consume the selected C hook");
     }
 
+    private static void checkGraphPlans(MethodNode method) {
+        var analysis = new AnalysisNative(SEED, AnalysisNative.MAX_METHODS, AnalysisNative.MAX_HELPERS_PER_ROOT);
+        var sections = new HashSet<String>();
+        for (int i = 0; i < AnalysisNative.MAX_METHODS; i++) {
+            String root = INT_ROOT + i;
+            String signature = method.name + method.desc + i;
+            var site = analysis.prepare(method, root, signature);
+            require(site.equals(analysis.prepare(method, root, signature)) && site.helperCount() == 3,
+                "three-helper chain was not reproducible");
+            require(sections.add(site.rootSection()), "duplicate root section");
+            long covered = 0;
+            for (var helper : site.helpers()) {
+                require(sections.add(helper.section()) && helper.section().length() <= 8,
+                    "duplicate or overlong PE section name");
+                require(helper.mask() != 0 && (covered & helper.mask()) == 0, "input parts overlap or are empty");
+                covered |= helper.mask();
+            }
+            require(covered == 0xffffffffL, "input parts omit bits");
+            analysis.accept(site);
+        }
+        require(analysis.selectedCount() == 8 && analysis.helperCount() == 24, "maximum graph budget count");
+        require(analysis.prepare(method, INT_ROOT, method.name + method.desc).reason().contains("method limit"),
+            "graph exceeded the root limit");
+        require(!new AnalysisNative(SEED, 8, 0).prepare(method, INT_ROOT, method.name + method.desc).enabled(),
+            "zero helpers did not disable the graph");
+        MethodNode zero = withConstant("zero", IAND, true);
+        require(new AnalysisNative(SEED, 8, 3).prepare(zero, "method_zero", zero.name + zero.desc)
+            .reason().contains("annihilating literal"), "a constant result was eligible for a helper graph");
+
+        String signature = method.name + method.desc;
+        var reference = new AnalysisNative(SEED, 1, 3).prepare(method, INT_ROOT, signature);
+        var orders = new HashSet<List<AnalysisNative.Helper>>();
+        for (long seed = 0; seed < 64; seed++) {
+            var site = new AnalysisNative(seed, 1, 3).prepare(method, INT_ROOT, signature);
+            orders.add(site.helpers());
+        }
+        require(orders.size() > 1 && reference.helperCount() == 3, "seed had no effect on helper partitions");
+    }
+
     private static MethodNode subtraction() {
         var method = method("subtract", "(II)I");
         method.visitVarInsn(ILOAD, 0);
@@ -134,36 +176,51 @@ public final class AnalysisNativeTest {
             typedef signed char jbyte;
             """);
 
-        var analysis = new AnalysisNative(SEED, 2);
-        var integer = analysis.prepare(narrow, INT_ROOT, narrow.name + narrow.desc);
-        analysis.accept(integer);
-        var longInteger = analysis.prepare(wide, LONG_ROOT, wide.name + wide.desc);
-        analysis.accept(longInteger);
-        require(longInteger.enabled() && longInteger.support().contains("uint64_t"), "long helper ABI was not emitted");
-        String support = MethodCompiler.runtimeSupport() + integer.support() + longInteger.support();
-        String intSource = MethodCompiler.compile(owner(), narrow, INT_ROOT, integer.rootAttribute(), integer::lower);
-        String longSource = MethodCompiler.compile(owner(), wide, LONG_ROOT, longInteger.rootAttribute(), longInteger::lower);
-        String exports = """
-            JNIEXPORT void *integer_root(void) { return (void *)method_test_subtract; }
-            JNIEXPORT void *long_root(void) { return (void *)method_test_multiply; }
-            """;
-        Path source = Files.writeString(scratch.resolve("native-helper.c"), support + intSource + longSource + exports);
+        var analysis = new AnalysisNative(SEED, 8, 3);
+        var methods = new ArrayList<>(List.of(narrow, wide));
+        methods.addAll(List.of(
+            operation("add", IADD, false), operation("or", LOR, true), operation("and", LAND, true),
+            operation("xor", IXOR, false), withConstant("constant", IADD, false), withConstant("negate", ISUB, true)));
+        var sites = new ArrayList<AnalysisNative.Selection>();
+        var support = new StringBuilder(MethodCompiler.runtimeSupport());
+        var roots = new StringBuilder();
+        var exports = new StringBuilder();
+        for (int i = 0; i < methods.size(); i++) {
+            MethodNode method = methods.get(i);
+            String root = "method_test_" + method.name;
+            var site = analysis.prepare(method, root, method.name + method.desc);
+            require(site.enabled(), "linked fixture was not eligible " + method.name);
+            analysis.accept(site);
+            sites.add(site);
+            support.append(site.support());
+            if (i != 0) roots.append(compile(method, site));
+            exports.append("JNIEXPORT void *export_").append(method.name)
+                .append("(void) { return (void *)").append(root).append("; }\n");
+        }
+        var integer = sites.getFirst();
+        var longInteger = sites.get(1);
+        require(longInteger.support().contains("uint64_t"), "long helper ABI was not emitted");
+        String intSource = compile(narrow, integer);
+        Path source = Files.writeString(scratch.resolve("native-helper.c"), support + intSource + roots + exports);
         for (NativeTarget target : NativeTarget.values()) {
             Path lib = scratch.resolve(target.key + "-" + target.file);
             link(zig, target, jni, scratch, source, lib, true);
             var evidence = analysis.verify(lib, target, objdump);
-            require(evidence.size() == 2 && evidence.stream().allMatch(result ->
-                result.status().equals("verified") && result.rootBytes() > 0 && result.helperBytes() > 0
-                    && result.edgeOffset() >= 0 && result.edgeOffset() < result.rootBytes()), target.key + " " + evidence);
-            require(analysis.verify(lib, target, null).stream().allMatch(result -> result.status().equals("unavailable")),
+            require(evidence.size() == sites.size(), "evidence omitted roots on " + target.key);
+            for (int i = 0; i < sites.size(); i++) checkEvidence(sites.get(i), evidence.get(i), target);
+            require(analysis.verify(lib, target, null).stream().allMatch(result -> result.status().equals("unavailable")
+                && result.edges().size() == 3 && result.edges().stream().allMatch(edge -> edge.status().equals("unavailable"))),
                 "missing disassembler was not reported for " + target.key);
         }
 
         NativeTarget host = NativeTarget.host();
         String unrelatedIntSource = MethodCompiler.compile(owner(), narrow, INT_ROOT, integer.rootAttribute(), null);
+        var exportedHelpers = new StringBuilder();
+        for (int i = 0; i < integer.helperCount(); i++)
+            exportedHelpers.append("JNIEXPORT void *export_helper_").append(i).append("(void) { return (void *)")
+                .append(integer.helpers().get(i).name()).append("; }\n");
         Path unrelated = Files.writeString(scratch.resolve("unrelated-helper.c"),
-            support + unrelatedIntSource + longSource + exports
-                + "JNIEXPORT void *unrelated_address(void) { return (void *)" + integer.helper() + "; }\n");
+            support + unrelatedIntSource + roots + exports + exportedHelpers);
         Path unrelatedLib = scratch.resolve("unrelated-" + host.file);
         link(zig, host, jni, scratch, unrelated, unrelatedLib, true);
         var unrelatedEvidence = analysis.verify(unrelatedLib, host, objdump);
@@ -171,17 +228,146 @@ public final class AnalysisNativeTest {
                 && unrelatedEvidence.getFirst().edgeOffset() == null && unrelatedEvidence.getLast().status().equals("verified"),
             "present but unrelated helper incorrectly verified: " + unrelatedEvidence);
 
-        Path executableSource = Files.writeString(scratch.resolve("native-helper-main.c"), support + intSource + longSource + """
+        String nextHelper = integer.helpers().get(1).name();
+        String call = "uint32_t prior = " + nextHelper + "(a, b);";
+        String unreachableTransfer = host == NativeTarget.LINUX_ARM64 || host == NativeTarget.WINDOWS_ARM64
+            ? "b 1f\\n\\tbl " : "jmp 1f\\n\\tcall ";
+        String brokenSupport = support.toString().replace(call,
+            "__asm__ volatile(\"" + unreachableTransfer + nextHelper + "\\n1:\"); uint32_t prior = a - b;");
+        require(!brokenSupport.contentEquals(support), "unreachable edge fixture did not replace a helper call");
+        Path broken = Files.writeString(scratch.resolve("unreachable-helper.c"),
+            brokenSupport + intSource + roots + exports + exportedHelpers);
+        Path brokenLib = scratch.resolve("unreachable-" + host.file);
+        link(zig, host, jni, scratch, broken, brokenLib, true);
+        var brokenEvidence = analysis.verify(brokenLib, host, objdump).getFirst();
+        require(brokenEvidence.status().equals("unverified") && brokenEvidence.edgeOffset() != null
+                && brokenEvidence.edges().get(1).status().equals("unverified")
+                && brokenEvidence.edges().get(1).targetBytes() > 0 && brokenEvidence.edges().get(1).edgeOffset() == null
+                && brokenEvidence.edges().get(2).status().equals("verified"),
+            "unreachable transfer within a helper incorrectly verified: " + brokenEvidence);
+
+        String missingSupport = support.toString().replace(integer.support(), "");
+        Path missing = Files.writeString(scratch.resolve("missing-helper.c"), missingSupport + unrelatedIntSource + roots + exports);
+        Path missingLib = scratch.resolve("missing-" + host.file);
+        link(zig, host, jni, scratch, missing, missingLib, true);
+        var missingEvidence = analysis.verify(missingLib, host, objdump).getFirst();
+        require(missingEvidence.status().equals("unverified") && missingEvidence.rootBytes() > 0
+                && missingEvidence.edges().stream().allMatch(edge -> edge.targetBytes() == null && edge.edgeOffset() == null),
+            "an absent helper section incorrectly verified: " + missingEvidence);
+
+        String main = """
             int main(void) {
                 if ((uint32_t)method_test_subtract(0, 0, INT32_MIN, 1) != UINT32_C(0x7fffffff)) return 1;
                 if ((uint32_t)method_test_subtract(0, 0, 5, 12) != UINT32_C(0xfffffff9)) return 2;
                 if ((uint64_t)method_test_multiply(0, 0, INT64_MIN, 3) != UINT64_C(0x8000000000000000)) return 3;
                 if ((uint64_t)method_test_multiply(0, 0, -7, 17) != 119) return 4;
+                if (method_test_constant(0, 0, INT32_MAX) != INT32_MIN) return 5;
+                if (method_test_negate(0, 0, -7) != 7) return 6;
                 return 0;
             }
-            """);
-        Path executable = scratch.resolve(host.key.startsWith("windows") ? "native-helper.exe" : "native-helper-run");
-        link(zig, host, jni, scratch, executableSource, executable, false);
+            """;
+        runExecutable(zig, host, jni, scratch, "root-semantics", support + intSource + roots + main);
+        checkSemantics(zig, host, jni, scratch);
+    }
+
+    private static String compile(MethodNode method, AnalysisNative.Selection site) throws Exception {
+        return MethodCompiler.compile(owner(), method, site.root(), site.rootAttribute(), site::lower);
+    }
+
+    private static void checkEvidence(AnalysisNative.Selection site, AnalysisNative.Evidence evidence, NativeTarget target) {
+        require(evidence.root().equals(site.root()) && evidence.status().equals("verified")
+                && evidence.edges().size() == site.helperCount(), target.key + " " + evidence);
+        String sourceSection = site.rootSection();
+        Long sourceBytes = evidence.rootBytes();
+        for (int i = 0; i < site.helperCount(); i++) {
+            var edge = evidence.edges().get(i);
+            require(edge.sourceSection().equals(sourceSection) && edge.targetSection().equals(site.helpers().get(i).section())
+                    && edge.sourceBytes().equals(sourceBytes) && edge.targetBytes() > 0 && edge.status().equals("verified")
+                    && edge.edgeOffset() >= 0 && edge.edgeOffset() < sourceBytes, target.key + " " + edge);
+            sourceSection = edge.targetSection();
+            sourceBytes = edge.targetBytes();
+        }
+        var first = evidence.edges().getFirst();
+        require(evidence.helperBytes().equals(first.targetBytes()) && evidence.edgeOffset().equals(first.edgeOffset()),
+            "first-edge compatibility fields differ " + evidence);
+    }
+
+    private static MethodNode operation(String name, int opcode, boolean wide) {
+        var method = method(name, wide ? "(JJ)J" : "(II)I");
+        method.visitVarInsn(wide ? LLOAD : ILOAD, 0);
+        method.visitVarInsn(wide ? LLOAD : ILOAD, wide ? 2 : 1);
+        method.visitInsn(opcode);
+        method.visitInsn(wide ? LRETURN : IRETURN);
+        method.visitMaxs(wide ? 4 : 2, wide ? 4 : 2);
+        return method;
+    }
+
+    private static MethodNode withConstant(String name, int opcode, boolean constantFirst) {
+        var method = method(name, "(I)I");
+        if (constantFirst) method.visitInsn(ICONST_0);
+        method.visitVarInsn(ILOAD, 0);
+        if (!constantFirst) method.visitInsn(ICONST_1);
+        method.visitInsn(opcode);
+        method.visitInsn(IRETURN);
+        method.visitMaxs(2, 1);
+        return method;
+    }
+
+    private static void checkSemantics(String zig, NativeTarget host, Path jni, Path scratch) throws Exception {
+        int[] narrow = { IADD, ISUB, IMUL, IAND, IOR, IXOR };
+        int[] wide = { LADD, LSUB, LMUL, LAND, LOR, LXOR };
+        String[] operators = { "+", "-", "*", "&", "|", "^" };
+        String main = """
+                return 0;
+            }
+            int main(void) {
+                uint64_t values[] = { 0, 1, 2, UINT32_C(0x7fffffff), UINT32_C(0x80000000),
+                    UINT64_C(0x7fffffffffffffff), UINT64_C(0x8000000000000000), UINT64_MAX };
+                for (unsigned i = 0; i < sizeof(values) / sizeof(values[0]); ++i) {
+                    for (unsigned j = 0; j < sizeof(values) / sizeof(values[0]); ++j) {
+                        int result = compare(values[i], values[j]);
+                        if (result != 0) return result;
+                    }
+                }
+                uint64_t state = UINT64_C(123456789);
+                for (unsigned i = 0; i < 4096; ++i) {
+                    state = state * UINT64_C(6364136223846793005) + UINT64_C(1);
+                    uint64_t a = state;
+                    state = state * UINT64_C(6364136223846793005) + UINT64_C(1);
+                    int result = compare(a, state);
+                    if (result != 0) return result;
+                }
+                return 0;
+            }
+            """;
+        for (int depth = 1; depth <= AnalysisNative.MAX_HELPERS_PER_ROOT; depth++) {
+            for (boolean longType : List.of(false, true)) {
+                var emitted = new StringBuilder(MethodCompiler.runtimeSupport());
+                var comparisons = new StringBuilder("static int compare(uint64_t a, uint64_t b) {\n");
+                var analysis = new AnalysisNative(SEED + depth, 8, depth);
+                String type = longType ? "uint64_t" : "uint32_t";
+                String values = longType ? "bits_j(a), bits_j(b)" : "bits_i(a), bits_i(b)";
+                for (int i = 0; i < operators.length; i++) {
+                    String name = "operation_" + i;
+                    MethodNode node = operation(name, (longType ? wide : narrow)[i], longType);
+                    var site = analysis.prepare(node, name, name + node.desc);
+                    analysis.accept(site);
+                    emitted.append(site.support()).append(compile(node, site));
+                    comparisons.append("    if ((").append(type).append(")").append(name).append("(0, 0, ")
+                        .append(values).append(") != ((").append(type).append(")a ").append(operators[i])
+                        .append(" (").append(type).append(")b)) return ").append(i + 1).append(";\n");
+                }
+                runExecutable(zig, host, jni, scratch, "semantics-" + depth + "-" + type,
+                    emitted.append(comparisons).append(main).toString());
+            }
+        }
+    }
+
+    private static void runExecutable(String zig, NativeTarget host, Path jni, Path scratch, String name, String code)
+            throws Exception {
+        Path source = Files.writeString(scratch.resolve(name + ".c"), code);
+        Path executable = scratch.resolve(name + (host.key.endsWith("-windows") ? ".exe" : ""));
+        link(zig, host, jni, scratch, source, executable, false);
         execute(List.of(executable.toAbsolutePath().toString()));
     }
 

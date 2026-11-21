@@ -14,9 +14,11 @@ import java.util.Set;
 final class AnalysisVerification {
     record Report(String profile, String seed, int resourceBudget, int entryBudget,
                   int expectedResourceBytes, int expectedResourceEntries, boolean resourcesVerified,
-                  String manifestSha256, List<String> anchoredNativeTargets) {
+                  String manifestSha256, List<String> anchoredNativeTargets,
+                  Map<String, Map<String, Long>> utilityCodeBytes) {
         Report {
             anchoredNativeTargets = List.copyOf(anchoredNativeTargets);
+            utilityCodeBytes = Map.copyOf(utilityCodeBytes);
         }
     }
 
@@ -50,8 +52,9 @@ final class AnalysisVerification {
 
     static Result verify(AnalysisConfig config, String loader, String root, Map<String, byte[]> staged,
                          Map<String, String> librariesByTarget, Map<Integer, byte[]> registrationResources,
-                         List<String> errors) throws IOException {
-        var plan = AnalysisCorpus.plan(config.profile().id, config.seed(), config.resourceBudget(), config.entryBudget());
+                         FilePadding.Generation utilities, List<String> errors) throws IOException {
+        var plan = AnalysisCorpus.withUtilities(AnalysisCorpus.plan(config.profile().id, config.seed(),
+            config.resourceBudget(), config.entryBudget()), utilities);
         var expected = AnalysisCorpus.generate(plan);
         var allowed = new HashSet<String>();
         int before = errors.size();
@@ -91,6 +94,8 @@ final class AnalysisVerification {
         }
 
         var anchored = new ArrayList<String>();
+        var utilityCodeBytes = new java.util.LinkedHashMap<String, Map<String, Long>>();
+        var sections = AnalysisUtilitySections.names(utilities);
         if (digest != null && registrationBinding != null) {
             byte[] payload = AnalysisBinding.payload(digest);
             for (var library : librariesByTarget.entrySet()) {
@@ -101,6 +106,7 @@ final class AnalysisVerification {
                     AnalysisBinding.require(binary, target, payload, loader);
                     AnalysisBinding.requireRegistrations(binary, target, registrationBinding);
                     anchored.add(library.getKey());
+                    utilityCodeBytes.put(library.getKey(), AnalysisUtilitySections.require(binary, target, sections));
                 } catch (IOException failure) {
                     errors.add("Native analysis binding invalid for " + library.getKey() + ": " + failure.getMessage());
                 }
@@ -109,7 +115,7 @@ final class AnalysisVerification {
 
         return new Result(allowed, new Report(config.profile().option, Long.toUnsignedString(config.seed()),
             config.resourceBudget(), config.entryBudget(), plan.byteCount(), plan.entryCount(), resourcesVerified,
-            digest == null ? null : HexFormat.of().formatHex(digest), anchored.stream().sorted().toList()));
+            digest == null ? null : HexFormat.of().formatHex(digest), anchored.stream().sorted().toList(), utilityCodeBytes));
     }
 
     private static ByteArrayInputStream stream(byte[] contents) {

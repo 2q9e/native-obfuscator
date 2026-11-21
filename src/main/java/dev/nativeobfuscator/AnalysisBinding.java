@@ -41,7 +41,11 @@ final class AnalysisBinding {
     }
 
     static void requireRegistrations(byte[] binary, NativeTarget target, byte[] registrationPayload) throws IOException {
-        NativeImage.requireReadOnlySection(binary, target, REGISTRATION_SECTION, registrationPayload);
+        try {
+            NativeImage.requireReadOnlySection(binary, target, REGISTRATION_SECTION, registrationPayload);
+        } catch (IOException failure) {
+            throw new IOException("Invalid native registration digest table: " + failure.getMessage(), failure);
+        }
     }
 
     static String registrationSource(byte[] table) {
