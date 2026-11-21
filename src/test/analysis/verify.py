@@ -102,6 +102,24 @@ def check_no_writes(cli, work, original, common):
     assert original.read_bytes() == original_bytes, "Analyze or dry run altered the original JAR"
 
 
+def check_source_output(cli, work, original, common):
+    output = work / "preview.c"
+    before = set(work.rglob("*"))
+    emitted = last_report(cli("protect", "--input", original, "--output", output,
+                              *common, *BALANCED, "--emit-c"))
+    assert emitted["status"] == "c-emitted-resources-omitted", emitted
+    assert emitted["binding"] == "requires-packaged-jar-runtime" and "artifact" not in emitted, emitted
+    assert set(work.rglob("*")) - before == {output}, "Emit-C produced an unexpected file"
+    generated = output.read_text(encoding="utf-8")
+    assert "_registerBoundV1" in generated and "check_analysis_binding" in generated, generated
+
+    invalid = ["harden", "--input", original, "--output", output, *common, *BALANCED, "--dry-run"]
+    require_text(cli(*invalid, "--emit-c", expected=2).stderr, "cannot use --emit-c")
+    require_text(cli(*invalid, "--dry-run", expected=2).stderr, "Repeated option --dry-run")
+    require_text(cli(*invalid, "--profile", "maximum", expected=2).stderr, "Specify --clang")
+    assert output.read_text(encoding="utf-8") == generated, "Rejected dry run changed output"
+
+
 def check_workflow(cli, execute, work, original, common, compiler, baseline, balanced_corpus):
     staged = work / "staged.jar"
     composed = [*common, *BALANCED, "--padding-count", "1", "--padding-seed", "92",
@@ -242,6 +260,7 @@ def main():
     common = ["--include", "Arithmetic#calc*", "--unsupported", "retain"]
     check_invalid_options(cli, work, original, common)
     check_no_writes(cli, work, original, common)
+    check_source_output(cli, work, original, common)
 
     def protect(jar, settings):
         cli("protect", "--input", original, "--output", jar, *common, "--padding", "off", *settings, *compiler)
