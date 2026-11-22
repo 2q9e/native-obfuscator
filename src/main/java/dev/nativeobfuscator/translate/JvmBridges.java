@@ -2,6 +2,7 @@ package dev.nativeobfuscator.translate;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.*;
 import org.objectweb.asm.tree.analysis.BasicInterpreter;
@@ -10,6 +11,10 @@ import static org.objectweb.asm.Opcodes.*;
 
 /** Keeps symbolic JVM linkage in the original caller class. */
 final class JvmBridges {
+    private static final String CONCAT_BOOTSTRAP_PARAMETERS =
+        "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;";
+    private static final String CALL_SITE = ")Ljava/lang/invoke/CallSite;";
+
     private final ClassNode owner;
     private final MethodNode caller;
     private final List<MethodNode> methods = new ArrayList<>();
@@ -32,7 +37,8 @@ final class JvmBridges {
         return (instruction instanceof MethodInsnNode call && externalCall(owner, call))
             || (instruction instanceof FieldInsnNode field && !field.owner.equals(owner.name))
             || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF
-            || instruction.getOpcode() == NEW || arrayAllocation(instruction.getOpcode());
+            || instruction.getOpcode() == NEW || arrayAllocation(instruction.getOpcode())
+            || (instruction instanceof InvokeDynamicInsnNode dynamic && stringConcat(dynamic));
     }
 
     static boolean arrayAllocation(int opcode) {
@@ -60,6 +66,28 @@ final class JvmBridges {
         return check.getOpcode() == CHECKCAST
             ? create(instructionIndex, null, Type.VOID_TYPE, arguments, operation, new InsnNode(POP))
             : create(instructionIndex, null, Type.INT_TYPE, arguments, operation);
+    }
+
+    static boolean stringConcat(InvokeDynamicInsnNode dynamic) {
+        Handle bootstrap = dynamic.bsm;
+        if (bootstrap.getTag() != H_INVOKESTATIC || bootstrap.isInterface()
+            || !bootstrap.getOwner().equals("java/lang/invoke/StringConcatFactory")
+            || !Type.getReturnType(dynamic.desc).equals(Type.getType(String.class))) return false;
+        if (bootstrap.getName().equals("makeConcat"))
+            return bootstrap.getDesc().equals(CONCAT_BOOTSTRAP_PARAMETERS + CALL_SITE) && dynamic.bsmArgs.length == 0;
+        if (!bootstrap.getName().equals("makeConcatWithConstants")
+            || !bootstrap.getDesc().equals(CONCAT_BOOTSTRAP_PARAMETERS + "Ljava/lang/String;[Ljava/lang/Object;" + CALL_SITE)
+            || dynamic.bsmArgs.length == 0 || !(dynamic.bsmArgs[0] instanceof String)) return false;
+        for (Object constant : dynamic.bsmArgs) {
+            if (!(constant instanceof String || constant instanceof Integer || constant instanceof Long
+                || constant instanceof Float || constant instanceof Double)) return false;
+        }
+        return true;
+    }
+
+    MethodNode concat(InvokeDynamicInsnNode dynamic, int instructionIndex) {
+        return create(instructionIndex, null, Type.getReturnType(dynamic.desc),
+            Type.getArgumentTypes(dynamic.desc), dynamic.clone(null));
     }
 
     MethodNode allocateArray(AbstractInsnNode allocation, int instructionIndex, Type type) {

@@ -2,6 +2,7 @@ import dev.nativeobfuscator.translate.MethodCompiler;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.tree.*;
 import static org.objectweb.asm.Opcodes.*;
@@ -165,6 +166,17 @@ public final class GenerateChecks {
         missingArray.visitInsn(IRETURN);
         missingArray.visitMaxs(0, 0);
         missingArray.visitEnd();
+        String concatDescriptor = "(Ljava/lang/String;I)Ljava/lang/String;";
+        var plainConcat = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covPlainConcat", concatDescriptor, null, null);
+        plainConcat.visitCode();
+        plainConcat.visitVarInsn(ALOAD, 0);
+        plainConcat.visitVarInsn(ILOAD, 1);
+        plainConcat.visitInvokeDynamicInsn("concat", concatDescriptor, new Handle(H_INVOKESTATIC,
+            "java/lang/invoke/StringConcatFactory", "makeConcat",
+            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;", false));
+        plainConcat.visitInsn(ARETURN);
+        plainConcat.visitMaxs(0, 0);
+        plainConcat.visitEnd();
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());
 

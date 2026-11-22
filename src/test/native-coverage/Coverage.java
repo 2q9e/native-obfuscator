@@ -186,6 +186,16 @@ public class Coverage {
         return built;
     }
     public static Object rejectAllocation(int size) { return new StringBuilder(Math.abs(size)); }
+    public static String covConcat(String name, int count, long offset) { return name + "=" + count + "/" + offset; }
+    public static String covConcatObject(Object token, int value) {
+        String result = token + ":" + value;
+        effects++;
+        return result;
+    }
+    public static String rejectConcatLoop(String name, int count) {
+        for (int i = 0; i < count; i++) name = name + i;
+        return name;
+    }
     public static int rejectHandler(int[] a) { try { return a[0]; } catch (NullPointerException e) { return 3; } }
     public static int rejectReferenceLoop(Object[] a) { int n = 0; for (int i = 0; i < a.length; i++) if (a[i] != null) n++; return n; }
 
@@ -340,6 +350,14 @@ public class Coverage {
         show(() -> covConstruct(Long.MAX_VALUE, sameString, true).label == sameString);
         show(() -> covConstruct(5, null, true).label == null);
         show(() -> rejectAllocation(-7).getClass().getSimpleName());
+        show(() -> covConcat("score", Integer.MIN_VALUE, Long.MAX_VALUE));
+        show(() -> covConcat(null, Integer.MAX_VALUE, Long.MIN_VALUE));
+        show(() -> covConcatObject(null, 7));
+        show(() -> covConcatObject(new Object() {
+            @Override public String toString() { throw new IllegalStateException(); }
+        }, 8));
+        show(() -> RawOps.covPlainConcat("literal", -4));
+        show(() -> rejectConcatLoop("loop:", 2));
         show(() -> covPending(0));
         show(() -> covPending(2));
         show(() -> covPendingArray(null, 0));

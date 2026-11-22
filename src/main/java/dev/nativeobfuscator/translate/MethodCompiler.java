@@ -323,7 +323,13 @@ public final class MethodCompiler {
             }
             case ATHROW -> throw new Unsupported("explicit throw and null-throw semantics are not verified");
             case MONITORENTER, MONITOREXIT -> throw new Unsupported("explicit monitor ownership and exception cleanup are not verified");
-            case INVOKEDYNAMIC -> throw new Unsupported("dynamic call-site linkage is not verified");
+            case INVOKEDYNAMIC -> {
+                var dynamic = (InvokeDynamicInsnNode) insn;
+                if (bridges == null || !JvmBridges.stringConcat(dynamic))
+                    throw new Unsupported("dynamic call-site linkage is not verified for this bootstrap");
+                MethodNode bridge = bridges.concat(dynamic, instructionIndex);
+                emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
+            }
             default -> throw new Unsupported("unsupported operation");
         }
     }
@@ -486,6 +492,7 @@ public final class MethodCompiler {
         for (AbstractInsnNode instruction : method.instructions) {
             int opcode = instruction.getOpcode();
             if (opcode == AALOAD || opcode == NEW || JvmBridges.arrayAllocation(opcode)) produced++;
+            else if (instruction instanceof InvokeDynamicInsnNode dynamic && JvmBridges.stringConcat(dynamic)) produced++;
             else if (instruction instanceof FieldInsnNode member
                 && (member.getOpcode() == GETFIELD || member.getOpcode() == GETSTATIC)) {
                 Type type = Type.getType(member.desc);
