@@ -45,7 +45,7 @@ report = run(tool + ["protect", "--output", protected] + selection + flags)
 (work / "build.log").write_text(report.stderr)
 decisions = [json.loads(line) for line in report.stdout.splitlines()]
 raw_methods = {"covRawZ", "covRawB", "covRawC", "covRawS", "covSpecial", "covReferenceCapacity",
-               "covLinkageRaw", "covLinkageMissing", "covExternalNull", "covExternalProtected"}
+               "covLinkageRaw", "covLinkageMissing", "covExternalNull", "covExternalProtected", "covExternalMissingField"}
 expected = raw_methods | set(re.findall(r"\b(cov\w+)\(", (root / "Coverage.java").read_text()))
 selected = {d["method"].split("#")[1].split("(")[0] for d in decisions if d["result"] == "selected"}
 assert selected == expected, (selected, expected, report.stdout)
@@ -54,7 +54,7 @@ native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declaratio
 assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d["result"] == "retained"}
-assert set(retained) == {"rejectAllocation", "rejectHandler", "rejectReferenceLoop", "rejectVolatile", "rejectExternalField", "rejectRawCall"}, retained
+assert set(retained) == {"rejectAllocation", "rejectHandler", "rejectReferenceLoop", "rejectVolatile", "rejectRawCall"}, retained
 assert "memory-model barriers" in retained["rejectVolatile"]
 assert "exception handlers" in retained["rejectHandler"]
 assert "local-reference lifetime" in retained["rejectReferenceLoop"]

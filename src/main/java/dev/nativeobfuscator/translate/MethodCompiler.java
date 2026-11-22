@@ -48,7 +48,7 @@ public final class MethodCompiler {
     public static List<MethodNode> rebuildBridges(ClassNode owner, MethodNode method) throws Unsupported {
         // Use the same verified reachability and deterministic naming as native emission.
         for (AbstractInsnNode instruction : method.instructions) {
-            if (instruction instanceof MethodInsnNode call && JvmBridges.externalCall(owner, call))
+            if (JvmBridges.requiresBridge(owner, instruction))
                 return compileWithBridges(owner, method, "rebuild_bridges", "", null).bridges();
         }
         return List.of();
@@ -177,7 +177,7 @@ public final class MethodCompiler {
                  IASTORE, LASTORE, FASTORE, DASTORE, AASTORE, BASTORE, CASTORE, SASTORE ->
                 arrayAccess(code, method, insn, frame, result);
             case GETFIELD, PUTFIELD, GETSTATIC, PUTSTATIC ->
-                fieldAccess(code, owner, method, (FieldInsnNode)insn, frame, result);
+                fieldAccess(code, owner, method, (FieldInsnNode)insn, frame, result, instructionIndex, bridges);
             case INVOKESTATIC, INVOKEVIRTUAL, INVOKESPECIAL, INVOKEINTERFACE ->
                 methodCall(code, owner, method, (MethodInsnNode)insn, frame, result, instructionIndex, bridges);
             case IADD, ISUB, IMUL, IAND, IOR, IXOR, LADD, LSUB, LMUL, LAND, LOR, LXOR -> {
@@ -579,20 +579,25 @@ public final class MethodCompiler {
     }
 
     private static void fieldAccess(StringBuilder code, ClassNode owner, MethodNode method, FieldInsnNode insn,
-                                    Frame<BasicValue> frame, Type result) throws Unsupported {
-        if (!insn.owner.equals(owner.name))
-            throw new Unsupported("field resolution outside the declaring class is not verified");
+                                    Frame<BasicValue> frame, Type result, int instructionIndex, JvmBridges bridges) throws Unsupported {
+        boolean statik = insn.getOpcode() == GETSTATIC || insn.getOpcode() == PUTSTATIC;
+        boolean store = insn.getOpcode() == PUTFIELD || insn.getOpcode() == PUTSTATIC;
+        int depth = frame.getStackSize();
+        if (!insn.owner.equals(owner.name)) {
+            if (bridges == null) throw new Unsupported("field resolution outside the declaring class requires a JVM bridge");
+            Type receiver = statik ? null : frame.getStack(depth - (store ? 2 : 1)).getType();
+            MethodNode bridge = bridges.field(insn, instructionIndex, receiver, store);
+            emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
+            return;
+        }
         FieldNode declaration = owner.fields.stream().filter(f -> f.name.equals(insn.name) && f.desc.equals(insn.desc)).findFirst().orElse(null);
         if (declaration == null) throw new Unsupported("field is not declared by the current class");
         if ((declaration.access & ACC_VOLATILE) != 0)
             throw new Unsupported("volatile field ordering requires verified JVM memory-model barriers");
-        boolean statik = insn.getOpcode() == GETSTATIC || insn.getOpcode() == PUTSTATIC;
-        boolean store = insn.getOpcode() == PUTFIELD || insn.getOpcode() == PUTSTATIC;
         if (statik != ((declaration.access & ACC_STATIC) != 0)) throw new Unsupported("field staticness disagrees with opcode");
         if (store && (declaration.access & ACC_FINAL) != 0) throw new Unsupported("writes to final fields require JVM initializer checks");
         Type type = Type.getType(insn.desc);
         if (!store) referenceResult(method, type);
-        int depth = frame.getStackSize();
         String receiver = statik ? "declaring" : stack(depth - (store ? 2 : 1)) + ".r";
         if (!statik) nullCheck(code, receiver, result);
         line(code, "{ jclass declaring = (*env)->FindClass(env, " + literal(owner.name) + ");");

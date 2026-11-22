@@ -97,7 +97,35 @@ public class Coverage {
     public static int covPendingArray(int[] a, int i) { int value = a[i]; effects++; return value; }
 
     // These must be retained, with explicit diagnostics.
-    public static int rejectExternalField() { return System.out == null ? 0 : 1; }
+    private static int fieldState;
+    private static class FieldBase {
+        static { fieldState += 1; }
+        static int count = 12;
+    }
+    private static final class FieldChild extends FieldBase {
+        static { fieldState += 10; }
+    }
+    private static final class FieldPeer {
+        private Object reference;
+        private long wide;
+        private volatile int published;
+    }
+    public static int covExternalSystemField() { return System.out == null ? 0 : 1; }
+    public static int covExternalStaticField(boolean read) {
+        if (!read) return 0;
+        FieldChild.count += 5;
+        return FieldChild.count;
+    }
+    private static long covExternalInstanceFields(FieldPeer peer, Object token, long delta) {
+        peer.reference = token;
+        peer.wide += delta;
+        effects++;
+        return peer.reference == token ? peer.wide : 0;
+    }
+    private static int covExternalVolatile(FieldPeer peer, int value) {
+        peer.published = value;
+        return peer.published;
+    }
     public static int rejectVolatile() { return published; }
     private static class VirtualPeer {
         int scale(int value) { return value * 2; }
@@ -209,6 +237,17 @@ public class Coverage {
         show(() -> covInterfaceDispatch(new DefaultDispatch(), Long.MAX_VALUE, 12.0));
         show(() -> covInterfaceDispatch(new OverrideDispatch(), Long.MAX_VALUE, 12.0));
         show(() -> covInterfaceDispatch(null, 7, 12.0));
+        show(() -> covExternalStaticField(false));
+        System.out.println("field-skipped:" + fieldState);
+        show(() -> covExternalStaticField(true));
+        System.out.println("field-inherited:" + fieldState);
+        show(Coverage::covExternalSystemField);
+        FieldPeer fieldPeer = new FieldPeer();
+        show(() -> covExternalInstanceFields(fieldPeer, token, Long.MAX_VALUE));
+        show(() -> covExternalInstanceFields(fieldPeer, null, 1));
+        show(() -> covExternalInstanceFields(null, token, 1));
+        show(() -> covExternalVolatile(fieldPeer, Integer.MIN_VALUE));
+        show(RawOps::covExternalMissingField);
         show(() -> covCallIdentity(token));
         show(() -> covCallIdentity(null));
         show(() -> covPending(0));

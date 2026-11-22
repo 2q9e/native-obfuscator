@@ -28,11 +28,27 @@ final class JvmBridges {
         };
     }
 
+    static boolean requiresBridge(ClassNode owner, AbstractInsnNode instruction) {
+        return (instruction instanceof MethodInsnNode call && externalCall(owner, call))
+            || (instruction instanceof FieldInsnNode field && !field.owner.equals(owner.name));
+    }
+
     List<MethodNode> methods() { return methods; }
 
     MethodNode call(MethodInsnNode call, int instructionIndex, Type receiver) {
-        Type returned = Type.getReturnType(call.desc);
-        Type[] arguments = Type.getArgumentTypes(call.desc);
+        var operation = new MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf);
+        return create(operation, instructionIndex, receiver, Type.getReturnType(call.desc), Type.getArgumentTypes(call.desc));
+    }
+
+    MethodNode field(FieldInsnNode field, int instructionIndex, Type receiver, boolean store) {
+        Type type = Type.getType(field.desc);
+        var operation = new FieldInsnNode(field.getOpcode(), field.owner, field.name, field.desc);
+        return store ? create(operation, instructionIndex, receiver, Type.VOID_TYPE, new Type[]{type})
+            : create(operation, instructionIndex, receiver, type, new Type[0]);
+    }
+
+    private MethodNode create(AbstractInsnNode operation, int instructionIndex, Type receiver,
+                              Type returned, Type[] arguments) {
         boolean nullReceiver = BasicInterpreter.NULL_TYPE.equals(receiver);
         Type[] parameters = arguments;
         if (receiver != null) {
@@ -54,12 +70,12 @@ final class JvmBridges {
         int slots = 0;
         for (int i = 0; i < parameters.length; i++) {
             Type parameter = parameters[i];
-            // Retain the verifier's null type for an invocation with a literal null receiver.
+            // Retain the verifier's null type for an operation with a literal null receiver.
             bridge.instructions.add(nullReceiver && i == 0
                 ? new InsnNode(ACONST_NULL) : new VarInsnNode(parameter.getOpcode(ILOAD), slots));
             slots += parameter.getSize();
         }
-        bridge.instructions.add(new MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf));
+        bridge.instructions.add(operation);
         bridge.instructions.add(new InsnNode(returned.getOpcode(IRETURN)));
         bridge.maxLocals = slots;
         bridge.maxStack = Math.max(slots, returned.getSize());

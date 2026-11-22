@@ -138,6 +138,13 @@ public final class GenerateChecks {
         protectedCall.visitInsn(IRETURN);
         protectedCall.visitMaxs(0, 0);
         protectedCall.visitEnd();
+        var missingField = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covExternalMissingField", "()I", null, null);
+        missingField.visitCode();
+        missingField.visitInsn(ACONST_NULL);
+        missingField.visitFieldInsn(GETFIELD, "RawStaticTarget", "missing", "I");
+        missingField.visitInsn(IRETURN);
+        missingField.visitMaxs(0, 0);
+        missingField.visitEnd();
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());
 
