@@ -1,6 +1,6 @@
 # Fabric fixture
 
-This example targets Minecraft 1.21.11, Yarn `1.21.11+build.4`, Loom `1.14.10`, and Fabric Loader `0.18.4`. The mod requires Java 21 or later and has no Fabric API dependency. At initialization it checks the integer kernel, a native method that calls Minecraft's `Identifier` and reads its widened path field, and a Mixin accessor on the same identifier. Fabric provides the version-specific [Loom documentation](https://docs.fabricmc.net/1.21.11/develop/loom/) and [1.21.11 release guidance](https://fabricmc.net/2025/12/05/12111.html).
+This example targets Minecraft 1.21.11, Yarn `1.21.11+build.4`, Loom `1.14.10`, and Fabric Loader `0.18.4`. The mod requires Java 21 or later and has no Fabric API dependency. At initialization it checks the integer kernel, an identifier score that reads Minecraft's widened path field, and a comparison that invokes Minecraft's `Identifier` through `Comparable`. It also checks a Mixin accessor on the same identifier. Fabric provides the version-specific [Loom documentation](https://docs.fabricmc.net/1.21.11/develop/loom/) and [1.21.11 release guidance](https://fabricmc.net/2025/12/05/12111.html).
 
 ## Build and protect
 
@@ -11,7 +11,7 @@ From the native-obfuscator repository root, use JDK 21 or 25 and install Gradle 
 ./gradlew -p examples/fabric protectFabricJar
 ```
 
-The example is a standalone Gradle project. `protectFabricJar` uses Loom's `remapJar` output by default and converts `Kernel.mix` and `Kernel.identifierScore`. Its selection keeps the entrypoint and Mixin in Java. The output is `examples/fabric/build/libs/native-fabric-fixture-1.0.0-protected.jar`. Gradle logs the CLI's method decisions and compiler errors.
+The example is a standalone Gradle project. `protectFabricJar` uses Loom's `remapJar` output by default and converts `Kernel.mix` and `Kernel.identifierScore`. Supply `-PnativeHierarchyJar=/absolute/path/to/server-intermediary.jar` to also convert `Kernel.identifierPriority`. The selection keeps the entrypoint and Mixin in Java. The output is `examples/fabric/build/libs/native-fabric-fixture-1.0.0-protected.jar`. Gradle logs the CLI's method decisions and compiler errors.
 
 Use these Gradle properties when the corresponding input differs:
 
@@ -19,13 +19,15 @@ Use these Gradle properties when the corresponding input differs:
 | --- | --- |
 | `nativeInputJar` | Absolute path to the existing Java obfuscator's output. Start from Loom's remapped JAR and preserve intermediary mappings, Fabric metadata, mixin configuration and access-widener resources. |
 | `nativeMethod` | Optional final-name selector. Use the Java obfuscator's mapping to select renamed methods. |
+| `nativeHierarchyJar` | Absolute path to Minecraft's intermediary server JAR. Its class headers prove that the runtime `Identifier` implements `Comparable`. |
 | `nativeCli` | Absolute path to an alternate native-obfuscator executable. The default uses the root `installDist` Java libraries. |
 | `nativeTarget`, `nativeZig` | A target such as `aarch64-linux` or `all`, and the absolute path to a Zig executable for cross-compilation. |
 
 ```sh
 ./gradlew -p examples/fabric protectFabricJar \
   -PnativeInputJar=/absolute/path/to/post-java-obfuscation.jar \
-  '-PnativeMethod=example/nativefixture/Kernel#mix(II)I'
+  -PnativeHierarchyJar=/absolute/path/to/server-intermediary.jar \
+  '-PnativeMethod=example/nativefixture/a#a*'
 ```
 
 The [ProGuard keep rules](smoke/proguard.pro) preserve the Fabric entrypoint and Mixin names while allowing the kernel and its methods to be renamed. Build Loom's remapped mod first. Use the intermediary server JAR produced by Fabric Loader and supply the server libraries, Fabric classpath, and JDK modules as ProGuard library inputs. Generate a library overlay with the remapped mod's access widener so that ProGuard can resolve the widened field. The overlay is used during this test's ProGuard invocation. [ProGuard configuration manual](https://www.guardsquare.com/manual/configuration/usage)
@@ -42,7 +44,7 @@ java -jar "$proguard_jar" @examples/fabric/smoke/proguard.pro \
   "${library_args[@]}"
 ```
 
-Set the Bash array `library_args` to alternating `-libraryjars` and absolute library paths. Include the JDK's `jmods/*.jmod` with the filter `(!**.jar;!module-info.class)`, the Fabric Loader and its dependencies, and the libraries extracted by the Minecraft server bundle. Use the output mapping for the Native Obfuscator selection. ProGuard 7.8.2 named the fixture class `example.nativefixture.a` and overloaded both methods as `a`, so `-PnativeMethod='example/nativefixture/a#a*'` selected both. The two renamed native methods returned the expected values through Fabric Loader 0.18.4 on Windows x64 with Java 21 and 25.
+Set the Bash array `library_args` to alternating `-libraryjars` and absolute library paths. Include the JDK's `jmods/*.jmod` with the filter `(!**.jar;!module-info.class)`, the Fabric Loader and its dependencies, and the libraries extracted by the Minecraft server bundle. Use the output mapping for the Native Obfuscator selection. ProGuard 7.8.2 named the fixture class `example.nativefixture.a` and overloaded the three methods as `a`. The selector above selected all three with `nativeHierarchyJar` configured. The renamed native methods returned the expected values through Fabric Loader 0.18.4 on Windows x64 with Java 21 and 25.
 
 To check that the kernel is native and the access widener uses the runtime namespace:
 
@@ -62,7 +64,7 @@ In a Minecraft 1.21.11 Fabric Loader 0.18.4 test server whose operator has accep
 java --enable-native-access=ALL-UNNAMED -jar fabric-server-launch.jar nogui
 ```
 
-Look for `Native fixture passed (kernel = 997305193, identifier score = 28443952, Mixin and access widener active)` in the server log. Wait for the Minecraft world to finish loading, enter `stop` in the server console, and confirm that it exits. The repository and build tasks do not accept Minecraft's EULA.
+Look for `Native fixture passed (kernel = 997305193, identifier score = 28443952, priority = 1030, Mixin and access widener active)` in the server log. Wait for the Minecraft world to finish loading, enter `stop` in the server console, and confirm that it exits. The repository and build tasks do not accept Minecraft's EULA.
 
 ## Offline bootstrap smoke test
 
@@ -75,4 +77,4 @@ examples/fabric/smoke/check-bootstrap.sh "$fixture_jar" \
   /absolute/path/to/minecraft-server.jar "$fabric_classpath"
 ```
 
-The script uses a temporary working directory and does not start a world. Neither smoke process creates or changes an EULA file.
+Set `NATIVE_FIXTURE_EXPECT_HIERARCHY=1` when testing the unrenamed fixture built with `nativeHierarchyJar` to require a native `identifierPriority` declaration as well. The script uses a temporary working directory and does not start a world. Neither smoke process creates or changes an EULA file.

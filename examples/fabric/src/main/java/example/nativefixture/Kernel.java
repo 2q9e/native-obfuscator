@@ -15,4 +15,12 @@ final class Kernel {
         int pathLength = identifier.path.length();
         return mix(base, (namespaceLength << 16) | pathLength);
     }
+
+    static int identifierPriority(Identifier current, Identifier candidate, int salt) {
+        Comparable<Identifier> key = current;
+        int order = key.compareTo(candidate);
+        if (order == 0) return salt;
+        Identifier first = order < 0 ? current : candidate;
+        return mix(first.path.length(), salt);
+    }
 }

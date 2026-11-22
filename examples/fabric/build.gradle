@@ -31,10 +31,15 @@ def nativeInput = externalJar.orElse(remappedJar.map { it.asFile })
 def protectedJar = layout.buildDirectory.file("libs/${project.name}-${version}-protected.jar")
 def nativeCli = providers.gradleProperty('nativeCli').map { file(it) }
 def nativeLibs = fileTree('../../build/install/native-obfuscator/lib') { include '*.jar' }
-def nativeMethods = providers.gradleProperty('nativeMethod').map { [it] }.orElse([
+def nativeHierarchyJar = providers.gradleProperty('nativeHierarchyJar').map { file(it) }
+def defaultNativeMethods = [
     'example/nativefixture/Kernel#mix(II)I',
     'example/nativefixture/Kernel#identifierScore*',
-])
+]
+if (nativeHierarchyJar.isPresent()) {
+    defaultNativeMethods.add('example/nativefixture/Kernel#identifierPriority*')
+}
+def nativeMethods = providers.gradleProperty('nativeMethod').map { [it] }.orElse(defaultNativeMethods)
 def nativeTarget = providers.gradleProperty('nativeTarget')
 def nativeZig = providers.gradleProperty('nativeZig')
 
@@ -51,6 +56,7 @@ tasks.register('protectFabricJar', Exec) {
         inputs.files(nativeLibs)
     }
     inputs.property('nativeMethods', nativeMethods)
+    inputs.file(nativeHierarchyJar).optional()
     inputs.property('nativeTarget', nativeTarget.orElse(''))
     inputs.property('nativeZig', nativeZig.orElse(''))
     outputs.file(protectedJar)
@@ -75,6 +81,9 @@ tasks.register('protectFabricJar', Exec) {
             '--exclude', 'example/nativefixture/NativeFixture#*',
             '--exclude', 'example/nativefixture/mixin/*#*'
         nativeMethods.get().each { selector -> args '--include', selector }
+        if (nativeHierarchyJar.isPresent()) {
+            args '--hierarchy-jar', nativeHierarchyJar.get().absolutePath
+        }
         if (nativeTarget.isPresent()) {
             args '--target', nativeTarget.get()
         }

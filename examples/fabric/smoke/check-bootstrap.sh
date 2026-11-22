@@ -19,6 +19,12 @@ if ! grep -F 'static native int mix(int, int);' <<< "$declarations" > /dev/null 
     printf 'Expected both native methods in the remapped Kernel class.\n' >&2
     exit 1
 fi
+if [ "${NATIVE_FIXTURE_EXPECT_HIERARCHY:-0}" = 1 ] &&
+    ! grep -F 'static native int identifierPriority(net.minecraft.class_2960, net.minecraft.class_2960, int);' \
+        <<< "$declarations" > /dev/null; then
+    printf 'Expected a native dependency-typed Identifier method.\n' >&2
+    exit 1
+fi
 
 mkdir -p "$fixture_run/mods"
 cp -- "$fixture_jar" "$fixture_run/mods/native-fabric-fixture.jar"
@@ -44,7 +50,7 @@ timeout 60s "$fixture_jdk/bin/java" --enable-native-access=ALL-UNNAMED -Xcheck:j
     cat bootstrap.log >&2
     exit 1
 }
-if ! grep -F 'Native fixture passed (kernel = 997305193, identifier score = 28443952, Mixin and access widener active)' bootstrap.log; then
+if ! grep -F 'Native fixture passed (kernel = 997305193, identifier score = 28443952, priority = 1030, Mixin and access widener active)' bootstrap.log; then
     cat bootstrap.log >&2
     exit 1
 fi
