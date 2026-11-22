@@ -45,6 +45,7 @@ public final class Main {
                   native-obfuscator restore --output RELEASE.jar
 
                 --include GLOB        Select an owner#name(descriptor) signature. Repeatable.
+                --hierarchy-jar PATH  Read dependency class headers for JVM call bridges. Repeatable.
                 --exclude GLOB        Retain a matching signature in Java. Repeatable.
                 --min-instructions N  Skip compatible methods under N JVM instructions (default 0).
                 --report-native-sizes Report exact Linux function sizes as JSON records.
@@ -133,7 +134,7 @@ public final class Main {
             });
             report = Workflow.verify(config.input(), candidate, expected, targetKeys(config.targets()),
                 config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(),
-                config.clang());
+                config.clang(), config.hierarchyJars());
             if (report.structurallyValid()) Workflow.publishStage(candidate, config.output(), report);
         } finally {
             Files.deleteIfExists(candidate);
@@ -203,7 +204,8 @@ public final class Main {
             throws IOException, InterruptedException {
         var config = coverage.config;
         return Workflow.verify(config.input(), staged, coverage.methods, verificationTargets(config),
-            config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(), clang);
+            config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(), clang,
+            config.hierarchyJars());
     }
 
     private static int runProtection(Protector.Config config, Gson gson, Consumer<Protector.Decision> collect)
@@ -255,7 +257,7 @@ public final class Main {
     }
 
     private static Set<String> coverageOptions() {
-        return Set.of("--input", "--include", "--exclude", "--target", "--unsupported",
+        return Set.of("--input", "--include", "--exclude", "--target", "--unsupported", "--hierarchy-jar",
             "--min-instructions", "--padding", "--padding-count", "--padding-seed", "--markers",
             "--marker-seed", "--analysis-resistance", "--analysis-seed", "--analysis-resource-budget",
             "--analysis-entry-budget", "--analysis-helper-methods", "--analysis-helpers-per-method",
@@ -345,6 +347,7 @@ public final class Main {
         };
         var includes = new ArrayList<Pattern>();
         var excludes = new ArrayList<Pattern>();
+        var hierarchyJars = new ArrayList<Path>();
         var targets = new LinkedHashSet<NativeTarget>();
         Map<String, String> options = new HashMap<>();
         boolean emitC = false;
@@ -367,6 +370,7 @@ public final class Main {
             switch (key) {
                 case "--include" -> includes.add(glob(value));
                 case "--exclude" -> excludes.add(glob(value));
+                case "--hierarchy-jar" -> hierarchyJars.add(Path.of(value));
                 case "--target" -> {
                     if (value.equals("all")) targets.addAll(List.of(NativeTarget.values()));
                     else targets.add(NativeTarget.parse(value));
@@ -457,7 +461,7 @@ public final class Main {
         return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), orderedTargets,
             options.get("--zig"), skip, analyze || dryRun, emitC, options.get("--clang"), options.get("--llvm-opt"),
             plugin, plugin == null ? null : passes, growth, markers, markerSeed, paddingCount, paddingSeed,
-            minInstructions, reportNativeSizes, analysis);
+            minInstructions, reportNativeSizes, analysis, hierarchyJars);
     }
 
     private static String extendedAnalysisPasses(String legacy, AnalysisConfig analysis) {
@@ -529,6 +533,7 @@ public final class Main {
                 String key = field.getKey();
                 JsonElement value = field.getValue();
                 String flag = "--" + switch (key) {
+                    case "hierarchyJar" -> "hierarchy-jar";
                     case "paddingCount" -> "padding-count";
                     case "paddingSeed" -> "padding-seed";
                     case "analysisResistance" -> "analysis-resistance";
@@ -541,7 +546,7 @@ public final class Main {
                     case "analysisLlvmSites" -> "analysis-llvm-sites";
                     default -> key;
                 };
-                if (key.equals("include") || key.equals("exclude") || key.equals("target")) {
+                if (Set.of("include", "exclude", "target", "hierarchyJar").contains(key)) {
                     for (JsonElement item : value.getAsJsonArray()) {
                         args.add(flag);
                         args.add(stringValue(item));

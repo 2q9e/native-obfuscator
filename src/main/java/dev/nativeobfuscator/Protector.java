@@ -39,7 +39,11 @@ final class Protector {
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
                   boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed,
                   int paddingCount, long paddingSeed, int minInstructions, boolean reportNativeSizes,
-                  AnalysisConfig analysis) {
+                  AnalysisConfig analysis, List<Path> hierarchyJars) {
+        Config {
+            hierarchyJars = List.copyOf(hierarchyJars);
+        }
+
         Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
                List<NativeTarget> targets, String zig, boolean skipUnsupported, boolean analyze,
                boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses,
@@ -47,13 +51,13 @@ final class Protector {
                int minInstructions, boolean reportNativeSizes) {
             this(input, output, includes, excludes, targets, zig, skipUnsupported, analyze, emitC, clang,
                 llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount, paddingSeed,
-                minInstructions, reportNativeSizes, AnalysisConfig.OFF);
+                minInstructions, reportNativeSizes, AnalysisConfig.OFF, List.of());
         }
 
         Config withOutput(Path replacement) {
             return new Config(input, replacement, includes, excludes, targets, zig, skipUnsupported, analyze,
                 emitC, clang, llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount,
-                paddingSeed, minInstructions, reportNativeSizes, analysis);
+                paddingSeed, minInstructions, reportNativeSizes, analysis, hierarchyJars);
         }
     }
     record Decision(String method, String result, String reason, Integer instructions,
@@ -101,7 +105,7 @@ final class Protector {
             throw new IOException("Input already uses the native-obfuscator resource namespace");
         var exclusions = FabricExclusions.from(files);
         var versioned = versionedClasses(files.keySet());
-        var hierarchy = referenceHierarchy(files, versioned);
+        var hierarchy = referenceHierarchy(files, versioned, config.hierarchyJars);
         var generated = FilePadding.generate(files, config.paddingCount, config.paddingSeed,
             config.paddingCount == 0 ? Set.of() : paddingReferencePlan(files, config, exclusions, versioned, hierarchy), hierarchy);
         var utilities = AnalysisDecoys.generate(files, config.analysis.decoyMethods(), config.analysis.seed(),
@@ -116,7 +120,7 @@ final class Protector {
             Archive.preflight(files, analysisPlan.byteCount(), analysisPlan.entryCount() + 2);
         var nativePlan = config.analysis.nativeMethodLimit() == 0 ? null
             : new AnalysisNative(config.analysis.seed(), config.analysis.nativeMethodLimit(), config.analysis.nativeHelpersPerRoot());
-        String id = runtimeId(files, config);
+        String id = runtimeId(files, config, hierarchy);
         String loader = RUNTIME.substring(0, RUNTIME.lastIndexOf('/') + 1) + id;
         var source = new StringBuilder(MethodCompiler.runtimeSupport()).append(registrationSupport());
         var registrationResources = new LinkedHashMap<String, byte[]>();
@@ -335,7 +339,7 @@ final class Protector {
         return markerText.toString().getBytes(StandardCharsets.US_ASCII);
     }
 
-    private static String runtimeId(Map<String, byte[]> files, Config config) {
+    private static String runtimeId(Map<String, byte[]> files, Config config, ReferenceHierarchy hierarchy) {
         var digest = Archive.sha256();
         files.forEach((name, data) -> {
             byte[] key = name.getBytes(StandardCharsets.UTF_8);
@@ -345,6 +349,7 @@ final class Protector {
         });
         digest.update((config.includes + "\n" + config.excludes + "\n" + config.targets
             + "\n" + config.llvmPasses + "\nformat 2").getBytes(StandardCharsets.UTF_8));
+        if (!config.hierarchyJars.isEmpty()) hierarchy.updateDigest(digest);
         if (config.minInstructions != 0)
             digest.update(("minimum instructions " + config.minInstructions).getBytes(StandardCharsets.UTF_8));
         if (config.analysis.enabled()) {
@@ -403,10 +408,39 @@ final class Protector {
     }
 
     static ReferenceHierarchy referenceHierarchy(Map<String, byte[]> files) throws IOException {
-        return referenceHierarchy(files, versionedClasses(files.keySet()));
+        return referenceHierarchy(files, List.of());
     }
 
-    private static ReferenceHierarchy referenceHierarchy(Map<String, byte[]> files, Set<String> versioned) throws IOException {
+    static ReferenceHierarchy referenceHierarchy(Map<String, byte[]> files, List<Path> libraries) throws IOException {
+        return referenceHierarchy(files, versionedClasses(files.keySet()), libraries);
+    }
+
+    private static ReferenceHierarchy referenceHierarchy(Map<String, byte[]> files, Set<String> versioned,
+                                                         List<Path> libraries) throws IOException {
+        var parents = classParents(files, versioned);
+        if (libraries.isEmpty()) return new ReferenceHierarchy(parents);
+        var dependencyParents = new LinkedHashMap<String, List<String>>();
+        var ambiguous = new HashSet<>(versioned);
+        for (Path library : libraries) {
+            try {
+                var entries = Archive.readLibrary(library);
+                var variants = versionedClasses(entries.keySet());
+                ambiguous.addAll(variants);
+                classParents(entries, variants).forEach((name, supers) -> {
+                    var previous = dependencyParents.putIfAbsent(name, supers);
+                    if (previous != null && !previous.equals(supers)) ambiguous.add(name);
+                });
+            } catch (IOException invalid) {
+                throw new IOException("Cannot index hierarchy JAR " + library + ": " + invalid.getMessage(), invalid);
+            }
+        }
+        ambiguous.forEach(dependencyParents::remove);
+        dependencyParents.forEach(parents::putIfAbsent);
+        return new ReferenceHierarchy(parents);
+    }
+
+    private static Map<String, List<String>> classParents(Map<String, byte[]> files, Set<String> versioned)
+            throws IOException {
         var parents = new LinkedHashMap<String, List<String>>();
         for (var entry : files.entrySet()) {
             String path = entry.getKey();
@@ -422,7 +456,7 @@ final class Protector {
                 throw new IOException("Invalid or unsupported classfile " + path, invalid);
             }
         }
-        return new ReferenceHierarchy(parents);
+        return parents;
     }
 
     private static ClassNode readClass(String path, byte[] bytes) throws IOException {

@@ -191,6 +191,10 @@ public final class GenerateChecks {
         peerTarget.visitEnd();
         peer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawStaticTarget.class"), peer.toByteArray());
+        var conflicting = new ClassWriter(0);
+        conflicting.visit(V21, ACC_PUBLIC, "Coverage$DefaultDispatch", null, "java/lang/Object", null);
+        conflicting.visitEnd();
+        Files.write(Path.of(args[0]).resolveSibling("conflicting-dispatch.class"), conflicting.toByteArray());
         System.out.println("Malformed operand policies: 11 passed; raw narrowing methods: 4 generated; private invokespecial: 1 generated");
     }
 }

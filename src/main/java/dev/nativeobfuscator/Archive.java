@@ -41,6 +41,14 @@ final class Archive {
     }
 
     static Map<String, byte[]> read(Path path, EntryCheck additionalCheck) throws IOException {
+        return read(path, additionalCheck, true);
+    }
+
+    static Map<String, byte[]> readLibrary(Path path) throws IOException {
+        return read(path, (name, size) -> {}, false);
+    }
+
+    private static Map<String, byte[]> read(Path path, EntryCheck additionalCheck, boolean rejectSigned) throws IOException {
         var files = new LinkedHashMap<String, byte[]>();
         long total = 0;
         try (var zip = new ZipFile(path.toFile())) {
@@ -51,7 +59,7 @@ final class Archive {
                 String name = entry.getName();
                 checkName(name);
                 if (files.containsKey(name)) throw new IOException("Duplicate JAR entry " + name);
-                if (name.toUpperCase(Locale.ROOT).matches("META-INF/([^/]+\\.(SF|RSA|DSA|EC)|SIG-[^/]+)"))
+                if (rejectSigned && name.toUpperCase(Locale.ROOT).matches("META-INF/([^/]+\\.(SF|RSA|DSA|EC)|SIG-[^/]+)"))
                     throw new IOException("Signed input JAR must be supplied before signing: " + name);
                 checkExpandedSize(name, entry.getSize(), total);
                 additionalCheck.accept(name, entry.getSize());

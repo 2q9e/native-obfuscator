@@ -97,6 +97,15 @@ final class Workflow {
                                      Set<String> expectedTargets,
                                      int paddingCount, long paddingSeed, int markers, long markerSeed,
                                      AnalysisConfig analysis, String clang) throws IOException, InterruptedException {
+        return verify(originalJar, stagedJar, expectedNativeMethods, expectedTargets, paddingCount, paddingSeed,
+            markers, markerSeed, analysis, clang, List.of());
+    }
+
+    static VerificationReport verify(Path originalJar, Path stagedJar,
+                                     Set<String> expectedNativeMethods, Set<String> expectedTargets,
+                                     int paddingCount, long paddingSeed, int markers, long markerSeed,
+                                     AnalysisConfig analysis, String clang, List<Path> hierarchyJars)
+            throws IOException, InterruptedException {
         if (markers < 0 || markers > 1000) throw new IllegalArgumentException("markers must be between 0 and 1000");
         Path original = regularFile(originalJar, "Original JAR");
         Path staged = regularFile(stagedJar, "Staged JAR");
@@ -111,7 +120,7 @@ final class Workflow {
         ReferenceHierarchy hierarchy;
         try {
             originalEntries = Archive.read(original);
-            hierarchy = Protector.referenceHierarchy(originalEntries);
+            hierarchy = Protector.referenceHierarchy(originalEntries, hierarchyJars);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
                 List.of(), 0, List.of(), Set.of(), List.of("Original JAR: " + failure.getMessage()), null, List.of());

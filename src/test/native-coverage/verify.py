@@ -18,9 +18,9 @@ java_home = os.environ.get("JAVA_HOME")
 def executable(name):
     return str(Path(java_home) / "bin" / name) if java_home else name
 
-def run(command):
+def run(command, expected=0):
     result = subprocess.run([str(x) for x in command], text=True, capture_output=True)
-    if result.returncode:
+    if result.returncode != expected:
         raise AssertionError(f"Command failed ({result.returncode}): {command}\n{result.stdout}\n{result.stderr}")
     return result
 
@@ -87,7 +87,45 @@ assert {d["method"].split("#")[1].split("(")[0]: d["result"] for d in versioned_
     "covHierarchyReceiver": "eligible", "covHierarchyInterface": "retained", "covHierarchyArguments": "retained"
 }, versioned_decisions
 
+dependency = work / "hierarchy-library.jar"
+conflicting = work / "hierarchy-conflict.jar"
+split_input = work / "hierarchy-input.jar"
+split_protected = work / "hierarchy-protected.jar"
+with ZipFile(original) as source, ZipFile(split_input, "w") as destination, ZipFile(dependency, "w") as library:
+    for name in source.namelist():
+        content = source.read(name)
+        if name == versioned_base:
+            library.writestr(name, content)
+            continue
+        if name == "META-INF/MANIFEST.MF":
+            content = content.rstrip(b"\r\n") + b"\r\nClass-Path: hierarchy-library.jar\r\n\r\n"
+        destination.writestr(name, content)
+with ZipFile(conflicting, "w") as library:
+    library.writestr(versioned_base, (work / "conflicting-dispatch.class").read_bytes())
+split_options = ["--input", split_input, "--include", "Coverage#covHierarchy*", "--unsupported", "retain", "--padding", "off"]
+unresolved = run(tool + ["analyze"] + split_options)
+ambiguous = run(tool + ["analyze"] + split_options + ["--hierarchy-jar", dependency, "--hierarchy-jar", conflicting])
+assert json.loads(unresolved.stdout.splitlines()[0])["result"] == "eligible", unresolved.stdout
+assert sum(json.loads(line)["result"] == "retained" for line in unresolved.stdout.splitlines()) == 2, unresolved.stdout
+assert ambiguous.stdout == unresolved.stdout, ambiguous.stdout
+dependency_config = work / "hierarchy.json"
+dependency_config.write_text(json.dumps({
+    "input": str(split_input), "include": ["Coverage#covHierarchy*"], "hierarchyJar": [str(dependency)], "padding": "off"
+}))
+resolved = run(tool + ["analyze", "--config", dependency_config])
+assert [json.loads(line)["result"] for line in resolved.stdout.splitlines()] == ["eligible"] * 3, resolved.stdout
+split_linkage = ["--hierarchy-jar", dependency]
+run(tool + ["harden", "--output", split_protected] + split_options + split_linkage + flags)
+run(tool + ["verify", "--staged", split_protected] + split_options + split_linkage + flags)
+run(tool + ["verify", "--staged", split_protected] + split_options + flags, expected=1)
+with ZipFile(split_protected) as archive:
+    assert versioned_base not in archive.namelist(), "Hierarchy library was copied into protected JAR"
+split_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED",
+                    "-jar", split_protected])
+
 original_result = run([executable("java"), "-Xverify:all", "-jar", original])
+assert original_result.stdout == split_result.stdout, split_result.stdout
+assert "WARNING in native method" not in split_result.stderr, split_result.stderr
 protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED", "-jar", protected])
 (work / "original.txt").write_text(original_result.stdout)
 (work / "protected.txt").write_text(protected_result.stdout)
