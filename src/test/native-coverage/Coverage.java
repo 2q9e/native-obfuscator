@@ -258,7 +258,56 @@ public class Coverage {
             return received == failure;
         }
     }
-    public static int rejectHandler(int[] a) { try { return a[0]; } catch (NullPointerException e) { return 3; } }
+    public static int covCatchArray(int[] data, int index) {
+        try { return data[index]; }
+        catch (NullPointerException failure) { return 31; }
+        catch (IndexOutOfBoundsException failure) { return 32; }
+    }
+    public static int covCatchIdentity(Throwable failure) throws Throwable {
+        int before = effects;
+        try {
+            covThrowAlways(failure);
+            effects++;
+            return 71;
+        } catch (IllegalStateException original) {
+            return original == failure && effects == before ? 72 : 73;
+        }
+    }
+    public static int covNestedCatch(Throwable failure, int[] data, boolean direct) throws Throwable {
+        int before = effects;
+        try {
+            try {
+                if (direct) covThrowAlways(failure);
+                return data[1];
+            } catch (ArrayIndexOutOfBoundsException miss) {
+                effects += 4;
+                covThrowAlways(failure);
+                return -7;
+            }
+        } catch (IllegalArgumentException original) {
+            return original == failure ? effects - before : -19;
+        }
+    }
+    public static int covFinally(int[] data, int index) {
+        try { return data[index]; }
+        finally { effects += 9; }
+    }
+    public static long covCatchConstruct(long amount, String label) {
+        try { return new AllocationPeer(amount, label).amount; }
+        catch (IllegalArgumentException rejected) { return Long.MIN_VALUE; }
+    }
+    public static int covCatchLinkage() {
+        try { return RawOps.covLinkageMissing(); }
+        catch (NoSuchMethodError missing) { return 91; }
+    }
+    public static int rejectHandlerLoop(int denominator, int steps) {
+        int total = 0;
+        for (int i = 0; i < steps; i++) {
+            try { total += i / denominator; }
+            catch (ArithmeticException ignored) { total--; }
+        }
+        return total;
+    }
     public static int rejectReferenceLoop(Object[] a) { int n = 0; for (int i = 0; i < a.length; i++) if (a[i] != null) n++; return n; }
 
     interface Attempt { Object run() throws Throwable; }
@@ -439,6 +488,26 @@ public class Coverage {
         show(() -> covThrow(failure, false));
         show(() -> covThrow(failure, true));
         show(() -> covThrow(null, true));
+        show(() -> covCatchArray(new int[]{44}, 0));
+        show(() -> covCatchArray(new int[]{44}, 1));
+        show(() -> covCatchArray(null, -1));
+        show(() -> covCatchIdentity(failure));
+        show(() -> covCatchIdentity(new ArithmeticException()));
+        show(() -> covNestedCatch(new IllegalArgumentException(), null, true));
+        show(() -> covNestedCatch(new IllegalArgumentException(), new int[0], false));
+        show(() -> covNestedCatch(new IllegalArgumentException(), new int[]{3, 21}, false));
+        show(() -> covNestedCatch(failure, new int[0], false));
+        show(() -> covFinally(new int[]{19}, 0));
+        show(() -> covFinally(null, 0));
+        show(() -> covCatchConstruct(17L, "ok"));
+        show(() -> covCatchConstruct(0L, "invalid"));
+        show(Coverage::covCatchLinkage);
+        show(() -> RawOps.covCatchTableOrder(0));
+        show(() -> RawOps.covCatchTableOrder(3));
+        show(() -> RawOps.covCatchCapacity(0));
+        show(() -> RawOps.covCatchCapacity(3));
+        show(() -> rejectHandlerLoop(0, 64));
+        show(() -> RawOps.rejectBackwardHandler(0));
         show(() -> storesThrownIdentity(failure));
         show(() -> covPending(0));
         show(() -> covPending(2));

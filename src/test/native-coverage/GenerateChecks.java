@@ -3,6 +3,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Handle;
+import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.tree.*;
 import static org.objectweb.asm.Opcodes.*;
@@ -24,6 +25,80 @@ public final class GenerateChecks {
         method.maxLocals = 8;
         return method;
     }
+    private static void exceptionFixtures(ClassWriter writer) {
+        var order = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covCatchTableOrder", "(I)I", null, null);
+        var start = new Label();
+        var end = new Label();
+        var first = new Label();
+        var second = new Label();
+        order.visitCode();
+        order.visitTryCatchBlock(start, end, first, "java/lang/RuntimeException");
+        order.visitTryCatchBlock(start, end, second, "java/lang/ArithmeticException");
+        order.visitLabel(start);
+        order.visitIntInsn(BIPUSH, 45);
+        order.visitVarInsn(ILOAD, 0);
+        order.visitInsn(IDIV);
+        order.visitLabel(end);
+        order.visitInsn(IRETURN);
+        order.visitLabel(first);
+        order.visitInsn(POP);
+        order.visitInsn(ICONST_1);
+        order.visitInsn(IRETURN);
+        order.visitLabel(second);
+        order.visitInsn(POP);
+        order.visitInsn(ICONST_2);
+        order.visitInsn(IRETURN);
+        order.visitMaxs(0, 0);
+        order.visitEnd();
+
+        var capacity = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covCatchCapacity", "(I)I", null, null);
+        capacity.visitCode();
+        capacity.visitInsn(ICONST_0);
+        capacity.visitVarInsn(ISTORE, 1);
+        for (int i = 0; i < 64; i++) {
+            var begin = new Label();
+            var finish = new Label();
+            var catchTarget = new Label();
+            var next = new Label();
+            capacity.visitTryCatchBlock(begin, finish, catchTarget, "java/lang/ArithmeticException");
+            capacity.visitLabel(begin);
+            capacity.visitInsn(ICONST_1);
+            capacity.visitVarInsn(ILOAD, 0);
+            capacity.visitInsn(IDIV);
+            capacity.visitInsn(POP);
+            capacity.visitLabel(finish);
+            capacity.visitJumpInsn(GOTO, next);
+            capacity.visitLabel(catchTarget);
+            capacity.visitInsn(POP);
+            capacity.visitIincInsn(1, 1);
+            capacity.visitLabel(next);
+        }
+        capacity.visitVarInsn(ILOAD, 1);
+        capacity.visitInsn(IRETURN);
+        capacity.visitMaxs(0, 0);
+        capacity.visitEnd();
+
+        var backward = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "rejectBackwardHandler", "(I)I", null, null);
+        var entry = new Label();
+        var exit = new Label();
+        var handler = new Label();
+        backward.visitCode();
+        backward.visitTryCatchBlock(entry, exit, handler, "java/lang/ArithmeticException");
+        backward.visitJumpInsn(GOTO, entry);
+        backward.visitLabel(handler);
+        backward.visitInsn(POP);
+        backward.visitInsn(ICONST_M1);
+        backward.visitInsn(IRETURN);
+        backward.visitLabel(entry);
+        backward.visitInsn(ICONST_1);
+        backward.visitVarInsn(ILOAD, 0);
+        backward.visitInsn(IDIV);
+        backward.visitLabel(exit);
+        backward.visitInsn(IRETURN);
+        backward.visitMaxs(0, 0);
+        backward.visitEnd();
+    }
+
     public static void main(String[] args) throws Exception {
         var owner = new ClassNode();
         owner.version = V21;
@@ -178,6 +253,7 @@ public final class GenerateChecks {
         plainConcat.visitInsn(ARETURN);
         plainConcat.visitMaxs(0, 0);
         plainConcat.visitEnd();
+        exceptionFixtures(writer);
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());
 

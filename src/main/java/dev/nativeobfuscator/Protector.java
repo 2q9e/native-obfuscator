@@ -516,6 +516,7 @@ final class Protector {
             MethodNode method = binding.method;
             method.access |= ACC_NATIVE;
             method.instructions.clear();
+            method.tryCatchBlocks.clear();
             method.localVariables = null;
             method.visibleLocalVariableAnnotations = null;
             method.invisibleLocalVariableAnnotations = null;

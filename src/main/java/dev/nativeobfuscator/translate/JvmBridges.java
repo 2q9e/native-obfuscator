@@ -149,6 +149,31 @@ final class JvmBridges {
         return bridge;
     }
 
+    MethodNode catchException(int instructionIndex, List<TryCatchBlockNode> handlers) {
+        String throwable = "java/lang/Throwable";
+        MethodNode bridge = newMethod(instructionIndex + "$catch", "(Ljava/lang/Throwable;)I");
+        var start = new LabelNode();
+        var end = new LabelNode();
+        bridge.instructions.add(start);
+        bridge.instructions.add(new VarInsnNode(ALOAD, 0));
+        bridge.instructions.add(new InsnNode(ATHROW));
+        bridge.instructions.add(end);
+        for (int i = 0; i < handlers.size(); i++) {
+            String type = handlers.get(i).type;
+            var target = new LabelNode();
+            bridge.tryCatchBlocks.add(new TryCatchBlockNode(start, end, target, type));
+            bridge.instructions.add(target);
+            bridge.instructions.add(new FrameNode(F_NEW, 1, new Object[]{throwable},
+                1, new Object[]{type == null ? throwable : type}));
+            bridge.instructions.add(new InsnNode(POP));
+            bridge.instructions.add(new LdcInsnNode(i));
+            bridge.instructions.add(new InsnNode(IRETURN));
+        }
+        bridge.maxLocals = 1;
+        bridge.maxStack = 1;
+        return bridge;
+    }
+
     private MethodNode create(int instructionIndex, Type receiver, Type returned, Type[] arguments,
                               AbstractInsnNode... operations) {
         boolean nullReceiver = BasicInterpreter.NULL_TYPE.equals(receiver);
@@ -164,11 +189,7 @@ final class JvmBridges {
             if (sort >= Type.BOOLEAN && sort <= Type.SHORT) parameters[i] = Type.INT_TYPE;
         }
         String descriptor = Type.getMethodDescriptor(returned, parameters);
-        if (prefix == null) prefix = "$$native$link$" + owner.methods.indexOf(caller) + "$";
-        String name = prefix + instructionIndex;
-        while (hasMethod(name, descriptor)) name += "$";
-
-        var bridge = new MethodNode(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC, name, descriptor, null, null);
+        MethodNode bridge = newMethod(Integer.toString(instructionIndex), descriptor);
         int slots = 0;
         for (int i = 0; i < parameters.length; i++) {
             Type parameter = parameters[i];
@@ -182,6 +203,14 @@ final class JvmBridges {
             bridge.instructions.add(new InsnNode(returned.getOpcode(IRETURN)));
         bridge.maxLocals = slots;
         bridge.maxStack = Math.max(slots, returned.getSize());
+        return bridge;
+    }
+
+    private MethodNode newMethod(String site, String descriptor) {
+        if (prefix == null) prefix = "$$native$link$" + owner.methods.indexOf(caller) + "$";
+        String name = prefix + site;
+        while (hasMethod(name, descriptor)) name += "$";
+        var bridge = new MethodNode(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC, name, descriptor, null, null);
         methods.add(bridge);
         return bridge;
     }
