@@ -191,6 +191,15 @@ def check_analysis(profile, seed, build_reports, verification, jar_metrics, nati
                 and sorted(utility_sections) == sorted(utility_sizes.values()),
                 f"Native utility links differ from build or staged measurements for {target}")
         metrics["utilityCodeBytes"] = utility_sizes
+        comparison = measured.get("llvmComparison")
+        if report["llvmStatus"] == "configured":
+            require(comparison and comparison["baselineExecutableBytes"] > 0
+                    and comparison["executableChanged"]
+                    and comparison["baselineExecutableSha256"] != comparison["executableSha256"],
+                    f"The linked fixture did not retain a measurable LLVM change for {target}")
+            metrics["llvmComparison"] = comparison
+        else:
+            require(comparison is None, f"Unexpected comparison from a C-only build for {target}")
         root_sections = [size for name, size in sections.items() if name.startswith(".nar")]
         helper_sections = [size for name, size in sections.items() if name.startswith(".nah")]
         require(len(root_sections) == helper_count and len(helper_sections) == helper_functions,
@@ -277,6 +286,29 @@ def measure_case(profile, compiler_args, *, work, tool, java, java_tmp, original
         result["llvmTransformedSitesByPass"] = transformed
     print(f"{label}: verified all {len(TARGETS)} targets; matched runtime on {host}; {len(planned)} helper methods", flush=True)
     return result
+
+
+def check_llvm_noop(tool, original, directory, env, args):
+    directory.mkdir()
+    result = run([*tool, "protect", "--input", original, "--output", directory / "protected.jar",
+                  "--include", "Arithmetic#calc*", "--unsupported", "retain", "--padding", "off",
+                  "--target", "all", "--analysis-resistance", "balanced", "--analysis-helper-methods", "0",
+                  "--analysis-decoy-methods", "0", "--zig", args.zig, "--clang", args.clang, "--llvm-opt",
+                  args.llvm_opt, "--llvm-plugin", args.llvm_plugin,
+                  "--llvm-passes", "native-encode<seed=42;max=0;prefix=method_>"],
+                 directory / "protect", env=env)
+    reports = [row for row in read_json_lines(result) if row.get("analysisResistance") == "balanced"]
+    require(len(reports) == 1 and reports[0]["llvmStatus"] == "configured", "Missing LLVM no-op report")
+    targets = reports[0]["targets"]
+    require({row["target"] for row in targets} == set(TARGETS), "Missing LLVM no-op targets")
+    for row in targets:
+        target = row["target"]
+        comparison = row["llvmComparison"]
+        require(not comparison["executableChanged"]
+                and comparison["baselineExecutableSha256"] == comparison["executableSha256"],
+                f"A zero-site LLVM pipeline changed the executable fingerprint for {target}")
+        warning = f"{target} LLVM pipeline left final executable sections unchanged".encode()
+        require(warning in result.stderr, f"Missing LLVM no-op diagnostic for {target}")
 
 
 def check_unverified_maximum(tool, original, work, env, seed):
@@ -396,7 +428,9 @@ def main():
 
     cases = [("off", "off", []), ("balanced", "balanced", []), ("maximum", "maximum", [])]
     if compiler_args:
-        cases.extend([("off-llvm", "off", compiler_args), ("maximum-llvm", "maximum", compiler_args)])
+        cases.extend([("off-llvm", "off", compiler_args), ("balanced-llvm", "balanced", compiler_args),
+                      ("maximum-llvm", "maximum", compiler_args)])
+        check_llvm_noop(tool, original, work / "llvm-noop", env, args)
     results = {}
     for label, profile, flags in cases:
         results[label] = measure_case(profile, flags, work=work, tool=tool, java=java, java_tmp=java_tmp,
@@ -426,6 +460,7 @@ def main():
     }
     if compiler_args:
         summary["llvmPasses"] = args.llvm_passes or "profile presets"
+        summary["llvmNoopDetectedForAllTargets"] = True
     output = work / "summary.json"
     output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(f"Cross-target analysis checks passed. Summary at {output}")

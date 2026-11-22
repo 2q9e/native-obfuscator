@@ -52,7 +52,13 @@ enum NativeTarget {
         return workspace.resolve(key).resolve(file);
     }
 
-    byte[] compile(Path workspace, Path source, Protector.Config config,
+    record LinkedComparison(long baselineExecutableBytes, int baselineLibraryBytes,
+                            String baselineExecutableSha256, String executableSha256,
+                            boolean executableChanged) {}
+
+    record Build(byte[] binary, long executableBytes, LinkedComparison llvmComparison) {}
+
+    Build compile(Path workspace, Path source, Protector.Config config,
                    Map<String, String> selectedSymbols, Consumer<Map<String, Long>> sizes)
             throws IOException, InterruptedException {
         Path output = linkedLibrary(workspace);
@@ -85,7 +91,7 @@ enum NativeTarget {
         String machine = key.substring(0, key.indexOf('-'));
         boolean linux = key.endsWith("-linux");
         String clangTriple = machine + (linux ? "-unknown-linux-gnu" : "-w64-windows-gnu");
-        Path baseline = null;
+        byte[] baseline = null;
         if (config.llvmPlugin() != null) {
             var frontend = new ArrayList<String>();
             frontend.add(config.clang());
@@ -116,11 +122,12 @@ enum NativeTarget {
                     String method = match.find() ? selectedSymbols.get(match.group(1)) : null;
                     System.err.println("target=" + key + " " + line + (method == null ? "" : " method=" + method));
                 });
-            lower(config, transformed, output, clangTriple, linux, sizes);
-            if (config.maxGrowth() >= 0) {
-                baseline = output.resolveSibling("baseline-" + file);
-                lower(config, optimized, baseline, clangTriple, linux, null);
+            if (config.maxGrowth() >= 0 || config.analysis().enabled()) {
+                // The DLL basename affects link layout. Keep both link inputs and outputs identically named.
+                lower(config, optimized, output, clangTriple, linux, null);
+                baseline = readLibrary(output);
             }
+            lower(config, transformed, output, clangTriple, linux, sizes);
         } else {
             var compileFlags = new ArrayList<>(flags);
             compileFlags.addAll(includeFlags);
@@ -129,16 +136,23 @@ enum NativeTarget {
         }
         byte[] binary = readLibrary(output);
         long protectedCode = NativeImage.executableBytes(binary, this);
+        LinkedComparison comparison = null;
         if (baseline != null) {
-            byte[] unprotected = readLibrary(baseline);
-            long baselineCode = NativeImage.executableBytes(unprotected, this);
+            long baselineCode = NativeImage.executableBytes(baseline, this);
             System.err.printf(Locale.ROOT,
                 "%s executable bytes %d -> %d, library bytes %d -> %d%n",
-                key, baselineCode, protectedCode, unprotected.length, binary.length);
-            if (protectedCode * 100 > baselineCode * (100L + config.maxGrowth()))
+                key, baselineCode, protectedCode, baseline.length, binary.length);
+            if (config.maxGrowth() >= 0 && protectedCode * 100 > baselineCode * (100L + config.maxGrowth()))
                 throw new IOException("Native code growth limit exceeded for " + key);
+            if (config.analysis().enabled()) {
+                String before = NativeImage.executableSha256(baseline, this);
+                String after = NativeImage.executableSha256(binary, this);
+                comparison = new LinkedComparison(baselineCode, baseline.length, before, after, !before.equals(after));
+                if (!comparison.executableChanged())
+                    System.err.println(key + " LLVM pipeline left final executable sections unchanged");
+            }
         }
-        return binary;
+        return new Build(binary, protectedCode, comparison);
     }
 
     private byte[] readLibrary(Path path) throws IOException {

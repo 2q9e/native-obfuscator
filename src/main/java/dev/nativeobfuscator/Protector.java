@@ -71,14 +71,15 @@ final class Protector {
                           int selectedApplicationMethods, int nativeHelperMethods, int nativeHelperFunctions,
                           int nativeMethodLimit, int nativeHelpersPerMethod, int generatedUtilityMethods,
                           boolean utilityCatalogIncluded, int plannedLlvmSites,
-                          String llvmPipeline, List<TargetAnalysis> targets, Archive.WrittenJar artifact) {
+                          String llvmStatus, String llvmPipeline, List<TargetAnalysis> targets, Archive.WrittenJar artifact) {
         AnalysisReport {
             targets = List.copyOf(targets);
         }
     }
 
     record TargetAnalysis(String target, int libraryBytes, long executableBytes,
-                          List<AnalysisNative.Evidence> helpers, Map<String, Long> utilityCodeBytes) {
+                          List<AnalysisNative.Evidence> helpers, Map<String, Long> utilityCodeBytes,
+                          NativeTarget.LinkedComparison llvmComparison) {
         TargetAnalysis {
             helpers = List.copyOf(helpers);
             utilityCodeBytes = Map.copyOf(utilityCodeBytes);
@@ -255,7 +256,8 @@ final class Protector {
                         new Decision(method, "native-size", measured.containsKey(symbol) ? "" : "no linked symbol",
                             null, null, target.key, measured.get(symbol))))
                     : null;
-                byte[] binary = target.compile(workspace, c, config, selectedSymbols, sizes);
+                var build = target.compile(workspace, c, config, selectedSymbols, sizes);
+                byte[] binary = build.binary();
                 if (binding != null) {
                     try {
                         AnalysisBinding.require(binary, target, binding, loader);
@@ -273,9 +275,8 @@ final class Protector {
                             throw new IOException("Native analysis helper " + helper.status() + " for " + target.key
                                 + " " + selectedSymbols.get(helper.root()) + ": " + helper.reason());
                     }
-                    targetAnalysis.add(new TargetAnalysis(target.key, binary.length,
-                        NativeImage.executableBytes(binary, target), helpers,
-                        AnalysisUtilitySections.require(binary, target, utilitySections)));
+                    targetAnalysis.add(new TargetAnalysis(target.key, binary.length, build.executableBytes(), helpers,
+                        AnalysisUtilitySections.require(binary, target, utilitySections), build.llvmComparison()));
                 }
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
                 files.put(base, binary);
@@ -303,12 +304,14 @@ final class Protector {
                                                  AnalysisNative nativePlan, List<TargetAnalysis> nativeTargets,
                                                  Archive.WrittenJar artifact) {
         var analysis = config.analysis;
+        String llvmStatus = config.llvmPlugin != null ? "configured"
+            : analysis.llvmSites() == 0 ? "disabled" : "no-llvm-build-configured";
         return new AnalysisReport(analysis.profile().option, Long.toUnsignedString(analysis.seed()),
             analysis.resourceBudget(), analysis.entryBudget(), status, binding, plan.byteCount(), plan.entryCount(),
             applicationMethods, nativePlan == null ? 0 : nativePlan.selectedCount(),
             nativePlan == null ? 0 : nativePlan.helperCount(), analysis.nativeMethodLimit(), analysis.nativeHelpersPerRoot(),
-            analysis.decoyMethods(), plan.componentIndex() != null, analysis.llvmSites(), config.llvmPasses,
-            nativeTargets, artifact);
+            analysis.decoyMethods(), plan.componentIndex() != null, analysis.llvmSites(), llvmStatus,
+            config.llvmPasses, nativeTargets, artifact);
     }
 
     static byte[] markers(String id, int count, long seed) {
