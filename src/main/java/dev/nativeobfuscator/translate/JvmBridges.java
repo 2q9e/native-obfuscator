@@ -31,7 +31,12 @@ final class JvmBridges {
     static boolean requiresBridge(ClassNode owner, AbstractInsnNode instruction) {
         return (instruction instanceof MethodInsnNode call && externalCall(owner, call))
             || (instruction instanceof FieldInsnNode field && !field.owner.equals(owner.name))
-            || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF;
+            || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF
+            || arrayAllocation(instruction.getOpcode());
+    }
+
+    static boolean arrayAllocation(int opcode) {
+        return opcode == NEWARRAY || opcode == ANEWARRAY || opcode == MULTIANEWARRAY;
     }
 
     List<MethodNode> methods() { return methods; }
@@ -55,6 +60,13 @@ final class JvmBridges {
         return check.getOpcode() == CHECKCAST
             ? create(instructionIndex, null, Type.VOID_TYPE, arguments, operation, new InsnNode(POP))
             : create(instructionIndex, null, Type.INT_TYPE, arguments, operation);
+    }
+
+    MethodNode allocateArray(AbstractInsnNode allocation, int instructionIndex, Type type) {
+        int dimensions = allocation instanceof MultiANewArrayInsnNode multi ? multi.dims : 1;
+        Type[] arguments = new Type[dimensions];
+        java.util.Arrays.fill(arguments, Type.INT_TYPE);
+        return create(instructionIndex, null, type, arguments, allocation.clone(null));
     }
 
     private MethodNode create(int instructionIndex, Type receiver, Type returned, Type[] arguments,

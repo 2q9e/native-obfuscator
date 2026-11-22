@@ -157,6 +157,14 @@ public final class GenerateChecks {
         missingCast.visitInsn(IRETURN);
         missingCast.visitMaxs(0, 0);
         missingCast.visitEnd();
+        var missingArray = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covAllocateMissingArray", "(I)I", null, null);
+        missingArray.visitCode();
+        missingArray.visitVarInsn(ILOAD, 0);
+        missingArray.visitTypeInsn(ANEWARRAY, "MissingArrayTarget");
+        missingArray.visitInsn(ARRAYLENGTH);
+        missingArray.visitInsn(IRETURN);
+        missingArray.visitMaxs(0, 0);
+        missingArray.visitEnd();
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());
 

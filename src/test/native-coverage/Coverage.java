@@ -68,6 +68,14 @@ public class Coverage {
     public static Object covReturnCall(Object value, int denominator) { return StaticPeer.identity(value, denominator); }
     public static String[][] covCheckedArray(Object value) { return (String[][]) value; }
     public static boolean covInstanceOfArray(Object value) { return value instanceof String[][]; }
+    public static byte[] covAllocatePrimitiveArray(int length) { return new byte[length]; }
+    public static String[][] covAllocateReferenceArray(int length) { return new String[length][]; }
+    public static long[][][] covAllocateDimensions(int a, int b) { return new long[a][b][]; }
+    public static int rejectAllocationLoop(int count) {
+        int size = 0;
+        for (int i = 0; i < count; i++) size += new int[i].length;
+        return size;
+    }
     public static int covCastLoop(Object value, int count) {
         int nonNull = 0;
         for (int i = 0; i < count; i++) if ((String) value != null) nonNull++;
@@ -293,6 +301,19 @@ public class Coverage {
         show(() -> covCastLoop(token, 1));
         show(() -> RawOps.covCastMissing(null));
         show(() -> RawOps.covCastMissing(token));
+        show(() -> covAllocatePrimitiveArray(5).length);
+        show(() -> covAllocatePrimitiveArray(5)[4]);
+        show(() -> covAllocatePrimitiveArray(-1));
+        show(() -> covAllocateReferenceArray(2)[1] == null);
+        show(() -> covAllocateReferenceArray(-1));
+        show(() -> covAllocateDimensions(2, 3)[1].length);
+        show(() -> covAllocateDimensions(2, 3)[1][2] == null);
+        show(() -> covAllocateDimensions(0, -1));
+        show(() -> covAllocateDimensions(-1, 0));
+        show(() -> covAllocateDimensions(0, 0).length);
+        show(() -> rejectAllocationLoop(4));
+        show(() -> RawOps.covAllocateMissingArray(1));
+        show(() -> RawOps.covAllocateMissingArray(-1));
         show(() -> covPending(0));
         show(() -> covPending(2));
         show(() -> covPendingArray(null, 0));

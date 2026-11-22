@@ -295,7 +295,12 @@ public final class MethodCompiler {
             }
             case LRETURN, FRETURN, DRETURN, ARETURN -> line(code, "return " + a + "." + field(result) + ";");
             case NEW -> throw new Unsupported("object allocation requires uninitialized-object tracking");
-            case NEWARRAY, ANEWARRAY, MULTIANEWARRAY -> throw new Unsupported("array allocation and dimension failure ordering are not verified");
+            case NEWARRAY, ANEWARRAY, MULTIANEWARRAY -> {
+                if (bridges == null) throw new Unsupported("array allocation requires a JVM bridge");
+                Type type = arrayAllocationType(insn);
+                MethodNode bridge = bridges.allocateArray(insn, instructionIndex, type);
+                emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
+            }
             case CHECKCAST, INSTANCEOF -> {
                 if (bridges == null) throw new Unsupported("reference type resolution requires a JVM bridge");
                 MethodNode bridge = bridges.typeCheck((TypeInsnNode) insn, instructionIndex);
@@ -390,6 +395,23 @@ public final class MethodCompiler {
         }
     }
 
+    private static Type arrayAllocationType(AbstractInsnNode insn) throws Unsupported {
+        if (insn instanceof MultiANewArrayInsnNode multi) return Type.getType(multi.desc);
+        if (insn instanceof TypeInsnNode reference) return Type.getType("[" + Type.getObjectType(reference.desc).getDescriptor());
+        int element = ((IntInsnNode) insn).operand;
+        return switch (element) {
+            case T_BOOLEAN -> Type.getType("[Z");
+            case T_CHAR -> Type.getType("[C");
+            case T_FLOAT -> Type.getType("[F");
+            case T_DOUBLE -> Type.getType("[D");
+            case T_BYTE -> Type.getType("[B");
+            case T_SHORT -> Type.getType("[S");
+            case T_INT -> Type.getType("[I");
+            case T_LONG -> Type.getType("[J");
+            default -> throw new Unsupported("invalid primitive array type " + element);
+        };
+    }
+
     private static boolean isNarrow(Type type) {
         return type != null && type.getSort() >= Type.BOOLEAN && type.getSort() <= Type.SHORT;
     }
@@ -447,7 +469,7 @@ public final class MethodCompiler {
     private static int referenceCapacity(MethodNode method) {
         int produced = 0;
         for (AbstractInsnNode instruction : method.instructions) {
-            if (instruction.getOpcode() == AALOAD) produced++;
+            if (instruction.getOpcode() == AALOAD || JvmBridges.arrayAllocation(instruction.getOpcode())) produced++;
             else if (instruction instanceof FieldInsnNode member
                 && (member.getOpcode() == GETFIELD || member.getOpcode() == GETSTATIC)) {
                 Type type = Type.getType(member.desc);
