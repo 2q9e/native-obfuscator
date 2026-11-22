@@ -32,7 +32,7 @@ final class JvmBridges {
         return (instruction instanceof MethodInsnNode call && externalCall(owner, call))
             || (instruction instanceof FieldInsnNode field && !field.owner.equals(owner.name))
             || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF
-            || arrayAllocation(instruction.getOpcode());
+            || instruction.getOpcode() == NEW || arrayAllocation(instruction.getOpcode());
     }
 
     static boolean arrayAllocation(int opcode) {
@@ -67,6 +67,44 @@ final class JvmBridges {
         Type[] arguments = new Type[dimensions];
         java.util.Arrays.fill(arguments, Type.INT_TYPE);
         return create(instructionIndex, null, type, arguments, allocation.clone(null));
+    }
+
+    static MethodInsnNode constructor(TypeInsnNode allocation) throws MethodCompiler.Unsupported {
+        String reason = "object allocation requires NEW, DUP, plain argument loads, and its matching constructor";
+        AbstractInsnNode duplicate = allocation.getNext();
+        if (duplicate == null || duplicate.getOpcode() != DUP) throw new MethodCompiler.Unsupported(reason);
+        AbstractInsnNode current = duplicate.getNext();
+        int arguments = 0;
+        // Moving NEW across these pushes cannot reorder a call, heap read, or constant resolution.
+        while (plainArgument(current)) {
+            arguments++;
+            current = current.getNext();
+        }
+        if (!(current instanceof MethodInsnNode call) || call.getOpcode() != INVOKESPECIAL || call.itf
+            || !call.name.equals("<init>") || !call.owner.equals(allocation.desc)
+            || arguments != Type.getArgumentCount(call.desc) || Type.getReturnType(call.desc) != Type.VOID_TYPE)
+            throw new MethodCompiler.Unsupported(reason);
+        return call;
+    }
+
+    private static boolean plainArgument(AbstractInsnNode instruction) {
+        if (instruction == null) return false;
+        int opcode = instruction.getOpcode();
+        return (opcode >= ILOAD && opcode <= ALOAD) || (opcode >= ACONST_NULL && opcode <= SIPUSH)
+            || (instruction instanceof LdcInsnNode constant && (constant.cst instanceof Integer
+                || constant.cst instanceof Long || constant.cst instanceof Float || constant.cst instanceof Double));
+    }
+
+    MethodNode construct(TypeInsnNode allocation, MethodInsnNode constructor, int instructionIndex) {
+        var operation = new MethodInsnNode(INVOKESPECIAL, constructor.owner, constructor.name, constructor.desc, false);
+        MethodNode bridge = create(instructionIndex, null, Type.getObjectType(allocation.desc),
+            Type.getArgumentTypes(constructor.desc), operation);
+        var prefix = new InsnList();
+        prefix.add(new TypeInsnNode(NEW, allocation.desc));
+        prefix.add(new InsnNode(DUP));
+        bridge.instructions.insert(prefix);
+        bridge.maxStack = bridge.maxLocals + 2;
+        return bridge;
     }
 
     private MethodNode create(int instructionIndex, Type receiver, Type returned, Type[] arguments,

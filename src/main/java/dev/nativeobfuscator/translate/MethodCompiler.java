@@ -116,7 +116,22 @@ public final class MethodCompiler {
             }
             if (insn.getOpcode() >= 0) {
                 try {
-                    emit(code, owner, method, insn, frames[i], type.getReturnType(), i, wrappingOperation, bridges);
+                    if (insn.getOpcode() == NEW && bridges != null) {
+                        var allocation = (TypeInsnNode) insn;
+                        MethodInsnNode constructor = JvmBridges.constructor(allocation);
+                        int end = method.instructions.indexOf(constructor);
+                        MethodNode bridge = bridges.construct(allocation, constructor, i);
+                        // NEW and DUP reserve two verifier slots. Plain pushes can fill the
+                        // argument slots while the combined JVM operation remains pending.
+                        for (int argument = i + 2; argument < end; argument++)
+                            emit(code, owner, method, insns[argument], frames[argument], type.getReturnType(), argument,
+                                wrappingOperation, bridges);
+                        emitCall(code, owner, method, bridge.name, bridge.desc, frames[end], type.getReturnType(),
+                            true, false, -2);
+                        i = end;
+                    } else {
+                        emit(code, owner, method, insn, frames[i], type.getReturnType(), i, wrappingOperation, bridges);
+                    }
                 } catch (Unsupported e) {
                     throw new Unsupported("instruction " + i + " (opcode " + insn.getOpcode() + "): " + e.getMessage());
                 }
@@ -469,7 +484,8 @@ public final class MethodCompiler {
     private static int referenceCapacity(MethodNode method) {
         int produced = 0;
         for (AbstractInsnNode instruction : method.instructions) {
-            if (instruction.getOpcode() == AALOAD || JvmBridges.arrayAllocation(instruction.getOpcode())) produced++;
+            int opcode = instruction.getOpcode();
+            if (opcode == AALOAD || opcode == NEW || JvmBridges.arrayAllocation(opcode)) produced++;
             else if (instruction instanceof FieldInsnNode member
                 && (member.getOpcode() == GETFIELD || member.getOpcode() == GETSTATIC)) {
                 Type type = Type.getType(member.desc);
@@ -667,6 +683,12 @@ public final class MethodCompiler {
 
     private static void emitCall(StringBuilder code, ClassNode owner, MethodNode method, String name, String descriptor,
                                  Frame<BasicValue> frame, Type result, boolean statik, boolean nonvirtual) throws Unsupported {
+        emitCall(code, owner, method, name, descriptor, frame, result, statik, nonvirtual, 0);
+    }
+
+    private static void emitCall(StringBuilder code, ClassNode owner, MethodNode method, String name, String descriptor,
+                                 Frame<BasicValue> frame, Type result, boolean statik, boolean nonvirtual,
+                                 int resultOffset) throws Unsupported {
         Type returned = Type.getReturnType(descriptor);
         referenceResult(method, returned);
         Type[] parameters = Type.getArgumentTypes(descriptor);
@@ -698,7 +720,7 @@ public final class MethodCompiler {
         String api = "Call" + (statik ? "Static" : nonvirtual ? "Nonvirtual" : "") + suffix(returned) + "MethodA";
         String call = "(*env)->" + api + "(env, " + receiver + (nonvirtual ? ", declaring" : "") + ", member, arguments)";
         if (returned.getSort() == Type.VOID) line(code, call + ";");
-        else line(code, stack(base) + "." + field(returned) + " = " + call + ";");
+        else line(code, stack(base + resultOffset) + "." + field(returned) + " = " + call + ";");
         line(code, "(*env)->DeleteLocalRef(env, declaring);");
         pending(code, result);
         line(code, "}");

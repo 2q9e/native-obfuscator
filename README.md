@@ -112,7 +112,7 @@ Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `c
 
 ## Bytecode support
 
-The translator supports numeric instructions, branches, loops, switches, typed array allocation, access, and length, reference identity and type checks, and verified object and array returns. It handles supported fields and calls within the declaring class and uses JVM linkage bridges for cross-class fields and calls. It preserves input classfile versions and the Java names used by callers. It retains or rejects unsupported methods according to `--unsupported` and reports the reason per method. [Verified JNI coverage and limits](docs/native-coverage.md)
+The translator supports numeric instructions, branches, loops, switches, typed array allocation, access, and length, simple object construction, reference identity and type checks, and verified object and array returns. It handles supported fields and calls within the declaring class and uses JVM linkage bridges for cross-class fields and calls. It preserves input classfile versions and the Java names used by callers. It retains or rejects unsupported methods according to `--unsupported` and reports the reason per method. [Verified JNI coverage and limits](docs/native-coverage.md)
 
 GitHub Actions runs Java 21 and 25 differential tests, Kotlin tests, and JNI runtime checks on all four targets. See the [verification report](docs/verification.md) for the results and the scope of the Fabric smoke test. For local differential tests, set `JAVA_HOME` and `JAVA_RELEASE` to the matching JDK and run `bash src/test/integration.sh "$tool"`. Set `GRADLE_HOME` to Gradle 9.3.1 to run `bash src/test/kotlin/verify.sh "$tool"`.
 

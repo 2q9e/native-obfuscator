@@ -168,7 +168,24 @@ public class Coverage {
     private static long covInterfaceDispatch(DispatchPeer peer, long value, double fraction) {
         return peer.fold(value, fraction);
     }
-    public static Object rejectAllocation() { return new Object(); }
+    private static class AllocationPeer {
+        final long amount;
+        final String label;
+        static { fieldState += 100; }
+        AllocationPeer(long amount, String label) {
+            if (amount == 0) throw new IllegalArgumentException();
+            this.amount = amount;
+            this.label = label;
+        }
+    }
+    public static Object covAllocateObject() { return new Object(); }
+    private static AllocationPeer covConstruct(long amount, String label, boolean allocate) {
+        if (!allocate) return null;
+        AllocationPeer built = new AllocationPeer(amount, label);
+        effects++;
+        return built;
+    }
+    public static Object rejectAllocation(int size) { return new StringBuilder(Math.abs(size)); }
     public static int rejectHandler(int[] a) { try { return a[0]; } catch (NullPointerException e) { return 3; } }
     public static int rejectReferenceLoop(Object[] a) { int n = 0; for (int i = 0; i < a.length; i++) if (a[i] != null) n++; return n; }
 
@@ -314,6 +331,15 @@ public class Coverage {
         show(() -> rejectAllocationLoop(4));
         show(() -> RawOps.covAllocateMissingArray(1));
         show(() -> RawOps.covAllocateMissingArray(-1));
+        show(() -> covAllocateObject() != covAllocateObject());
+        show(() -> covConstruct(1, sameString, false) == null);
+        System.out.println("allocation-skipped:" + fieldState);
+        show(() -> covConstruct(0, sameString, true));
+        System.out.println("allocation-started:" + fieldState);
+        show(() -> covConstruct(Long.MIN_VALUE, sameString, true).amount);
+        show(() -> covConstruct(Long.MAX_VALUE, sameString, true).label == sameString);
+        show(() -> covConstruct(5, null, true).label == null);
+        show(() -> rejectAllocation(-7).getClass().getSimpleName());
         show(() -> covPending(0));
         show(() -> covPending(2));
         show(() -> covPendingArray(null, 0));
