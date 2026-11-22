@@ -80,7 +80,7 @@ public final class GenerateChecks {
         capacity.visitMaxs(0, 0);
         capacity.visitEnd();
 
-        var backward = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "rejectBackwardHandler", "(I)I", null, null);
+        var backward = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covBackwardHandler", "(I)I", null, null);
         var entry = new Label();
         var exit = new Label();
         var handler = new Label();
@@ -99,6 +99,56 @@ public final class GenerateChecks {
         backward.visitInsn(IRETURN);
         backward.visitMaxs(0, 0);
         backward.visitEnd();
+
+        var retry = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covBackwardThrowable",
+            "(Ljava/lang/Throwable;I)Ljava/lang/Throwable;", null, null);
+        var raise = new Label();
+        var raised = new Label();
+        var again = new Label();
+        retry.visitCode();
+        retry.visitTryCatchBlock(raise, raised, again, "java/lang/Throwable");
+        retry.visitJumpInsn(GOTO, raise);
+        retry.visitLabel(again);
+        retry.visitVarInsn(ASTORE, 2);
+        retry.visitIincInsn(1, -1);
+        retry.visitVarInsn(ILOAD, 1);
+        retry.visitJumpInsn(IFGT, raise);
+        retry.visitVarInsn(ALOAD, 2);
+        retry.visitInsn(ARETURN);
+        retry.visitLabel(raise);
+        retry.visitVarInsn(ALOAD, 0);
+        retry.visitInsn(ATHROW);
+        retry.visitLabel(raised);
+        retry.visitMaxs(0, 0);
+        retry.visitEnd();
+
+        var carry = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covStackCarry",
+            "([Ljava/lang/Object;Ljava/lang/Object;I)Ljava/lang/Object;", null, null);
+        var loop = new Label();
+        var keep = new Label();
+        var joined = new Label();
+        var done = new Label();
+        carry.visitCode();
+        carry.visitVarInsn(ALOAD, 1);
+        carry.visitLabel(loop);
+        carry.visitVarInsn(ALOAD, 0);
+        carry.visitInsn(ICONST_0);
+        carry.visitInsn(AALOAD);
+        carry.visitInsn(DUP);
+        carry.visitJumpInsn(IFNULL, keep);
+        carry.visitInsn(SWAP);
+        carry.visitInsn(POP);
+        carry.visitJumpInsn(GOTO, joined);
+        carry.visitLabel(keep);
+        carry.visitInsn(POP);
+        carry.visitLabel(joined);
+        carry.visitIincInsn(2, -1);
+        carry.visitVarInsn(ILOAD, 2);
+        carry.visitLookupSwitchInsn(loop, new int[]{0}, new Label[]{done});
+        carry.visitLabel(done);
+        carry.visitInsn(ARETURN);
+        carry.visitMaxs(0, 0);
+        carry.visitEnd();
     }
 
     public static void main(String[] args) throws Exception {

@@ -70,8 +70,6 @@ final class ExceptionHandlers {
             int target = method.instructions.indexOf(block.handler);
             if (start < 0 || end <= start || target < 0)
                 throw new MethodCompiler.Unsupported("invalid exception handler range");
-            if (target < end)
-                throw new MethodCompiler.Unsupported("backward exception handlers require bounded JNI local-reference lifetime");
             if (discardsThrowable(block.handler, loadedLocals)) discarded.add(block.handler);
             else retainsThrowable = true;
 

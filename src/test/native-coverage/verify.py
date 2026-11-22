@@ -56,17 +56,10 @@ native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declaratio
 assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d["result"] == "retained"}
-assert set(retained) == {"rejectAllocation", "rejectLiveHandlerLoop", "rejectBackwardHandler", "rejectReferenceLoop",
-                         "rejectAllocationLoop", "rejectRawCall", "rejectConcatLoop", "rejectDirectHierarchy",
-                         "rejectUnknownHierarchy"}, retained
+assert set(retained) == {"rejectAllocation", "rejectRawCall", "rejectDirectHierarchy", "rejectUnknownHierarchy"}, retained
 assert "bytecode verification failed" in retained["rejectDirectHierarchy"]
 assert "bytecode verification failed" in retained["rejectUnknownHierarchy"]
 assert "object allocation" in retained["rejectAllocation"]
-assert "live thrown references in cyclic methods" in retained["rejectLiveHandlerLoop"]
-assert "backward exception handlers" in retained["rejectBackwardHandler"]
-assert "local-reference lifetime" in retained["rejectReferenceLoop"]
-assert "local-reference lifetime" in retained["rejectAllocationLoop"]
-assert "local-reference lifetime" in retained["rejectConcatLoop"]
 assert "not proven to fit JNI descriptor B" in retained["rejectRawCall"]
 verified = run(tool + ["verify", "--staged", protected] + selection + flags)
 (work / "verify.jsonl").write_text(verified.stdout)

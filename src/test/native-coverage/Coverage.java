@@ -80,7 +80,7 @@ public class Coverage {
     public static byte[] covAllocatePrimitiveArray(int length) { return new byte[length]; }
     public static String[][] covAllocateReferenceArray(int length) { return new String[length][]; }
     public static long[][][] covAllocateDimensions(int a, int b) { return new long[a][b][]; }
-    public static int rejectAllocationLoop(int count) {
+    public static int covAllocationLoop(int count) {
         int size = 0;
         for (int i = 0; i < count; i++) size += new int[i].length;
         return size;
@@ -245,7 +245,7 @@ public class Coverage {
         effects++;
         return result;
     }
-    public static String rejectConcatLoop(String name, int count) {
+    public static String covConcatLoop(String name, int count) {
         for (int i = 0; i < count; i++) name = name + i;
         return name;
     }
@@ -312,7 +312,7 @@ public class Coverage {
         }
         return total;
     }
-    public static int rejectLiveHandlerLoop(Throwable failure, int steps) throws Throwable {
+    public static int covLiveHandlerLoop(Throwable failure, int steps) throws Throwable {
         int total = 0;
         for (int i = 0; i < steps; i++) {
             try { covThrowAlways(failure); }
@@ -322,7 +322,36 @@ public class Coverage {
         }
         return total;
     }
-    public static int rejectReferenceLoop(Object[] a) { int n = 0; for (int i = 0; i < a.length; i++) if (a[i] != null) n++; return n; }
+    public static int covReferenceLoop(Object[] a) { int n = 0; for (int i = 0; i < a.length; i++) if (a[i] != null) n++; return n; }
+    public Object covFieldLoop(Object[] values, int repeats) {
+        Object current = object;
+        for (int i = 0; i < repeats; i++) {
+            Object next = values[i & 3];
+            if ((i & 1) == 0) object = next;
+            if (next != null) current = object;
+        }
+        return current;
+    }
+    public static long covConstructorLoop(long amount, String label, int repeats) {
+        long sum = 0;
+        for (int i = 0; i < repeats; i++) sum += new AllocationPeer(amount, label).amount;
+        return sum;
+    }
+    private static Object elementOrThrow(Object[] source, int index, Throwable failure) throws Throwable {
+        if ((index & 3) == 0) throw failure;
+        return source[index & 3];
+    }
+    public static Object covCallWithCatchLoop(Object[] source, Throwable failure, int repeats) throws Throwable {
+        Object result = null;
+        for (int i = 0; i < repeats; i++) {
+            try { result = elementOrThrow(source, i, failure); }
+            catch (IllegalStateException caught) {
+                if (caught != failure) return null;
+                result = caught;
+            }
+        }
+        return result;
+    }
 
     interface Attempt { Object run() throws Throwable; }
     private static void show(Attempt attempt) {
@@ -481,7 +510,7 @@ public class Coverage {
         show(() -> covAllocateDimensions(0, -1));
         show(() -> covAllocateDimensions(-1, 0));
         show(() -> covAllocateDimensions(0, 0).length);
-        show(() -> rejectAllocationLoop(4));
+        show(() -> covAllocationLoop(128));
         show(() -> RawOps.covAllocateMissingArray(1));
         show(() -> RawOps.covAllocateMissingArray(-1));
         show(() -> covAllocateObject() != covAllocateObject());
@@ -500,7 +529,7 @@ public class Coverage {
             @Override public String toString() { throw new IllegalStateException(); }
         }, 8));
         show(() -> RawOps.covPlainConcat("literal", -4));
-        show(() -> rejectConcatLoop("loop:", 2));
+        show(() -> covConcatLoop("loop:", 128));
         Throwable failure = new IllegalStateException("identity");
         show(() -> covThrow(failure, false));
         show(() -> covThrow(failure, true));
@@ -525,8 +554,18 @@ public class Coverage {
         show(() -> RawOps.covCatchCapacity(3));
         show(() -> covCatchLoop(0, 4096));
         show(() -> covCatchLoop(3, 4096));
-        show(() -> rejectLiveHandlerLoop(failure, 64));
-        show(() -> RawOps.rejectBackwardHandler(0));
+        show(() -> covLiveHandlerLoop(failure, 8192));
+        show(() -> RawOps.covBackwardHandler(0));
+        show(() -> RawOps.covBackwardThrowable(failure, 8192) == failure);
+        show(() -> RawOps.covBackwardThrowable(null, 128) instanceof NullPointerException);
+        Object[] references = {token, null, sameString, token};
+        show(() -> covReferenceLoop(references));
+        show(() -> instance.covFieldLoop(references, 8192) == sameString);
+        show(() -> covConstructorLoop(41, sameString, 4096));
+        show(() -> covCallWithCatchLoop(references, failure, 8192) == token);
+        show(() -> covCallWithCatchLoop(references, failure, 8193) == failure);
+        show(() -> RawOps.covStackCarry(new Object[]{sameString}, token, 8192) == sameString);
+        show(() -> RawOps.covStackCarry(new Object[]{null}, token, 8192) == token);
         show(() -> storesThrownIdentity(failure));
         show(() -> covPending(0));
         show(() -> covPending(2));
