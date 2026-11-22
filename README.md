@@ -59,7 +59,7 @@ Use the same padding count and seed with `protect`, `harden`, `verify`, and `app
 
 ## Optional analysis resistance
 
-Use `--analysis-resistance balanced` to add reproducible synthetic resources and validate their manifest before native registration. `maximum` also outlines eligible native wrapping operations and checks their presence in each final library. The default is `off`. Configure analysis seeds and resource limits independently of the LLVM profile, padding, and markers. [Analysis resistance guide](docs/analysis-resistance.md)
+Use `--analysis-resistance balanced` to package executable utility methods, outline eligible native operations, and bind the resource manifest to native registration. `maximum` increases helper depth and utility diversity. Both profiles extend preset LLVM pipelines when a toolchain is configured. The default is `off`. Configure seeds and limits independently of padding and markers. [Analysis resistance guide](docs/analysis-resistance.md)
 
 ## Staged release workflow
 
