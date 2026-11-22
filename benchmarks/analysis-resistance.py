@@ -5,6 +5,7 @@ import argparse
 from collections import Counter, defaultdict
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -19,7 +20,9 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).with_name("analysis-workload.java")
-METHODS = ["step(I)I", "mix(II)I", "batch(III)I", "conditional(I)I", "excluded(I)I"]
+NATIVE_METHODS = ["step(I)I", "mix(II)I", "batch(III)I", "conditional(I)I", "accumulate(I)I", "arrayUpdate([III)I"]
+RETAINED = "retainedWithHandler([II)I"
+EXCLUDED = "excluded(I)I"
 OWNER = "AnalysisWorkload$Kernel"
 TARGETS = {
     "x86_64-linux": "elf64-x86-64",
@@ -95,6 +98,10 @@ def arguments():
     parser.add_argument("--llvm-opt", help="matching opt executable")
     parser.add_argument("--llvm-plugin", help="matching local LLVM pass plugin")
     parser.add_argument("--max-growth", type=int, help="cap executable growth against each LLVM build's frontend baseline")
+    parser.add_argument("--max-runtime-overhead-percent", type=float,
+                        help="optional per-workload steady-state median limit relative to native off")
+    parser.add_argument("--max-startup-overhead-ms", type=float,
+                        help="optional first invocation median increase limit relative to native off")
     llvm = parser.add_mutually_exclusive_group()
     llvm.add_argument("--llvm-profile", choices=("compatibility", "balanced", "aggressive", "maximum"))
     llvm.add_argument("--llvm-passes", help="explicit pipeline shared by every protected case")
@@ -109,6 +116,9 @@ def arguments():
         parser.error("pass --clang, --llvm-opt, and --llvm-plugin together")
     if args.max_growth is not None and (args.max_growth < 0 or args.llvm_profile == "compatibility"):
         parser.error("--max-growth requires a non-negative percentage and an LLVM transformation profile")
+    for limit in (args.max_runtime_overhead_percent, args.max_startup_overhead_ms):
+        if limit is not None and (not math.isfinite(limit) or limit < 0):
+            parser.error("overhead limits must be finite and non-negative")
     for option in ("zig", "llvm_objdump", "clang", "llvm_opt", "llvm_plugin"):
         value = getattr(args, option)
         if value:
@@ -300,12 +310,15 @@ def checked_build(stdout, stderr, stats, profile, seed):
     application = [record for record in decisions if record["method"].startswith(f"{OWNER}#")]
     app_selected = [method for method in selected if method.startswith(f"{OWNER}#")]
     utilities = sorted(record["method"] for record in decisions if record["result"] == "analysis-utility")
-    require(app_selected == sorted(f"{OWNER}#{method}" for method in METHODS[:-1]), "Unexpected selected fixture methods")
+    require(app_selected == sorted(f"{OWNER}#{method}" for method in NATIVE_METHODS), "Unexpected selected fixture methods")
     require([method for method in selected if method not in app_selected] == utilities, "Unexpected selected utilities")
-    require(stats["javaKernel"]["nativeMethodNames"] == sorted(method.split("(")[0] for method in METHODS[:-1]),
+    require(stats["javaKernel"]["nativeMethodNames"] == sorted(method.split("(")[0] for method in NATIVE_METHODS),
             "Packaged native declarations differ from the fixture selection")
     counts = Counter(record["result"] for record in application)
     require(counts["excluded"] == 1, "Explicit exclusion was not reported")
+    retained = [record for record in application if record["result"] == "retained"]
+    require(len(retained) == 1 and retained[0]["method"] == f"{OWNER}#{RETAINED}"
+            and "exception handlers" in retained[0]["reason"], "Unexpected unsupported method diagnostic")
     reports = [item for item in records if "analysisResistance" in item]
     if profile == "off":
         require(not reports and not utilities and stats["analysisResourceEntries"] == 0, "Analysis output appeared in off")
@@ -332,6 +345,17 @@ def checked_build(stdout, stderr, stats, profile, seed):
             require(target["libraryBytes"] == metrics["libraryBytes"]
                     and target["executableBytes"] == metrics["wholeLibraryExecutableTotals"]["bytes"],
                     "Packaged size metrics differ from CLI")
+            utility_sections = {name: sizes["bytes"] for name, sizes in sections.items() if name.startswith(".nou")}
+            require(len(utility_sections) == len(utilities)
+                    and sorted(utility_sections.values()) == sorted(target["utilityCodeBytes"].values()),
+                    "Linked utility sections differ from the build report")
+            metrics["detectableUtilitySections"] = utility_sections
+            comparison = target.get("llvmComparison")
+            if comparison is not None:
+                require(comparison["executableChanged"] ==
+                        (comparison["baselineExecutableSha256"] != comparison["executableSha256"]),
+                        "LLVM executable fingerprints contradict the change result")
+                metrics["llvmComparison"] = comparison
             helper_evidence = target["helpers"]
             require(len(helper_evidence) == roots
                     and all(helper["status"] == "verified" for helper in helper_evidence), "Unverified helper roots")
@@ -357,7 +381,11 @@ def checked_build(stdout, stderr, stats, profile, seed):
             "frontendExecutableBytes": int(baseline), "transformedExecutableBytes": int(current),
             "frontendLibraryBytes": int(baseline_library), "transformedLibraryBytes": int(current_library),
         }
+    eligible = counts["selected"]
+    candidates = eligible + counts["retained"]
     stats["methodSelection"] = {"applicationCounts": dict(counts), "generatedUtilityCount": len(utilities),
+                                "eligibleApplicationCoveragePercent": 100.0 * len(app_selected) / eligible,
+                                "requestedApplicationCoveragePercent": 100.0 * len(app_selected) / candidates,
                                 "decisions": decisions}
 
 
@@ -433,6 +461,27 @@ def timed_cases(cases, args, work, jvm, env):
     return {phase + "-" + str(seed): checksums for (phase, seed), checksums in expected.items()}
 
 
+def overhead_checks(cases, args):
+    baseline = cases["off"]
+    violations = []
+    for label, stats in cases.items():
+        if stats.get("analysisProfile") not in {"balanced", "maximum"}:
+            continue
+        startup = stats["startup"]["firstInvocationMs"]["median"] - baseline["startup"]["firstInvocationMs"]["median"]
+        steady = {}
+        for name in WORKLOADS:
+            reference = baseline["steadyState"][name]["medianNsPerUpdate"]
+            steady[name] = 100 * (stats["steadyState"][name]["medianNsPerUpdate"] / reference - 1)
+            limit = args.max_runtime_overhead_percent
+            if limit is not None and steady[name] > limit:
+                violations.append(f"{label} {name} overhead {steady[name]:.2f}% exceeds {limit:g}%")
+        limit = args.max_startup_overhead_ms
+        if limit is not None and startup > limit:
+            violations.append(f"{label} first invocation increase {startup:.2f} ms exceeds {limit:g} ms")
+        stats["overheadAgainstNativeOff"] = {"firstInvocationIncreaseMs": startup, "steadyStateIncreasePercent": steady}
+    return violations
+
+
 def main():
     args = arguments()
     build = ROOT / "build"
@@ -493,8 +542,8 @@ def main():
     cases = {"original": jar_metrics(jar, original, [], args.llvm_objdump, truth, env)}
     require(cases["original"]["javaKernel"]["integerLiteralRecall"]["distinctFixtureLiteralsSeen"] == len(truth),
             "Original bytecode scan did not find all fixture literals")
-    selections = ["--exclude", f"{OWNER}#{METHODS[-1]}"]
-    for method in METHODS:
+    selections = ["--unsupported", "retain", "--exclude", f"{OWNER}#{EXCLUDED}"]
+    for method in (*NATIVE_METHODS, RETAINED, EXCLUDED):
         selections.extend(["--include", f"{OWNER}#{method}"])
     common = ["--input", jar, "--padding", "off", *selections, *compiler]
     for target in targets:
@@ -522,8 +571,12 @@ def main():
 
     print("Timing startup and steady state in fresh JVMs", flush=True)
     checksums = timed_cases(cases, args, work, jvm, env)
+    violations = overhead_checks(cases, args)
     report = {
-        "result": "pass",
+        "result": "budget-failed" if violations else "pass",
+        "overheadBudgetViolations": violations,
+        "maxRuntimeOverheadPercent": args.max_runtime_overhead_percent,
+        "maxStartupOverheadMs": args.max_startup_overhead_ms,
         "hostTarget": host,
         "crossBuiltTargets": targets[1:],
         "toolVersions": versions,
@@ -545,6 +598,7 @@ def main():
             "startup": "Fresh JVMs. Process time runs from spawn through exit. First invocation includes kernel class initialization and, in protected cases, native registration. Filesystem caches may be warm.",
             "steadyState": "Median of per-fork medians after warmup. The per_call and batched_32 kernels run the same recurrence with one protected call per update or per 32 updates. JIT and native optimization can also affect the difference.",
             "nativeCode": "Linear disassembly of executable sections includes registration, toolchain code, and padding. Block-leader estimates count section entries, visible labels, local branch targets, and decoded successors after branches and returns. Decoded helper transfers match section entries directly, with reachability checked by the protection CLI.",
+            "utilityDetection": "Counts executable .nou sections visible to llvm-objdump. These sections make the utility locations identifiable in the current artifact format.",
             "literalRecall": "Counts exact 32-bit fixture literal values in javap ldc entries or native disassembly immediate operands. This reports presence anywhere in the scanned code and does not reconstruct constants, attribute values to functions, or measure decompilation effort.",
         },
         "cases": cases,
@@ -552,6 +606,8 @@ def main():
     output = work / "summary.json"
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"Analysis benchmark complete. Summary at {output}")
+    if violations:
+        raise SystemExit("\n".join(violations))
 
 
 if __name__ == "__main__":

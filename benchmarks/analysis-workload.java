@@ -5,6 +5,27 @@ final class AnalysisWorkload {
     private static final int BATCH = 32;
 
     static final class Kernel {
+        private int state;
+
+        int accumulate(int value) {
+            state = state + value;
+            return state;
+        }
+
+        static int arrayUpdate(int[] values, int index, int delta) {
+            int next = values[index] + delta;
+            values[index] = next;
+            return next;
+        }
+
+        static int retainedWithHandler(int[] values, int index) {
+            try {
+                return values[index];
+            } catch (ArrayIndexOutOfBoundsException error) {
+                return -1;
+            }
+        }
+
         static int step(int value) {
             return value ^ 0x13271953;
         }
@@ -51,12 +72,17 @@ final class AnalysisWorkload {
     private static int probe(int seed) {
         int value = seed;
         int checksum = Kernel.excluded(seed);
+        int[] window = new int[16];
+        Kernel accumulator = new Kernel();
         for (int i = 0; i < 4_096; i++) {
             value = value * 1_664_525 + 1_013_904_223;
             int expectedBatch = Kernel.mix(value, i);
             int actualBatch = Kernel.batch(value, i, 1);
             if (expectedBatch != actualBatch) throw new AssertionError("batch recurrence differs from mix");
-            checksum = Integer.rotateLeft(checksum, 5) ^ actualBatch ^ Kernel.conditional(value) ^ Kernel.step(value);
+            int updated = Kernel.arrayUpdate(window, i % window.length, expectedBatch);
+            int observed = Kernel.retainedWithHandler(window, i % (window.length + 1));
+            checksum = Integer.rotateLeft(checksum, 5) ^ accumulator.accumulate(updated)
+                ^ observed ^ actualBatch ^ Kernel.conditional(value) ^ Kernel.step(value);
         }
         return checksum;
     }
