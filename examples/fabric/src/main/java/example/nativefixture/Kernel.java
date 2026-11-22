@@ -23,4 +23,9 @@ final class Kernel {
         Identifier first = order < 0 ? current : candidate;
         return mix(first.path.length(), salt);
     }
+
+    static int identifierPriorityOrDefault(Identifier current, Identifier candidate, int salt, int fallback) {
+        try { return identifierPriority(current, candidate, salt); }
+        catch (NullPointerException missing) { return fallback; }
+    }
 }

@@ -35,9 +35,10 @@ def nativeHierarchyJar = providers.gradleProperty('nativeHierarchyJar').map { fi
 def defaultNativeMethods = [
     'example/nativefixture/Kernel#mix(II)I',
     'example/nativefixture/Kernel#identifierScore*',
+    'example/nativefixture/Kernel#identifierPriorityOrDefault*',
 ]
 if (nativeHierarchyJar.isPresent()) {
-    defaultNativeMethods.add('example/nativefixture/Kernel#identifierPriority*')
+    defaultNativeMethods.add('example/nativefixture/Kernel#identifierPriority(*')
 }
 def nativeMethods = providers.gradleProperty('nativeMethod').map { [it] }.orElse(defaultNativeMethods)
 def nativeTarget = providers.gradleProperty('nativeTarget')
