@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from zipfile import ZipFile
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("distribution", type=Path)
@@ -55,7 +56,10 @@ native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declaratio
 assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d["result"] == "retained"}
-assert set(retained) == {"rejectAllocation", "rejectHandler", "rejectReferenceLoop", "rejectAllocationLoop", "rejectRawCall", "rejectConcatLoop"}, retained
+assert set(retained) == {"rejectAllocation", "rejectHandler", "rejectReferenceLoop", "rejectAllocationLoop",
+                         "rejectRawCall", "rejectConcatLoop", "rejectDirectHierarchy", "rejectUnknownHierarchy"}, retained
+assert "bytecode verification failed" in retained["rejectDirectHierarchy"]
+assert "bytecode verification failed" in retained["rejectUnknownHierarchy"]
 assert "object allocation" in retained["rejectAllocation"]
 assert "exception handlers" in retained["rejectHandler"]
 assert "local-reference lifetime" in retained["rejectReferenceLoop"]
@@ -66,6 +70,23 @@ verified = run(tool + ["verify", "--staged", protected] + selection + flags)
 (work / "verify.jsonl").write_text(verified.stdout)
 verification = json.loads(verified.stdout.splitlines()[-1])
 assert verification["verification"]["structurallyValid"], verification
+# A versioned superclass may supply a different hierarchy on another JVM.
+versioned = work / "versioned.jar"
+versioned_base = "Coverage$DefaultDispatch.class"
+with ZipFile(original) as source, ZipFile(versioned, "w") as destination:
+    for name in source.namelist():
+        content = source.read(name)
+        if name == "META-INF/MANIFEST.MF":
+            content = content.rstrip(b"\r\n") + b"\r\nMulti-Release: true\r\n\r\n"
+        destination.writestr(name, content)
+    destination.writestr("META-INF/versions/25/" + versioned_base, source.read(versioned_base))
+versioned_report = run(tool + ["analyze", "--input", versioned, "--include", "Coverage#covHierarchy*",
+                               "--unsupported", "retain", "--padding", "off"])
+versioned_decisions = [json.loads(line) for line in versioned_report.stdout.splitlines()]
+assert {d["method"].split("#")[1].split("(")[0]: d["result"] for d in versioned_decisions} == {
+    "covHierarchyReceiver": "eligible", "covHierarchyInterface": "retained", "covHierarchyArguments": "retained"
+}, versioned_decisions
+
 original_result = run([executable("java"), "-Xverify:all", "-jar", original])
 protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED", "-jar", protected])
 (work / "original.txt").write_text(original_result.stdout)

@@ -56,9 +56,9 @@ final class JvmBridges {
 
     List<MethodNode> methods() { return methods; }
 
-    MethodNode call(MethodInsnNode call, int instructionIndex, Type receiver) {
+    MethodNode call(MethodInsnNode call, int instructionIndex, Type receiver, Type[] parameters) {
         var operation = new MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf);
-        return create(instructionIndex, receiver, Type.getReturnType(call.desc), Type.getArgumentTypes(call.desc), operation);
+        return create(instructionIndex, receiver, Type.getReturnType(call.desc), parameters, operation);
     }
 
     MethodNode field(FieldInsnNode field, int instructionIndex, Type receiver, boolean store) {

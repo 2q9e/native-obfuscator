@@ -1,5 +1,6 @@
 package dev.nativeobfuscator.translate;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import org.objectweb.asm.Type;
@@ -35,28 +36,39 @@ public final class MethodCompiler {
 
     public static String compile(ClassNode owner, MethodNode method, String symbol,
                                  String methodAttribute, WrappingOperation wrappingOperation) throws Unsupported {
-        return compile(owner, method, symbol, methodAttribute, wrappingOperation, null);
+        return compile(owner, method, symbol, methodAttribute, wrappingOperation, null, ReferenceHierarchy.EMPTY);
     }
 
     public static Compilation compileWithBridges(ClassNode owner, MethodNode method, String symbol,
                                                  String methodAttribute, WrappingOperation wrappingOperation) throws Unsupported {
+        return compileWithBridges(owner, method, symbol, methodAttribute, wrappingOperation, ReferenceHierarchy.EMPTY);
+    }
+
+    public static Compilation compileWithBridges(ClassNode owner, MethodNode method, String symbol,
+                                                 String methodAttribute, WrappingOperation wrappingOperation,
+                                                 ReferenceHierarchy hierarchy) throws Unsupported {
         var bridges = new JvmBridges(owner, method);
-        String code = compile(owner, method, symbol, methodAttribute, wrappingOperation, bridges);
+        String code = compile(owner, method, symbol, methodAttribute, wrappingOperation, bridges, hierarchy);
         return new Compilation(code, bridges.methods());
     }
 
     public static List<MethodNode> rebuildBridges(ClassNode owner, MethodNode method) throws Unsupported {
+        return rebuildBridges(owner, method, ReferenceHierarchy.EMPTY);
+    }
+
+    public static List<MethodNode> rebuildBridges(ClassNode owner, MethodNode method,
+                                                    ReferenceHierarchy hierarchy) throws Unsupported {
         // Use the same verified reachability and deterministic naming as native emission.
         for (AbstractInsnNode instruction : method.instructions) {
             if (JvmBridges.requiresBridge(owner, instruction))
-                return compileWithBridges(owner, method, "rebuild_bridges", "", null).bridges();
+                return compileWithBridges(owner, method, "rebuild_bridges", "", null, hierarchy).bridges();
         }
         return List.of();
     }
 
     private static String compile(ClassNode owner, MethodNode method, String symbol,
                                   String methodAttribute, WrappingOperation wrappingOperation,
-                                  JvmBridges bridges) throws Unsupported {
+                                  JvmBridges bridges, ReferenceHierarchy hierarchy) throws Unsupported {
         if (method.name.startsWith("<") || (method.access & (ACC_ABSTRACT | ACC_NATIVE)) != 0)
             throw new Unsupported("initializer, abstract method, or already native");
         if (!method.tryCatchBlocks.isEmpty())
@@ -65,7 +77,7 @@ public final class MethodCompiler {
             throw new Unsupported("method exceeds translation limits");
         final Frame<BasicValue>[] frames;
         try {
-            frames = new Analyzer<>(new TypedVerifier()).analyze(owner.name, method);
+            frames = new Analyzer<>(new TypedVerifier(owner, hierarchy)).analyze(owner.name, method);
         } catch (AnalyzerException | RuntimeException e) {
             throw new Unsupported("bytecode verification failed: " + e.getMessage());
         }
@@ -340,10 +352,36 @@ public final class MethodCompiler {
     }
 
 
-    /** Keeps exact descriptor types without loading application classes into the tool VM.
-     * Hierarchy-dependent assignments are deliberately rejected rather than guessed. */
+    /** Keeps exact descriptor types without loading application classes into the tool VM. */
     private static final class TypedVerifier extends BasicVerifier {
-        TypedVerifier() { super(ASM9); }
+        private final ClassNode owner;
+        private final ReferenceHierarchy hierarchy;
+
+        TypedVerifier(ClassNode owner, ReferenceHierarchy hierarchy) {
+            super(ASM9);
+            this.owner = owner;
+            this.hierarchy = hierarchy;
+        }
+
+        @Override public BasicValue naryOperation(AbstractInsnNode instruction, List<? extends BasicValue> values)
+                throws AnalyzerException {
+            if (!(instruction instanceof MethodInsnNode call) || !JvmBridges.externalCall(owner, call))
+                return super.naryOperation(instruction, values);
+            Type[] parameters = Type.getArgumentTypes(call.desc);
+            int firstArgument = call.getOpcode() == INVOKESTATIC ? 0 : 1;
+            ArrayList<BasicValue> checked = null;
+            for (int i = 0; i < values.size(); i++) {
+                Type expected = i < firstArgument ? Type.getObjectType(call.owner) : parameters[i - firstArgument];
+                BasicValue value = values.get(i);
+                if (!value.isReference() || !isReferenceType(expected)
+                    || referenceSubtype(value.getType(), expected) || !hierarchy.proves(value.getType(), expected)) continue;
+                // Validate this use only. Later instructions and bridge parameters retain
+                // the original operand type, so the JVM checks the same typed invocation.
+                if (checked == null) checked = new ArrayList<>(values);
+                checked.set(i, newValue(expected));
+            }
+            return super.naryOperation(instruction, checked == null ? values : checked);
+        }
         @Override public BasicValue newValue(Type type) {
             if (type != null && (type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT || isNarrow(type)))
                 return new BasicValue(type);
@@ -677,9 +715,15 @@ public final class MethodCompiler {
         if (!insn.owner.equals(owner.name)) {
             if (bridges == null || !JvmBridges.externalCall(owner, insn))
                 throw new Unsupported("direct call resolution outside the declaring class is not verified for this opcode");
-            Type receiver = insn.getOpcode() == INVOKESTATIC ? null
-                : frame.getStack(frame.getStackSize() - Type.getArgumentCount(insn.desc) - 1).getType();
-            MethodNode bridge = bridges.call(insn, instructionIndex, receiver);
+            Type[] parameters = Type.getArgumentTypes(insn.desc);
+            int firstArgument = frame.getStackSize() - parameters.length;
+            Type receiver = insn.getOpcode() == INVOKESTATIC ? null : frame.getStack(firstArgument - 1).getType();
+            for (int i = 0; i < parameters.length; i++) {
+                Type expected = parameters[i];
+                Type actual = frame.getStack(firstArgument + i).getType();
+                if (isReferenceType(expected) && !referenceSubtype(actual, expected)) parameters[i] = actual;
+            }
+            MethodNode bridge = bridges.call(insn, instructionIndex, receiver, parameters);
             emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
             return;
         }

@@ -1,3 +1,6 @@
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Random;
 
 /** Differential fixture: helper targets remain Java unless explicitly selected. */
@@ -100,6 +103,9 @@ public class Coverage {
             int ignored = 1 / denominator;
             return value;
         }
+        static int inspect(DispatchPeer peer, VirtualPeer[] values) {
+            return (int) peer.fold(13, 4) + (values == null ? 0 : values.length);
+        }
     }
     private static class StaticFail {
         static { fail(); }
@@ -187,7 +193,8 @@ public class Coverage {
     private interface DispatchPeer {
         default long fold(long value, double fraction) { return value + (long)fraction; }
     }
-    private static final class DefaultDispatch implements DispatchPeer {}
+    private static class DefaultDispatch implements DispatchPeer {}
+    private static final class InheritedDispatch extends DefaultDispatch {}
     private static final class OverrideDispatch implements DispatchPeer {
         @Override public long fold(long value, double fraction) { return value - (long)fraction; }
     }
@@ -196,6 +203,20 @@ public class Coverage {
     private static long covInterfaceDispatch(DispatchPeer peer, long value, double fraction) {
         return peer.fold(value, fraction);
     }
+    private static int covHierarchyReceiver(VirtualChild peer, int value) {
+        VirtualPeer receiver = peer;
+        return receiver.scale(value);
+    }
+    private static long covHierarchyInterface(InheritedDispatch peer, long value, double fraction) {
+        DispatchPeer receiver = peer;
+        return receiver.fold(value, fraction);
+    }
+    private static int covHierarchyArguments(InheritedDispatch peer, VirtualChild[] values) {
+        return StaticPeer.inspect(peer, values);
+    }
+    private static int localAcceptsParent(VirtualPeer peer) { return peer.scale(5); }
+    private static int rejectDirectHierarchy(VirtualChild peer) { return localAcceptsParent(peer); }
+    public static void rejectUnknownHierarchy(ArrayList<Integer> values) { Collections.reverse(values); }
     private static class AllocationPeer {
         final long amount;
         final String label;
@@ -328,6 +349,19 @@ public class Coverage {
         show(() -> covInterfaceDispatch(new DefaultDispatch(), Long.MAX_VALUE, 12.0));
         show(() -> covInterfaceDispatch(new OverrideDispatch(), Long.MAX_VALUE, 12.0));
         show(() -> covInterfaceDispatch(null, 7, 12.0));
+        show(() -> covHierarchyReceiver(new VirtualChild(), 7));
+        show(() -> covHierarchyReceiver(null, 7));
+        show(() -> covHierarchyInterface(new InheritedDispatch(), Long.MAX_VALUE, 1.0));
+        show(() -> covHierarchyInterface(null, 7, 12.0));
+        show(() -> covHierarchyArguments(new InheritedDispatch(), new VirtualChild[3]));
+        show(() -> covHierarchyArguments(new InheritedDispatch(), null));
+        show(() -> covHierarchyArguments(null, new VirtualChild[3]));
+        show(() -> rejectDirectHierarchy(new VirtualChild()));
+        show(() -> {
+            var values = new ArrayList<>(List.of(1, 3, 7));
+            rejectUnknownHierarchy(values);
+            return values;
+        });
         show(() -> covExternalStaticField(false));
         System.out.println("field-skipped:" + fieldState);
         show(() -> covExternalStaticField(true));

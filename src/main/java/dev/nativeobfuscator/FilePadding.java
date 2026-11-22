@@ -1,5 +1,6 @@
 package dev.nativeobfuscator;
 
+import dev.nativeobfuscator.translate.ReferenceHierarchy;
 import java.io.IOException;
 import java.util.*;
 import org.objectweb.asm.*;
@@ -21,6 +22,13 @@ final class FilePadding {
     }
 
     static Generation generate(Map<String, byte[]> input, int count, long seed, Set<String> plannedNativeMethods) throws IOException {
+        var hierarchy = count > 0 && !plannedNativeMethods.isEmpty()
+            ? Protector.referenceHierarchy(input) : ReferenceHierarchy.EMPTY;
+        return generate(input, count, seed, plannedNativeMethods, hierarchy);
+    }
+
+    static Generation generate(Map<String, byte[]> input, int count, long seed, Set<String> plannedNativeMethods,
+                               ReferenceHierarchy hierarchy) throws IOException {
         if (count < 0 || count > 1000) throw new IllegalArgumentException("padding count must be between 0 and 1000");
         var classes = new LinkedHashMap<String, byte[]>();
         var selected = new LinkedHashMap<String, String>();
@@ -43,7 +51,8 @@ final class FilePadding {
                     }
                     if ((method.access & ACC_NATIVE) != 0 || planned.contains(method.name + method.desc)) natives++;
                 }
-                byte[] finalReference = planned.isEmpty() ? entry.getValue() : Protector.rewriteExpected(entry.getValue(), CALIBRATION_LOADER, 0, planned);
+                byte[] finalReference = planned.isEmpty() ? entry.getValue()
+                    : Protector.rewriteExpected(entry.getValue(), CALIBRATION_LOADER, 0, planned, hierarchy);
                 references.add(new Reference(node.name, node.version, finalReference.length, node.fields.size(), methods, natives));
             } catch (RuntimeException failure) {
                 throw new IOException("Cannot inspect padding size reference " + entry.getKey(), failure);

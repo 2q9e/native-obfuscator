@@ -1,5 +1,6 @@
 package dev.nativeobfuscator;
 
+import dev.nativeobfuscator.translate.ReferenceHierarchy;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -107,8 +108,10 @@ final class Workflow {
         var errors = new ArrayList<String>();
         Map<String, byte[]> originalEntries;
         Map<String, byte[]> stagedEntries;
+        ReferenceHierarchy hierarchy;
         try {
             originalEntries = Archive.read(original);
+            hierarchy = Protector.referenceHierarchy(originalEntries);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
                 List.of(), 0, List.of(), Set.of(), List.of("Original JAR: " + failure.getMessage()), null, List.of());
@@ -126,7 +129,7 @@ final class Workflow {
         if (!sha256(staged).equals(stagedHash))
             errors.add("Staged JAR changed during verification");
 
-        var generation = FilePadding.generate(originalEntries, paddingCount, paddingSeed, expectedNativeMethods);
+        var generation = FilePadding.generate(originalEntries, paddingCount, paddingSeed, expectedNativeMethods, hierarchy);
         var utilities = AnalysisDecoys.generate(originalEntries, analysis.decoyMethods(), analysis.seed(),
             generation.classes().keySet());
         var generatedEntries = new LinkedHashMap<>(generation.classes());
@@ -319,7 +322,7 @@ final class Workflow {
                 if (actual == null) continue;
                 try {
                     byte[] rewritten = Protector.rewriteExpected(trusted,
-                        "dev/nativeobfuscator/runtime/" + runtimeId, expectedIndices.get(classEntry), ownerPlan.getValue());
+                        "dev/nativeobfuscator/runtime/" + runtimeId, expectedIndices.get(classEntry), ownerPlan.getValue(), hierarchy);
                     if (!sameClass(rewritten, actual))
                         errors.add("Selected class does not match trusted build inputs: " + classEntry);
                 } catch (IOException | RuntimeException invalid) {

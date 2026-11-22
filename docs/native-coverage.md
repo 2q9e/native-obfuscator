@@ -1,6 +1,6 @@
 # JNI coverage and verification
 
-Native conversion checks operand types before emitting JNI calls. Frame analysis preserves exact array and object descriptors and checks assignments it can prove from bytecode and descriptors. A method stays in Java under `--unsupported retain` when the translator cannot prove a required assignment. The default policy fails the build. Diagnostics identify the instruction and reason.
+Native conversion checks operand types before emitting JNI calls. Frame analysis preserves exact array and object descriptors and checks assignments it can prove from bytecode and descriptors. External call bridges also use superclass and interface edges from unversioned class headers in the input JAR. When that proof widens a reference argument, the bridge keeps the operand's original type and executes the symbolic invocation in the JVM. Classes available only from external dependencies and relationships through multi-release class definitions require separate evidence. A method stays in Java under `--unsupported retain` when the translator cannot prove a required assignment. The default policy fails the build. Diagnostics identify the instruction and reason.
 
 The verified additions are:
 

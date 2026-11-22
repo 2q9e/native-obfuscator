@@ -3,6 +3,7 @@ package dev.nativeobfuscator;
 import dev.nativeobfuscator.runtime.AnalysisManifest;
 import dev.nativeobfuscator.runtime.NativeRuntime;
 import dev.nativeobfuscator.translate.MethodCompiler;
+import dev.nativeobfuscator.translate.ReferenceHierarchy;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -100,8 +101,9 @@ final class Protector {
             throw new IOException("Input already uses the native-obfuscator resource namespace");
         var exclusions = FabricExclusions.from(files);
         var versioned = versionedClasses(files.keySet());
+        var hierarchy = referenceHierarchy(files, versioned);
         var generated = FilePadding.generate(files, config.paddingCount, config.paddingSeed,
-            config.paddingCount == 0 ? Set.of() : paddingReferencePlan(files, config, exclusions, versioned));
+            config.paddingCount == 0 ? Set.of() : paddingReferencePlan(files, config, exclusions, versioned, hierarchy), hierarchy);
         var utilities = AnalysisDecoys.generate(files, config.analysis.decoyMethods(), config.analysis.seed(),
             generated.classes().keySet());
         var utilitySections = AnalysisUtilitySections.names(utilities);
@@ -146,7 +148,7 @@ final class Protector {
                     String symbol = GeneratedNames.nativeFunction(id, name);
                     try {
                         var site = nativePlan != null && !required ? nativePlan.prepare(method, symbol, name) : null;
-                        var compiled = compile(node, method, symbol, site, utilitySections.get(name));
+                        var compiled = compile(node, method, symbol, site, utilitySections.get(name), hierarchy);
                         MethodMetrics metrics = measure(method);
                         if (!required && metrics.instructions < config.minInstructions) {
                             report.accept(new Decision(name, "excluded",
@@ -375,7 +377,7 @@ final class Protector {
 
     /** Resolve the genuine native selection before sampling final class structures. */
     private static Set<String> paddingReferencePlan(Map<String, byte[]> files, Config config,
-            Map<String, String> exclusions, Set<String> versioned) throws IOException {
+            Map<String, String> exclusions, Set<String> versioned, ReferenceHierarchy hierarchy) throws IOException {
         var selected = new HashSet<String>();
         for (var file : files.entrySet()) {
             String path = file.getKey();
@@ -386,7 +388,7 @@ final class Protector {
                 String signature = node.name + "#" + method.name + method.desc;
                 if (!matches(config.includes, signature) || matches(config.excludes, signature)) continue;
                 try {
-                    compile(node, method, "reference_plan");
+                    compile(node, method, "reference_plan", null, null, hierarchy);
                     if (measure(method).instructions >= config.minInstructions) selected.add(signature);
                 } catch (MethodCompiler.Unsupported ignored) {
                     // The main plan reports the precise unsupported-policy decision.
@@ -398,6 +400,29 @@ final class Protector {
 
     private static boolean applicationClass(String path) {
         return path.endsWith(".class") && !path.startsWith("META-INF/") && !path.equals("module-info.class");
+    }
+
+    static ReferenceHierarchy referenceHierarchy(Map<String, byte[]> files) throws IOException {
+        return referenceHierarchy(files, versionedClasses(files.keySet()));
+    }
+
+    private static ReferenceHierarchy referenceHierarchy(Map<String, byte[]> files, Set<String> versioned) throws IOException {
+        var parents = new LinkedHashMap<String, List<String>>();
+        for (var entry : files.entrySet()) {
+            String path = entry.getKey();
+            if (!applicationClass(path) || versioned.contains(path.substring(0, path.length() - 6))) continue;
+            try {
+                var reader = new ClassReader(entry.getValue());
+                if (!path.equals(reader.getClassName() + ".class"))
+                    throw new IOException("Class name disagrees with JAR path: " + path);
+                var supers = new ArrayList<>(List.of(reader.getInterfaces()));
+                if (reader.getSuperName() != null) supers.add(reader.getSuperName());
+                parents.put(reader.getClassName(), supers);
+            } catch (RuntimeException invalid) {
+                throw new IOException("Invalid or unsupported classfile " + path, invalid);
+            }
+        }
+        return new ReferenceHierarchy(parents);
     }
 
     private static ClassNode readClass(String path, byte[] bytes) throws IOException {
@@ -433,17 +458,13 @@ final class Protector {
         return exclusions.get(node.name);
     }
 
-    private static MethodCompiler.Compilation compile(ClassNode node, MethodNode method, String symbol) throws MethodCompiler.Unsupported {
-        return compile(node, method, symbol, null, null);
-    }
-
     private static MethodCompiler.Compilation compile(ClassNode node, MethodNode method, String symbol,
-                AnalysisNative.Selection site, String utilitySection) throws MethodCompiler.Unsupported {
+                AnalysisNative.Selection site, String utilitySection, ReferenceHierarchy hierarchy) throws MethodCompiler.Unsupported {
         if (utilitySection != null)
             return MethodCompiler.compileWithBridges(node, method, symbol,
-                "__attribute__((section(\"" + utilitySection + "\"))) ", null);
-        if (site == null || !site.enabled()) return MethodCompiler.compileWithBridges(node, method, symbol, "", null);
-        var compiled = MethodCompiler.compileWithBridges(node, method, symbol, site.rootAttribute(), site::lower);
+                "__attribute__((section(\"" + utilitySection + "\"))) ", null, hierarchy);
+        if (site == null || !site.enabled()) return MethodCompiler.compileWithBridges(node, method, symbol, "", null, hierarchy);
+        var compiled = MethodCompiler.compileWithBridges(node, method, symbol, site.rootAttribute(), site::lower, hierarchy);
         return new MethodCompiler.Compilation(site.support() + compiled.code(), compiled.bridges());
     }
 
@@ -485,14 +506,19 @@ final class Protector {
     }
 
     static byte[] rewriteExpected(byte[] original, String loader, int index,
-                                  java.util.Set<String> methodSignatures) throws IOException {
+                                  Set<String> methodSignatures) throws IOException {
+        return rewriteExpected(original, loader, index, methodSignatures, ReferenceHierarchy.EMPTY);
+    }
+
+    static byte[] rewriteExpected(byte[] original, String loader, int index,
+                                  Set<String> methodSignatures, ReferenceHierarchy hierarchy) throws IOException {
         ClassNode node = new ClassNode();
         new ClassReader(original).accept(node, 0);
         var bindings = new ArrayList<Binding>();
         for (MethodNode method : node.methods) {
             if (!methodSignatures.contains(method.name + method.desc)) continue;
             try {
-                bindings.add(new Binding(method, "", "", MethodCompiler.rebuildBridges(node, method)));
+                bindings.add(new Binding(method, "", "", MethodCompiler.rebuildBridges(node, method, hierarchy)));
             } catch (MethodCompiler.Unsupported failure) {
                 throw new IOException("Cannot reconstruct JVM bridges for " + node.name + "#" + method.name + method.desc, failure);
             }
