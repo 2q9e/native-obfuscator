@@ -439,9 +439,6 @@ final class Protector {
 
     private static MethodCompiler.Compilation compile(ClassNode node, MethodNode method, String symbol,
                 AnalysisNative.Selection site, String utilitySection) throws MethodCompiler.Unsupported {
-        int sort = Type.getReturnType(method.desc).getSort();
-        if (sort == Type.ARRAY || sort == Type.OBJECT)
-            throw new MethodCompiler.Unsupported("reference-return assignability requires JVM resolution");
         if (utilitySection != null)
             return MethodCompiler.compileWithBridges(node, method, symbol,
                 "__attribute__((section(\"" + utilitySection + "\"))) ", null);

@@ -29,7 +29,11 @@ public final class VerifyModern {
         var bridge = Arrays.stream(BridgeFixture.class.getDeclaredMethods())
                 .filter(method -> method.isBridge() && method.getName().equals("get"))
                 .findFirst().orElseThrow();
-        check(bridge.isSynthetic() && !Modifier.isNative(bridge.getModifiers()), "synthetic bridge retained");
+        check(bridge.isSynthetic() && Modifier.isNative(bridge.getModifiers()) == protectedJar, "synthetic bridge JNI flag");
+        var concreteGetter = Arrays.stream(BridgeFixture.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("get") && method.getReturnType() == Integer.class)
+                .findFirst().orElseThrow();
+        check(Modifier.isNative(concreteGetter.getModifiers()) == protectedJar, "reference getter JNI flag");
         var record = new BridgeFixture(12);
         Supplier<?> supplier = record;
         check(supplier.get().equals(12) && bridge.invoke(record).equals(12), "bridge dispatch");

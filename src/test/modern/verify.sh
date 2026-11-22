@@ -73,11 +73,10 @@ for report, supported, unsupported in (
 ):
     decisions = [json.loads(line) for line in (work / f"{report}.jsonl").read_text(encoding="utf-8").splitlines()]
     expected = {unicode: supported, record: supported, condy: unsupported}
-    expected.update(dict.fromkeys(bridges, unsupported))
+    expected.update(dict.fromkeys(bridges, supported))
     assert len(decisions) == len(expected), decisions
     assert {decision["method"]: decision["result"] for decision in decisions} == expected, decisions
     reasons = {decision["method"]: decision["reason"] for decision in decisions}
     assert "constant requires JVM linkage" in reasons[condy], decisions
-    assert all("reference-return" in reasons[method] for method in bridges), decisions
 PY
 printf 'Java %s modern bytecode test passed (%s)\n' "$release" "$(cat "$work/protected.txt")"

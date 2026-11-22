@@ -58,6 +58,14 @@ public class Coverage {
     private static int[] arrayIdentity(int[] v) { return v; }
     public static boolean covCallIdentity(Object v) { return identity(v) == v; }
     private static Object identity(Object v) { return v; }
+    public Coverage covReturnThis() { return this; }
+    public static String covReturnString(String value, boolean keep) { return keep ? value : null; }
+    public static Object[][] covReturnCovariant(String[][] value) { return value; }
+    public static int[] covReturnArray(int[][] value, int index) { return value[index]; }
+    public static Object covReturnMerged(boolean chooseLeft, String left, Integer right) {
+        return chooseLeft ? left : right;
+    }
+    public static Object covReturnCall(Object value, int denominator) { return StaticPeer.identity(value, denominator); }
     private static int linkState;
     private static class StaticBase {
         static { linkState += 1; }
@@ -250,6 +258,22 @@ public class Coverage {
         show(RawOps::covExternalMissingField);
         show(() -> covCallIdentity(token));
         show(() -> covCallIdentity(null));
+        show(() -> instance.covReturnThis() == instance);
+        String sameString = new String("same");
+        show(() -> covReturnString(sameString, true) == sameString);
+        show(() -> covReturnString(sameString, false) == null);
+        String[][] strings = {{"value"}};
+        show(() -> covReturnCovariant(strings) == strings);
+        int[] ints = {17};
+        show(() -> covReturnArray(new int[][]{ints}, 0) == ints);
+        show(() -> covReturnArray(new int[][]{null}, 0) == null);
+        show(() -> covReturnArray(new int[0][], 0));
+        show(() -> covReturnArray(null, 0));
+        Integer sameNumber = 25;
+        show(() -> covReturnMerged(true, sameString, sameNumber) == sameString);
+        show(() -> covReturnMerged(false, sameString, sameNumber) == sameNumber);
+        show(() -> covReturnCall(token, 1) == token);
+        show(() -> covReturnCall(token, 0));
         show(() -> covPending(0));
         show(() -> covPending(2));
         show(() -> covPendingArray(null, 0));
