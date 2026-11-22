@@ -11,11 +11,13 @@ public final class NativeFixture implements ModInitializer {
         int result = Kernel.mix(0x7654_3210, 0x1357_9BDF);
         Identifier identifier = Identifier.of("native_fixture", "widened_path");
         IdentifierAccessor accessor = (IdentifierAccessor) (Object) identifier;
-        if (result != 0x3B71_AB69
+        int score = Kernel.identifierScore(identifier, 41);
+        if (result != 0x3B71_AB69 || score != 28_443_952
             || !"native_fixture".equals(accessor.nativeFixtureNamespace())
             || !"widened_path".equals(identifier.path)) {
             throw new IllegalStateException("Native fixture verification failed");
         }
-        LoggerFactory.getLogger("native-fixture").info("Native fixture passed (kernel = {}, Mixin and access widener active)", result);
+        LoggerFactory.getLogger("native-fixture").info(
+            "Native fixture passed (kernel = {}, identifier score = {}, Mixin and access widener active)", result, score);
     }
 }

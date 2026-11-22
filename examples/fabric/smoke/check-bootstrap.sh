@@ -13,9 +13,10 @@ fixture_jdk="${JAVA_HOME:?Set JAVA_HOME to JDK 21 or 25}"
 fixture_run="$(mktemp -d)"
 trap 'rm -rf -- "$fixture_run"' EXIT
 
-if ! "$fixture_jdk/bin/javap" -p -classpath "$fixture_jar" example.nativefixture.Kernel |
-    grep -F 'static native int mix(int, int);' > /dev/null; then
-    printf 'The supplied fixture JAR has not converted Kernel.mix to native code.\n' >&2
+declarations=$("$fixture_jdk/bin/javap" -p -classpath "$fixture_jar" example.nativefixture.Kernel)
+if ! grep -F 'static native int mix(int, int);' <<< "$declarations" > /dev/null ||
+    ! grep -F 'static native int identifierScore(net.minecraft.class_2960, int);' <<< "$declarations" > /dev/null; then
+    printf 'Expected both native methods in the remapped Kernel class.\n' >&2
     exit 1
 fi
 
@@ -43,7 +44,7 @@ timeout 60s "$fixture_jdk/bin/java" --enable-native-access=ALL-UNNAMED -Xcheck:j
     cat bootstrap.log >&2
     exit 1
 }
-if ! grep -F 'Native fixture passed (kernel = 997305193, Mixin and access widener active)' bootstrap.log; then
+if ! grep -F 'Native fixture passed (kernel = 997305193, identifier score = 28443952, Mixin and access widener active)' bootstrap.log; then
     cat bootstrap.log >&2
     exit 1
 fi

@@ -31,13 +31,16 @@ def nativeInput = externalJar.orElse(remappedJar.map { it.asFile })
 def protectedJar = layout.buildDirectory.file("libs/${project.name}-${version}-protected.jar")
 def nativeCli = providers.gradleProperty('nativeCli').map { file(it) }
 def nativeLibs = fileTree('../../build/install/native-obfuscator/lib') { include '*.jar' }
-def nativeMethod = providers.gradleProperty('nativeMethod').orElse('example/nativefixture/Kernel#mix(II)I')
+def nativeMethods = providers.gradleProperty('nativeMethod').map { [it] }.orElse([
+    'example/nativefixture/Kernel#mix(II)I',
+    'example/nativefixture/Kernel#identifierScore*',
+])
 def nativeTarget = providers.gradleProperty('nativeTarget')
 def nativeZig = providers.gradleProperty('nativeZig')
 
 tasks.register('protectFabricJar', Exec) {
     group = 'build'
-    description = 'Convert the example kernel after Fabric Loom remaps the mod.'
+    description = 'Convert the example kernel and Minecraft-linked method after Loom remaps the mod.'
     if (!externalJar.isPresent()) {
         dependsOn remap
     }
@@ -47,7 +50,7 @@ tasks.register('protectFabricJar', Exec) {
     } else {
         inputs.files(nativeLibs)
     }
-    inputs.property('nativeMethod', nativeMethod)
+    inputs.property('nativeMethods', nativeMethods)
     inputs.property('nativeTarget', nativeTarget.orElse(''))
     inputs.property('nativeZig', nativeZig.orElse(''))
     outputs.file(protectedJar)
@@ -69,9 +72,9 @@ tasks.register('protectFabricJar', Exec) {
         output.parentFile.mkdirs()
         args 'protect', '--input', nativeInput.get().absolutePath,
             '--output', output.absolutePath,
-            '--include', nativeMethod.get(),
             '--exclude', 'example/nativefixture/NativeFixture#*',
             '--exclude', 'example/nativefixture/mixin/*#*'
+        nativeMethods.get().each { selector -> args '--include', selector }
         if (nativeTarget.isPresent()) {
             args '--target', nativeTarget.get()
         }
