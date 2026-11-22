@@ -1,0 +1,6 @@
+-dontshrink
+-dontoptimize
+-dontskipnonpubliclibraryclassmembers
+-keep public class example.nativefixture.NativeFixture { public *; }
+-keep interface example.nativefixture.mixin.IdentifierAccessor { *; }
+-keepattributes RuntimeVisibleAnnotations,RuntimeInvisibleAnnotations,Signature,InnerClasses,EnclosingMethod

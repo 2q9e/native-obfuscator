@@ -18,7 +18,7 @@ Use these Gradle properties when the corresponding input differs:
 | Property | Value |
 | --- | --- |
 | `nativeInputJar` | Absolute path to the existing Java obfuscator's output. Start from Loom's remapped JAR and preserve intermediary mappings, Fabric metadata, mixin configuration and access-widener resources. |
-| `nativeMethod` | Final `owner#name(descriptor)` selector when a Java obfuscator renames the kernel. Leave it unset if the original signature is retained. |
+| `nativeMethod` | Optional final-name selector. Use the Java obfuscator's mapping to select renamed methods. |
 | `nativeCli` | Absolute path to an alternate native-obfuscator executable. The default uses the root `installDist` Java libraries. |
 | `nativeTarget`, `nativeZig` | A target such as `aarch64-linux` or `all`, and the absolute path to a Zig executable for cross-compilation. |
 
@@ -27,6 +27,22 @@ Use these Gradle properties when the corresponding input differs:
   -PnativeInputJar=/absolute/path/to/post-java-obfuscation.jar \
   '-PnativeMethod=example/nativefixture/Kernel#mix(II)I'
 ```
+
+The [ProGuard keep rules](smoke/proguard.pro) preserve the Fabric entrypoint and Mixin names while allowing the kernel and its methods to be renamed. Build Loom's remapped mod first. Use the intermediary server JAR produced by Fabric Loader and supply the server libraries, Fabric classpath, and JDK modules as ProGuard library inputs. Generate a library overlay with the remapped mod's access widener so that ProGuard can resolve the widened field. The overlay is used during this test's ProGuard invocation. [ProGuard configuration manual](https://www.guardsquare.com/manual/configuration/usage)
+
+```sh
+# class_tweaker_cp contains Fabric class-tweaker 0.3.0 and the ASM 9.9 modules.
+javac --release 21 -cp "$class_tweaker_cp" -d "$work" examples/fabric/smoke/ProGuardLibrary.java
+java -cp "$work:$class_tweaker_cp" ProGuardLibrary \
+  "$remapped_mod" "$intermediary_server" "$work/widened-library.jar"
+java -jar "$proguard_jar" @examples/fabric/smoke/proguard.pro \
+  -injars "$remapped_mod" -outjars "$work/post-proguard.jar" -printmapping "$work/mapping.txt" \
+  -libraryjars "$work/widened-library.jar" \
+  -libraryjars "$intermediary_server(!net/minecraft/class_2960.class;!module-info.class)" \
+  "${library_args[@]}"
+```
+
+Set the Bash array `library_args` to alternating `-libraryjars` and absolute library paths. Include the JDK's `jmods/*.jmod` with the filter `(!**.jar;!module-info.class)`, the Fabric Loader and its dependencies, and the libraries extracted by the Minecraft server bundle. Use the output mapping for the Native Obfuscator selection. ProGuard 7.8.2 named the fixture class `example.nativefixture.a` and overloaded both methods as `a`, so `-PnativeMethod='example/nativefixture/a#a*'` selected both. The two renamed native methods returned the expected values through Fabric Loader 0.18.4 on Windows x64 with Java 21 and 25.
 
 To check that the kernel is native and the access widener uses the runtime namespace:
 
