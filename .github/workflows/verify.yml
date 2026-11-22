@@ -144,7 +144,10 @@ jobs:
           name: cross-built-fixture
           path: |
             fixture/*.jar
-            fixture/native-coverage/*.jar
+            fixture/native-coverage/original.jar
+            fixture/native-coverage/protected.jar
+            fixture/native-coverage/hierarchy-protected.jar
+            fixture/native-coverage/hierarchy-library.jar
           if-no-files-found: error
           retention-days: 3
 
@@ -188,12 +191,17 @@ jobs:
         run: |
           cd fixture/native-coverage
           java -Xverify:all -jar original.jar > original.txt
-          java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED \
-            -jar protected.jar > protected.txt 2> execution.log
-          cmp original.txt protected.txt
-          if grep -F 'WARNING in native method' execution.log; then
-            exit 1
-          fi
+          for artifact in protected hierarchy-protected; do
+            java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED \
+              -jar "$artifact.jar" > "$artifact.txt" 2> "$artifact.log" || {
+                cat "$artifact.log" >&2
+                exit 1
+              }
+            cmp original.txt "$artifact.txt"
+            if grep -F 'WARNING in native method' "$artifact.log"; then
+              exit 1
+            fi
+          done
       - if: runner.os == 'Windows'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
