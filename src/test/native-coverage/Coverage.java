@@ -99,7 +99,24 @@ public class Coverage {
     // These must be retained, with explicit diagnostics.
     public static int rejectExternalField() { return System.out == null ? 0 : 1; }
     public static int rejectVolatile() { return published; }
-    public static int rejectExternal(String value) { return value.length(); }
+    private static class VirtualPeer {
+        int scale(int value) { return value * 2; }
+    }
+    private static final class VirtualChild extends VirtualPeer {
+        @Override int scale(int value) { return value * 3; }
+    }
+    private interface DispatchPeer {
+        default long fold(long value, double fraction) { return value + (long)fraction; }
+    }
+    private static final class DefaultDispatch implements DispatchPeer {}
+    private static final class OverrideDispatch implements DispatchPeer {
+        @Override public long fold(long value, double fraction) { return value - (long)fraction; }
+    }
+    public static int covExternalVirtual(String value) { return value.length(); }
+    private static int covExternalOverride(VirtualPeer peer, int value) { return peer.scale(value); }
+    private static long covInterfaceDispatch(DispatchPeer peer, long value, double fraction) {
+        return peer.fold(value, fraction);
+    }
     public static Object rejectAllocation() { return new Object(); }
     public static int rejectHandler(int[] a) { try { return a[0]; } catch (NullPointerException e) { return 3; } }
     public static int rejectReferenceLoop(Object[] a) { int n = 0; for (int i = 0; i < a.length; i++) if (a[i] != null) n++; return n; }
@@ -181,6 +198,17 @@ public class Coverage {
         System.out.println("linkage-failed:" + linkState);
         show(() -> RawOps.covLinkageRaw(257));
         show(RawOps::covLinkageMissing);
+        show(RawOps::covExternalNull);
+        show(() -> RawOps.covExternalProtected(new RawOps()));
+        show(() -> RawOps.covExternalProtected(null));
+        show(() -> covExternalVirtual("native"));
+        show(() -> covExternalVirtual(null));
+        show(() -> covExternalOverride(new VirtualPeer(), 7));
+        show(() -> covExternalOverride(new VirtualChild(), 7));
+        show(() -> covExternalOverride(null, 7));
+        show(() -> covInterfaceDispatch(new DefaultDispatch(), Long.MAX_VALUE, 12.0));
+        show(() -> covInterfaceDispatch(new OverrideDispatch(), Long.MAX_VALUE, 12.0));
+        show(() -> covInterfaceDispatch(null, 7, 12.0));
         show(() -> covCallIdentity(token));
         show(() -> covCallIdentity(null));
         show(() -> covPending(0));

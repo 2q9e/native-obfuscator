@@ -48,7 +48,7 @@ public final class MethodCompiler {
     public static List<MethodNode> rebuildBridges(ClassNode owner, MethodNode method) throws Unsupported {
         // Use the same verified reachability and deterministic naming as native emission.
         for (AbstractInsnNode instruction : method.instructions) {
-            if (instruction instanceof MethodInsnNode call && JvmBridges.externalStatic(owner, call))
+            if (instruction instanceof MethodInsnNode call && JvmBridges.externalCall(owner, call))
                 return compileWithBridges(owner, method, "rebuild_bridges", "", null).bridges();
         }
         return List.of();
@@ -613,9 +613,11 @@ public final class MethodCompiler {
                                    Frame<BasicValue> frame, Type result, int instructionIndex, JvmBridges bridges) throws Unsupported {
         if (insn.name.startsWith("<")) throw new Unsupported("constructor calls require uninitialized-object tracking");
         if (!insn.owner.equals(owner.name)) {
-            if (bridges == null || !JvmBridges.externalStatic(owner, insn))
+            if (bridges == null || !JvmBridges.externalCall(owner, insn))
                 throw new Unsupported("direct call resolution outside the declaring class is not verified for this opcode");
-            MethodNode bridge = bridges.staticCall(insn, instructionIndex);
+            Type receiver = insn.getOpcode() == INVOKESTATIC ? null
+                : frame.getStack(frame.getStackSize() - Type.getArgumentCount(insn.desc) - 1).getType();
+            MethodNode bridge = bridges.call(insn, instructionIndex, receiver);
             emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
             return;
         }

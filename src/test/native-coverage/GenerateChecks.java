@@ -43,7 +43,7 @@ public final class GenerateChecks {
         reject(owner, method("wrongStaticCall", "()I", new MethodInsnNode(INVOKESTATIC, owner.name, "target", "()I", false), new InsnNode(IRETURN)));
         reject(owner, method("wrongArrayLength", "(Ljava/lang/Object;)I", new VarInsnNode(ALOAD, 0), new InsnNode(ARRAYLENGTH), new InsnNode(IRETURN)));
         var writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
-        writer.visit(V21, ACC_PUBLIC | ACC_FINAL, "RawOps", null, "java/lang/Object", null);
+        writer.visit(V21, ACC_PUBLIC | ACC_FINAL, "RawOps", null, "java/lang/Object", new String[]{"java/lang/Cloneable"});
         for (int i = 0; i < 4; i++) {
             char arrayType = "ZBCS".charAt(i);
             int store = new int[]{BASTORE, BASTORE, CASTORE, SASTORE}[i];
@@ -122,6 +122,22 @@ public final class GenerateChecks {
         missing.visitInsn(IRETURN);
         missing.visitMaxs(0, 0);
         missing.visitEnd();
+        var nullReceiver = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covExternalNull", "()I", null, null);
+        nullReceiver.visitCode();
+        nullReceiver.visitInsn(ACONST_NULL);
+        nullReceiver.visitMethodInsn(INVOKEVIRTUAL, "RawStaticTarget", "missing", "()I", false);
+        nullReceiver.visitInsn(IRETURN);
+        nullReceiver.visitMaxs(0, 0);
+        nullReceiver.visitEnd();
+        var protectedCall = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covExternalProtected", "(LRawOps;)I", null, null);
+        protectedCall.visitCode();
+        protectedCall.visitVarInsn(ALOAD, 0);
+        protectedCall.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Object", "clone", "()Ljava/lang/Object;", false);
+        protectedCall.visitInsn(POP);
+        protectedCall.visitInsn(ICONST_1);
+        protectedCall.visitInsn(IRETURN);
+        protectedCall.visitMaxs(0, 0);
+        protectedCall.visitEnd();
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());
 
