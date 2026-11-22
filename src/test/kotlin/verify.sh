@@ -63,14 +63,14 @@ for report, supported in (("analysis", "eligible"), ("protection", "selected")):
         instance + "calcPrimitive(II)I": supported,
         "fixture/kotlin/KotlinFixtureKt#calcStatic(JJI)J": supported,
         lambda_method: "retained",
-        reference: "retained",
+        reference: supported,
         lambda_body: supported,
     }
     assert len(decisions) == len(expected), decisions
     assert {decision["method"]: decision["result"] for decision in decisions} == expected, decisions
     reasons = {decision["method"]: decision["reason"] for decision in decisions}
     assert "(opcode 186)" in reasons[lambda_method], decisions
-    assert "(opcode 187)" in reasons[reference], decisions
+    assert reasons[reference] == "", decisions
     assert reasons[lambda_body] == "", decisions
 metadata = "META-INF/native_obfuscator_fixture.kotlin_module"
 with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / "protected.jar") as protected:

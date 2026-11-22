@@ -32,7 +32,8 @@ fun main(args: Array<String>) {
         .getDeclaredMethod("calcStatic", Long::class.java, Long::class.java, Int::class.java)
     check(Modifier.isNative(primitive.modifiers) == protectedJar)
     check(Modifier.isNative(static.modifiers) == protectedJar)
-    check(!Modifier.isNative(lambda.modifiers) && !Modifier.isNative(reference.modifiers))
+    check(!Modifier.isNative(lambda.modifiers))
+    check(Modifier.isNative(reference.modifiers) == protectedJar)
     check(clazz.isData && clazz.primaryConstructor?.parameters?.single()?.name == "count")
     check(clazz.primaryConstructor?.call(12) == instance)
     val reflected = clazz.declaredMemberFunctions.single { it.name == "calcPrimitive" }
