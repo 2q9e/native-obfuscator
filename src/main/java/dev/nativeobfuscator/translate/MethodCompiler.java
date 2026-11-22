@@ -296,7 +296,11 @@ public final class MethodCompiler {
             case LRETURN, FRETURN, DRETURN, ARETURN -> line(code, "return " + a + "." + field(result) + ";");
             case NEW -> throw new Unsupported("object allocation requires uninitialized-object tracking");
             case NEWARRAY, ANEWARRAY, MULTIANEWARRAY -> throw new Unsupported("array allocation and dimension failure ordering are not verified");
-            case CHECKCAST, INSTANCEOF -> throw new Unsupported("reference type resolution is not verified");
+            case CHECKCAST, INSTANCEOF -> {
+                if (bridges == null) throw new Unsupported("reference type resolution requires a JVM bridge");
+                MethodNode bridge = bridges.typeCheck((TypeInsnNode) insn, instructionIndex);
+                emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
+            }
             case ATHROW -> throw new Unsupported("explicit throw and null-throw semantics are not verified");
             case MONITORENTER, MONITOREXIT -> throw new Unsupported("explicit monitor ownership and exception cleanup are not verified");
             case INVOKEDYNAMIC -> throw new Unsupported("dynamic call-site linkage is not verified");

@@ -30,25 +30,35 @@ final class JvmBridges {
 
     static boolean requiresBridge(ClassNode owner, AbstractInsnNode instruction) {
         return (instruction instanceof MethodInsnNode call && externalCall(owner, call))
-            || (instruction instanceof FieldInsnNode field && !field.owner.equals(owner.name));
+            || (instruction instanceof FieldInsnNode field && !field.owner.equals(owner.name))
+            || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF;
     }
 
     List<MethodNode> methods() { return methods; }
 
     MethodNode call(MethodInsnNode call, int instructionIndex, Type receiver) {
         var operation = new MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf);
-        return create(operation, instructionIndex, receiver, Type.getReturnType(call.desc), Type.getArgumentTypes(call.desc));
+        return create(instructionIndex, receiver, Type.getReturnType(call.desc), Type.getArgumentTypes(call.desc), operation);
     }
 
     MethodNode field(FieldInsnNode field, int instructionIndex, Type receiver, boolean store) {
         Type type = Type.getType(field.desc);
         var operation = new FieldInsnNode(field.getOpcode(), field.owner, field.name, field.desc);
-        return store ? create(operation, instructionIndex, receiver, Type.VOID_TYPE, new Type[]{type})
-            : create(operation, instructionIndex, receiver, type, new Type[0]);
+        return store ? create(instructionIndex, receiver, Type.VOID_TYPE, new Type[]{type}, operation)
+            : create(instructionIndex, receiver, type, new Type[0], operation);
     }
 
-    private MethodNode create(AbstractInsnNode operation, int instructionIndex, Type receiver,
-                              Type returned, Type[] arguments) {
+    MethodNode typeCheck(TypeInsnNode check, int instructionIndex) {
+        var operation = new TypeInsnNode(check.getOpcode(), check.desc);
+        Type[] arguments = {Type.getType(Object.class)};
+        // A successful cast keeps the existing JNI handle, including inside a loop.
+        return check.getOpcode() == CHECKCAST
+            ? create(instructionIndex, null, Type.VOID_TYPE, arguments, operation, new InsnNode(POP))
+            : create(instructionIndex, null, Type.INT_TYPE, arguments, operation);
+    }
+
+    private MethodNode create(int instructionIndex, Type receiver, Type returned, Type[] arguments,
+                              AbstractInsnNode... operations) {
         boolean nullReceiver = BasicInterpreter.NULL_TYPE.equals(receiver);
         Type[] parameters = arguments;
         if (receiver != null) {
@@ -75,7 +85,7 @@ final class JvmBridges {
                 ? new InsnNode(ACONST_NULL) : new VarInsnNode(parameter.getOpcode(ILOAD), slots));
             slots += parameter.getSize();
         }
-        bridge.instructions.add(operation);
+        for (AbstractInsnNode operation : operations) bridge.instructions.add(operation);
         bridge.instructions.add(new InsnNode(returned.getOpcode(IRETURN)));
         bridge.maxLocals = slots;
         bridge.maxStack = Math.max(slots, returned.getSize());

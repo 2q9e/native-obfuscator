@@ -66,6 +66,13 @@ public class Coverage {
         return chooseLeft ? left : right;
     }
     public static Object covReturnCall(Object value, int denominator) { return StaticPeer.identity(value, denominator); }
+    public static String[][] covCheckedArray(Object value) { return (String[][]) value; }
+    public static boolean covInstanceOfArray(Object value) { return value instanceof String[][]; }
+    public static int covCastLoop(Object value, int count) {
+        int nonNull = 0;
+        for (int i = 0; i < count; i++) if ((String) value != null) nonNull++;
+        return nonNull;
+    }
     private static int linkState;
     private static class StaticBase {
         static { linkState += 1; }
@@ -274,6 +281,18 @@ public class Coverage {
         show(() -> covReturnMerged(false, sameString, sameNumber) == sameNumber);
         show(() -> covReturnCall(token, 1) == token);
         show(() -> covReturnCall(token, 0));
+        show(() -> covCheckedArray(strings) == strings);
+        show(() -> covCheckedArray(null) == null);
+        show(() -> covCheckedArray(new Object[1][]));
+        show(() -> covInstanceOfArray(strings));
+        show(() -> covInstanceOfArray(new Object[1][]));
+        show(() -> covInstanceOfArray(null));
+        show(() -> covCastLoop(sameString, 4096));
+        show(() -> covCastLoop(null, 9));
+        show(() -> covCastLoop(token, 0));
+        show(() -> covCastLoop(token, 1));
+        show(() -> RawOps.covCastMissing(null));
+        show(() -> RawOps.covCastMissing(token));
         show(() -> covPending(0));
         show(() -> covPending(2));
         show(() -> covPendingArray(null, 0));

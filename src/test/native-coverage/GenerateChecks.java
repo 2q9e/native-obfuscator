@@ -148,6 +148,15 @@ public final class GenerateChecks {
         missingField.visitInsn(IRETURN);
         missingField.visitMaxs(0, 0);
         missingField.visitEnd();
+        var missingCast = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covCastMissing", "(Ljava/lang/Object;)I", null, null);
+        missingCast.visitCode();
+        missingCast.visitVarInsn(ALOAD, 0);
+        missingCast.visitTypeInsn(CHECKCAST, "MissingCastTarget");
+        missingCast.visitInsn(POP);
+        missingCast.visitInsn(ICONST_1);
+        missingCast.visitInsn(IRETURN);
+        missingCast.visitMaxs(0, 0);
+        missingCast.visitEnd();
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());
 

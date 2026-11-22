@@ -45,7 +45,8 @@ report = run(tool + ["protect", "--output", protected] + selection + flags)
 (work / "build.log").write_text(report.stderr)
 decisions = [json.loads(line) for line in report.stdout.splitlines()]
 raw_methods = {"covRawZ", "covRawB", "covRawC", "covRawS", "covSpecial", "covReferenceCapacity",
-               "covLinkageRaw", "covLinkageMissing", "covExternalNull", "covExternalProtected", "covExternalMissingField"}
+               "covLinkageRaw", "covLinkageMissing", "covExternalNull", "covExternalProtected", "covExternalMissingField",
+               "covCastMissing"}
 expected = raw_methods | set(re.findall(r"\b(cov\w+)\(", (root / "Coverage.java").read_text()))
 selected = {d["method"].split("#")[1].split("(")[0] for d in decisions if d["result"] == "selected"}
 assert selected == expected, (selected, expected, report.stdout)
