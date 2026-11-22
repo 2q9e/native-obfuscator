@@ -29,9 +29,8 @@ import static org.objectweb.asm.Opcodes.*;
 /** Compile with the installed distribution's libraries on the classpath, then run
  *  with a working directory argument followed by any native compiler flags. */
 public final class ArrayJoinTest {
-    private static final String NATIVE_METHODS = "abcdefg";
+    private static final String NATIVE_METHODS = "abcdefgh";
     private static final Map<String, String> RETAINED = Map.of(
-        "h", "reference type resolution is not verified",
         "i", "reference-producing operation in a cyclic method requires bounded JNI local-reference lifetime",
         "j", "constant requires JVM linkage");
 
