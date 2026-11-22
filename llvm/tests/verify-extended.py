@@ -96,7 +96,7 @@ def test(args, work):
         return exe
 
     reference_exe = link("baseline", reference, reference_cfg)
-    for pass_name, default_cap, bound in (("native-mix", 4, 4), ("native-route", 1, 13)):
+    for pass_name, default_cap, bound in (("native-mix", 4, 5), ("native-route", 1, 13)):
         output = work / f"{pass_name}-eligibility.bc"
         log = transform(pass_name, "seed=42;max=4;prefix=method_", eligibility, output)
         rejected = get_bodies(output)
@@ -182,7 +182,18 @@ def test(args, work):
                 assert cfg_bodies["method_existing_phi"].count(" br i1 ") == 3
 
             exe = link(name, output, cfg_output)
+            if pass_name == "native-mix" and seed in (42, 44):
+                normalized, _ = run(opt, "-passes=instcombine,reassociate,instcombine,verify", "-S", output, "-o", "-")
+                product = function_bodies(normalized)["method_mul32"]
+                assert len(re.findall(r"\bmul i32\b", product)) == (1 if seed == 42 else 2)
+            if pass_name == "native-mix" and seed == 44:
+                product = rewritten["method_mul32"]
+                assert all(label in product for label in ("native.mix.shifted", "native.mix.selected", "native.mix.complement"))
+                assert len(re.findall(r"\bmul i32\b", product)) == 2
+                check_linked(tool("llvm-objdump"), pass_name, reference_exe, exe, split_product=True)
             if seed == 42:
+                if pass_name == "native-mix":
+                    assert "native.mix.adjustment" in rewritten["method_mul32"]
                 first_output = output.read_bytes()
                 repeated = work / f"{name}-repeat.bc"
                 transform(pass_name, options, reference, repeated)
@@ -192,7 +203,7 @@ def test(args, work):
                 assert first_output != output.read_bytes()
 
 
-def check_linked(objdump, pass_name, baseline, transformed):
+def check_linked(objdump, pass_name, baseline, transformed, split_product=False):
     arch = platform.machine().lower()
     if arch not in ("x86_64", "amd64", "aarch64", "arm64"):
         print(f"Linked mnemonic check unavailable for {arch}")
@@ -206,11 +217,20 @@ def check_linked(objdump, pass_name, baseline, transformed):
         return result
 
     x86 = arch in ("x86_64", "amd64")
-    symbols = ("method_add32",) if pass_name == "native-mix" else ("method_add32", "method_mul32")
+    if split_product:
+        symbols = ("method_mul32",)
+    elif pass_name == "native-mix":
+        symbols = ("method_add32",)
+    else:
+        symbols = ("method_add32", "method_mul32")
     for symbol in symbols:
         before = mnemonics(symbol, baseline)
         after = mnemonics(symbol, transformed)
-        if pass_name == "native-mix":
+        if split_product:
+            multiply = r"imul[bwlq]?" if x86 else r"mul|madd"
+            assert sum(bool(re.fullmatch(multiply, op)) for op in before) == 1
+            assert sum(bool(re.fullmatch(multiply, op)) for op in after) == 2
+        elif pass_name == "native-mix":
             mixed = r"(and|xor)[bwlq]?" if x86 else r"and|eor"
             assert not any(re.fullmatch(mixed, op) for op in before)
             assert any(re.fullmatch(mixed, op) for op in after)

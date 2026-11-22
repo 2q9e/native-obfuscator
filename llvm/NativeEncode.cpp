@@ -174,6 +174,22 @@ llvm::Value *buildOffsetProduct(llvm::IRBuilder<> &Builder, llvm::Value *Left,
   return Builder.CreateSub(Product, Adjustment);
 }
 
+llvm::Value *buildSplitProduct(llvm::IRBuilder<> &Builder, llvm::Value *Left,
+                               llvm::Value *Right, const llvm::APInt &Mask) {
+  auto *Selected = llvm::ConstantInt::get(Right->getType(), Mask);
+  auto *Complement = llvm::ConstantInt::get(Right->getType(), ~Mask);
+  // The selected contribution is even. Toggling Left's high bit changes
+  // the first product by a multiple of 2^N.
+  auto *Sign = llvm::ConstantInt::get(Left->getType(),
+                                      llvm::APInt::getSignMask(Mask.getBitWidth()));
+  auto *Shifted = Builder.CreateXor(Left, Sign, "native.mix.shifted");
+  auto *FirstBits = Builder.CreateAnd(Right, Selected, "native.mix.selected");
+  auto *OtherBits = Builder.CreateAnd(Right, Complement, "native.mix.complement");
+  auto *First = Builder.CreateMul(Shifted, FirstBits, "native.mix.first");
+  auto *Other = Builder.CreateMul(Left, OtherBits, "native.mix.other");
+  return Builder.CreateAdd(First, Other);
+}
+
 llvm::Value *buildMixing(llvm::IRBuilder<> &Builder,
                          const llvm::BinaryOperator &Operation,
                          uint64_t &State) {
@@ -207,8 +223,14 @@ llvm::Value *buildMixing(llvm::IRBuilder<> &Builder,
     return Builder.CreateSub(Different, Carry);
   }
   case llvm::Instruction::Mul: {
-    if (Alternate)
-      std::swap(Left, Right);
+    if (Alternate) {
+      unsigned Width = Type->getBitWidth();
+      auto Mask = llvm::APInt(Width, nextRandom(State));
+      Mask.clearBit(0);
+      if (Mask.isZero())
+        Mask = llvm::APInt(Width, UINT64_C(0x5555555555555554));
+      return buildSplitProduct(Builder, Left, Right, Mask);
+    }
     return buildOffsetProduct(Builder, Left, Right,
                               encodingFactor(Type->getBitWidth(), State),
                               "native.mix");

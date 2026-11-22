@@ -70,14 +70,14 @@ branch can introduce input-dependent timing.
 `native-mix` accepts the same options and defaults to four sites per function.
 It substitutes scalar 8-, 16-, 32-, and 64-bit `add`, `sub`, `mul`, `and`,
 `or`, and `xor` instructions. The seed and function name select the identity
-or the multiplication offset. Arithmetic in the following examples wraps at
+or the multiplication form and its offset or bit mask. Arithmetic wraps at
 the operand width.
 
 | Operation | Example identity |
 | --- | --- |
 | `add` | `(x ^ y) + 2 * (x & y)` |
 | `sub` | `(x ^ y) - 2 * (~x & y)` |
-| `mul` | `(x + k) * y - k * y` |
+| `mul` | `(x + k) * y - k * y` or `(x ^ highBit) * (y & m) + x * (y & ~m)` with an even mask `m` |
 | `and` | `(x + y) - (x \| y)` |
 | `or` | `(x + y) - (x & y)` |
 | `xor` | `(x \| y) - (x & y)` |
@@ -87,7 +87,11 @@ poison and `undef`, since the replacement can use each operand more than once.
 Examples of eligible inputs include integer constants, `noundef` arguments,
 and results of `freeze`. The pass skips `optnone` and `naked` functions and
 instructions with poison-generating flags such as `nuw`, `nsw`, and `disjoint`.
-One substitution adds at most four IR instructions.
+One substitution adds at most five IR instructions. The even mask makes the
+high-bit toggle contribute a multiple of the wrap modulus. In the LLVM 23
+multiply fixture, an additional InstCombine and Reassociate pipeline reduced
+the offset form to a single multiply and left two multiplies in the masked
+form. Machine code can still simplify the high-bit toggle.
 
 `native-route` accepts the same options and defaults to one site per function.
 It routes a scalar 8-, 16-, 32-, or 64-bit `add`, `sub`, or `mul` through two
