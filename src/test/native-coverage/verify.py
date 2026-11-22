@@ -74,7 +74,7 @@ protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--en
 assert protected_result.stdout == original_result.stdout, "Differential mismatch; compare original.txt and protected.txt"
 assert "WARNING in native method" not in protected_result.stderr, protected_result.stderr
 assert "WARNING in native method" not in protected_result.stdout, protected_result.stdout
-summary = {"malformedOperandChecks": 10, "randomizedNativeCalls": 20000, "selectedMethods": len(selected), "retainedMethods": retained, "outcomesCompared": len(original_result.stdout.splitlines()), "result": "pass", "compilerArguments": flags}
+summary = {"malformedOperandChecks": 11, "randomizedNativeCalls": 20000, "selectedMethods": len(selected), "retainedMethods": retained, "outcomesCompared": len(original_result.stdout.splitlines()), "result": "pass", "compilerArguments": flags}
 (work / "result.json").write_text(json.dumps(summary, indent=2) + "\n")
 print(json.dumps(summary, indent=2))
 if managed:

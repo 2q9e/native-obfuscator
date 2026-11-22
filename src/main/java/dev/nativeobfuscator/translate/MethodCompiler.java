@@ -321,7 +321,12 @@ public final class MethodCompiler {
                 MethodNode bridge = bridges.typeCheck((TypeInsnNode) insn, instructionIndex);
                 emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
             }
-            case ATHROW -> throw new Unsupported("explicit throw and null-throw semantics are not verified");
+            case ATHROW -> {
+                if (bridges == null) throw new Unsupported("explicit throw requires a JVM bridge");
+                MethodNode bridge = bridges.throwException(instructionIndex);
+                emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
+                line(code, zeroReturn(result));
+            }
             case MONITORENTER, MONITOREXIT -> throw new Unsupported("explicit monitor ownership and exception cleanup are not verified");
             case INVOKEDYNAMIC -> {
                 var dynamic = (InvokeDynamicInsnNode) insn;

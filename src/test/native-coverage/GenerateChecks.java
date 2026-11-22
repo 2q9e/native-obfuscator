@@ -46,6 +46,7 @@ public final class GenerateChecks {
         reject(owner, method("wrongObjectReturn", "(Ljava/lang/Object;)Ljava/lang/String;",
             new VarInsnNode(ALOAD, 0), new InsnNode(ARETURN)));
         reject(owner, method("wrongArrayReturn", "([I)[J", new VarInsnNode(ALOAD, 0), new InsnNode(ARETURN)));
+        reject(owner, method("wrongThrow", "(Ljava/lang/Object;)V", new VarInsnNode(ALOAD, 0), new InsnNode(ATHROW)));
         var writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         writer.visit(V21, ACC_PUBLIC | ACC_FINAL, "RawOps", null, "java/lang/Object", new String[]{"java/lang/Cloneable"});
         for (int i = 0; i < 4; i++) {
@@ -190,6 +191,6 @@ public final class GenerateChecks {
         peerTarget.visitEnd();
         peer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawStaticTarget.class"), peer.toByteArray());
-        System.out.println("Malformed operand policies: 10 passed; raw narrowing methods: 4 generated; private invokespecial: 1 generated");
+        System.out.println("Malformed operand policies: 11 passed; raw narrowing methods: 4 generated; private invokespecial: 1 generated");
     }
 }

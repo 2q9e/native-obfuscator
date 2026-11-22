@@ -38,7 +38,7 @@ final class JvmBridges {
             || (instruction instanceof FieldInsnNode field && (!field.owner.equals(owner.name)
                 || isVolatile(declaredField(owner, field))))
             || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF
-            || instruction.getOpcode() == NEW || arrayAllocation(instruction.getOpcode())
+            || instruction.getOpcode() == NEW || instruction.getOpcode() == ATHROW || arrayAllocation(instruction.getOpcode())
             || (instruction instanceof InvokeDynamicInsnNode dynamic && stringConcat(dynamic));
     }
 
@@ -75,6 +75,11 @@ final class JvmBridges {
         return check.getOpcode() == CHECKCAST
             ? create(instructionIndex, null, Type.VOID_TYPE, arguments, operation, new InsnNode(POP))
             : create(instructionIndex, null, Type.INT_TYPE, arguments, operation);
+    }
+
+    MethodNode throwException(int instructionIndex) {
+        Type[] arguments = {Type.getType(Throwable.class)};
+        return create(instructionIndex, null, Type.VOID_TYPE, arguments, new InsnNode(ATHROW));
     }
 
     static boolean stringConcat(InvokeDynamicInsnNode dynamic) {
@@ -173,7 +178,8 @@ final class JvmBridges {
             slots += parameter.getSize();
         }
         for (AbstractInsnNode operation : operations) bridge.instructions.add(operation);
-        bridge.instructions.add(new InsnNode(returned.getOpcode(IRETURN)));
+        if (operations[operations.length - 1].getOpcode() != ATHROW)
+            bridge.instructions.add(new InsnNode(returned.getOpcode(IRETURN)));
         bridge.maxLocals = slots;
         bridge.maxStack = Math.max(slots, returned.getSize());
         methods.add(bridge);

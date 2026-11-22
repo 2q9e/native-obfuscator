@@ -224,6 +224,19 @@ public class Coverage {
         for (int i = 0; i < count; i++) name = name + i;
         return name;
     }
+    public static int covThrow(Throwable failure, boolean fail) throws Throwable {
+        if (fail) throw failure;
+        return 17;
+    }
+    public static void covThrowAlways(Throwable failure) throws Throwable { throw failure; }
+    private static boolean storesThrownIdentity(Throwable failure) {
+        try {
+            covThrowAlways(failure);
+            return false;
+        } catch (Throwable received) {
+            return received == failure;
+        }
+    }
     public static int rejectHandler(int[] a) { try { return a[0]; } catch (NullPointerException e) { return 3; } }
     public static int rejectReferenceLoop(Object[] a) { int n = 0; for (int i = 0; i < a.length; i++) if (a[i] != null) n++; return n; }
 
@@ -388,6 +401,11 @@ public class Coverage {
         }, 8));
         show(() -> RawOps.covPlainConcat("literal", -4));
         show(() -> rejectConcatLoop("loop:", 2));
+        Throwable failure = new IllegalStateException("identity");
+        show(() -> covThrow(failure, false));
+        show(() -> covThrow(failure, true));
+        show(() -> covThrow(null, true));
+        show(() -> storesThrownIdentity(failure));
         show(() -> covPending(0));
         show(() -> covPending(2));
         show(() -> covPendingArray(null, 0));
