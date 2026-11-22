@@ -100,6 +100,8 @@ public final class MethodCompiler {
         code.append(") {\n    (void)env; (void)self;\n    Value s[").append(Math.max(1, method.maxStack))
             .append("] = {0}, l[").append(Math.max(1, method.maxLocals)).append("] = {0};\n")
             .append("    (void)s; (void)l;\n");
+        line(code, "jclass declaring = " + (isStatic ? "self;" : "NULL;"));
+        line(code, "(void)declaring;");
         int capacityOffset = code.length();
         String returnOnFailure = zeroReturn(type.getReturnType());
         Supplier<String> uncaught = () -> returnOnFailure;
@@ -175,8 +177,10 @@ public final class MethodCompiler {
         line(code, "jthrowable caught = (*env)->ExceptionOccurred(env);");
         line(code, "if (caught == NULL) { " + uncaught + " }");
         line(code, "(*env)->ExceptionClear(env);");
-        line(code, "jint handler = match_exception(env, caught, " + literal(owner.name) + ", " + literal(matcher.name) + ");");
-        line(code, "if ((*env)->ExceptionCheck(env)) { " + uncaught + " }");
+        Supplier<String> failure = () -> uncaught;
+        ensureDeclaringClass(code, owner, method, failure);
+        line(code, "jint handler = match_exception(env, declaring, caught, " + literal(matcher.name) + ");");
+        pending(code, failure);
         line(code, "switch (handler) {");
         for (int i = 0; i < route.handlers.size(); i++) {
             LabelNode target = route.handlers.get(i).handler;
@@ -561,6 +565,16 @@ public final class MethodCompiler {
         return type != null && type.equals(BasicInterpreter.NULL_TYPE);
     }
 
+    private static void ensureDeclaringClass(StringBuilder code, ClassNode owner, MethodNode method,
+                                             Supplier<String> failure) {
+        if ((method.access & ACC_STATIC) != 0) return;
+        // This local reference belongs to the native invocation and survives its JVM callbacks.
+        line(code, "if (declaring == NULL) {");
+        line(code, "declaring = (*env)->FindClass(env, " + literal(owner.name) + ");");
+        pending(code, failure);
+        line(code, "}");
+    }
+
     private static void pending(StringBuilder code, Supplier<String> failure) {
         line(code, "if ((*env)->ExceptionCheck(env)) { " + failure.get() + " }");
     }
@@ -734,16 +748,15 @@ public final class MethodCompiler {
         if (!store) referenceResult(method, type);
         String receiver = statik ? "declaring" : stack(depth - (store ? 2 : 1)) + ".r";
         if (!statik) nullCheck(code, receiver, failure);
-        line(code, "{ jclass declaring = (*env)->FindClass(env, " + literal(owner.name) + ");");
-        pending(code, failure);
+        line(code, "{");
+        ensureDeclaringClass(code, owner, method, failure);
         line(code, "jfieldID member = (*env)->Get" + (statik ? "Static" : "") + "FieldID(env, declaring, " + literal(insn.name) + ", " + literal(insn.desc) + ");");
-        line(code, "if ((*env)->ExceptionCheck(env)) { (*env)->DeleteLocalRef(env, declaring); " + failure.get() + " }");
+        pending(code, failure);
         String api = (store ? "Set" : "Get") + (statik ? "Static" : "") + suffix(type) + "Field";
         String call = "(*env)->" + api + "(env, " + receiver + ", member" +
             (store ? ", " + narrowed(type, stack(depth - 1) + "." + field(type)) : "") + ")";
         if (store) line(code, call + ";");
         else line(code, stack(depth - (statik ? 0 : 1)) + "." + field(type) + " = " + call + ";");
-        line(code, "(*env)->DeleteLocalRef(env, declaring);");
         pending(code, failure);
         line(code, "}");
     }
@@ -801,11 +814,10 @@ public final class MethodCompiler {
         }
         String receiver = statik ? "declaring" : stack(base) + ".r";
         if (!statik) nullCheck(code, receiver, failure);
-        line(code, "{ jclass declaring = (*env)->FindClass(env, " + literal(owner.name) + ");");
-        pending(code, failure);
+        line(code, "{");
+        ensureDeclaringClass(code, owner, method, failure);
         line(code, "jmethodID member = (*env)->Get" + (statik ? "Static" : "") + "MethodID(env, declaring, " + literal(name) + ", " + literal(descriptor) + ");");
-        // DeleteLocalRef is permitted while a Java exception is pending.
-        line(code, "if ((*env)->ExceptionCheck(env)) { (*env)->DeleteLocalRef(env, declaring); " + failure.get() + " }");
+        pending(code, failure);
         line(code, "jvalue arguments[" + Math.max(1, parameters.length) + "] = {{0}};");
         for (int i = 0; i < parameters.length; i++) {
             Type parameter = parameters[i];
@@ -819,7 +831,6 @@ public final class MethodCompiler {
         String call = "(*env)->" + api + "(env, " + receiver + (nonvirtual ? ", declaring" : "") + ", member, arguments)";
         if (returned.getSort() == Type.VOID) line(code, call + ";");
         else line(code, stack(base + resultOffset) + "." + field(returned) + " = " + call + ";");
-        line(code, "(*env)->DeleteLocalRef(env, declaring);");
         pending(code, failure);
         line(code, "}");
     }
@@ -943,18 +954,11 @@ public final class MethodCompiler {
                 if (x <= -0x1p63) return INT64_MIN;
                 return (jlong)x;
             }
-            static inline jint match_exception(JNIEnv *env, jthrowable caught, const char *owner, const char *name) {
-                jclass declaring = (*env)->FindClass(env, owner);
-                if ((*env)->ExceptionCheck(env)) return -1;
+            static inline jint match_exception(JNIEnv *env, jclass declaring, jthrowable caught, const char *name) {
                 jmethodID match = (*env)->GetStaticMethodID(env, declaring, name, "(Ljava/lang/Throwable;)I");
-                if ((*env)->ExceptionCheck(env)) {
-                    (*env)->DeleteLocalRef(env, declaring);
-                    return -1;
-                }
+                if ((*env)->ExceptionCheck(env)) return -1;
                 jvalue argument = {.l = caught};
-                jint handler = (*env)->CallStaticIntMethodA(env, declaring, match, &argument);
-                (*env)->DeleteLocalRef(env, declaring);
-                return handler;
+                return (*env)->CallStaticIntMethodA(env, declaring, match, &argument);
             }
 
             static inline void null_error(JNIEnv *env) {

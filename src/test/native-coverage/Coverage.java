@@ -39,6 +39,10 @@ public class Coverage {
     public static int covLength(Object[] a) { return a.length; }
     public int covFields(Object v, int delta) { object = v; count += delta; wide += delta; return object == v ? count + (int)wide : -1; }
     public static boolean covStaticFields(Object v, long delta) { shared = v; total += delta; return shared == v && total != 0; }
+    private static final class StaticStateSubclass extends Coverage {
+        static Object shared = new Object();
+        static long total = 160;
+    }
     public static int covReceiverField(Coverage receiver) { return receiver.count; }
     public double covTypedFields(byte b, char c, short s, boolean z, float f, double d) {
         signedByte = b; unsignedChar = c; signedShort = s; flag = z; fraction = f; precise = d;
@@ -366,6 +370,9 @@ public class Coverage {
         show(() -> instance.covFields(null, 1));
         show(() -> covStaticFields(token, Long.MAX_VALUE));
         show(() -> covStaticFields(null, 1));
+        Object subclassField = StaticStateSubclass.shared;
+        show(() -> StaticStateSubclass.covStaticFields(token, -9));
+        show(() -> StaticStateSubclass.shared == subclassField && StaticStateSubclass.total == 160);
         show(() -> covReceiverField(null));
         show(() -> covReceiverField(instance));
         show(() -> covStaticCall(Long.MAX_VALUE, Double.NaN, (byte)-128, (char)65535, (short)-32768, true));
