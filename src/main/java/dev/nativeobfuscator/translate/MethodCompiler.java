@@ -1,5 +1,6 @@
 package dev.nativeobfuscator.translate;
 
+import java.util.List;
 import java.util.Locale;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.*;
@@ -26,8 +27,36 @@ public final class MethodCompiler {
         return compile(owner, method, symbol, "", null);
     }
 
+    public record Compilation(String code, List<MethodNode> bridges) {
+        public Compilation {
+            bridges = List.copyOf(bridges);
+        }
+    }
+
     public static String compile(ClassNode owner, MethodNode method, String symbol,
                                  String methodAttribute, WrappingOperation wrappingOperation) throws Unsupported {
+        return compile(owner, method, symbol, methodAttribute, wrappingOperation, null);
+    }
+
+    public static Compilation compileWithBridges(ClassNode owner, MethodNode method, String symbol,
+                                                 String methodAttribute, WrappingOperation wrappingOperation) throws Unsupported {
+        var bridges = new JvmBridges(owner, method);
+        String code = compile(owner, method, symbol, methodAttribute, wrappingOperation, bridges);
+        return new Compilation(code, bridges.methods());
+    }
+
+    public static List<MethodNode> rebuildBridges(ClassNode owner, MethodNode method) throws Unsupported {
+        // Use the same verified reachability and deterministic naming as native emission.
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call && JvmBridges.externalStatic(owner, call))
+                return compileWithBridges(owner, method, "rebuild_bridges", "", null).bridges();
+        }
+        return List.of();
+    }
+
+    private static String compile(ClassNode owner, MethodNode method, String symbol,
+                                  String methodAttribute, WrappingOperation wrappingOperation,
+                                  JvmBridges bridges) throws Unsupported {
         if (method.name.startsWith("<") || (method.access & (ACC_ABSTRACT | ACC_NATIVE)) != 0)
             throw new Unsupported("initializer, abstract method, or already native");
         if (!method.tryCatchBlocks.isEmpty())
@@ -87,7 +116,7 @@ public final class MethodCompiler {
             }
             if (insn.getOpcode() >= 0) {
                 try {
-                    emit(code, owner, method, insn, frames[i], type.getReturnType(), i, wrappingOperation);
+                    emit(code, owner, method, insn, frames[i], type.getReturnType(), i, wrappingOperation, bridges);
                 } catch (Unsupported e) {
                     throw new Unsupported("instruction " + i + " (opcode " + insn.getOpcode() + "): " + e.getMessage());
                 }
@@ -98,7 +127,7 @@ public final class MethodCompiler {
 
     private static void emit(StringBuilder code, ClassNode owner, MethodNode method, AbstractInsnNode insn,
                              Frame<BasicValue> frame, Type result, int instructionIndex,
-                             WrappingOperation wrappingOperation) throws Unsupported {
+                             WrappingOperation wrappingOperation, JvmBridges bridges) throws Unsupported {
         int depth = frame.getStackSize();
         String out = "s[" + depth + "]";
         String a = "s[" + (depth - 1) + "]";
@@ -150,7 +179,7 @@ public final class MethodCompiler {
             case GETFIELD, PUTFIELD, GETSTATIC, PUTSTATIC ->
                 fieldAccess(code, owner, method, (FieldInsnNode)insn, frame, result);
             case INVOKESTATIC, INVOKEVIRTUAL, INVOKESPECIAL, INVOKEINTERFACE ->
-                methodCall(code, owner, method, (MethodInsnNode)insn, frame, result);
+                methodCall(code, owner, method, (MethodInsnNode)insn, frame, result, instructionIndex, bridges);
             case IADD, ISUB, IMUL, IAND, IOR, IXOR, LADD, LSUB, LMUL, LAND, LOR, LXOR -> {
                 boolean wide = op == LADD || op == LSUB || op == LMUL || op == LAND || op == LOR || op == LXOR;
                 String f = wide ? ".j" : ".i";
@@ -581,10 +610,15 @@ public final class MethodCompiler {
     }
 
     private static void methodCall(StringBuilder code, ClassNode owner, MethodNode method, MethodInsnNode insn,
-                                   Frame<BasicValue> frame, Type result) throws Unsupported {
-        if (!insn.owner.equals(owner.name))
-            throw new Unsupported("direct call resolution outside the declaring class is not verified");
+                                   Frame<BasicValue> frame, Type result, int instructionIndex, JvmBridges bridges) throws Unsupported {
         if (insn.name.startsWith("<")) throw new Unsupported("constructor calls require uninitialized-object tracking");
+        if (!insn.owner.equals(owner.name)) {
+            if (bridges == null || !JvmBridges.externalStatic(owner, insn))
+                throw new Unsupported("direct call resolution outside the declaring class is not verified for this opcode");
+            MethodNode bridge = bridges.staticCall(insn, instructionIndex);
+            emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
+            return;
+        }
         MethodNode declaration = owner.methods.stream().filter(m -> m.name.equals(insn.name) && m.desc.equals(insn.desc)).findFirst().orElse(null);
         if (declaration == null) throw new Unsupported("call target is not declared by the current class");
         boolean statik = insn.getOpcode() == INVOKESTATIC;
@@ -594,9 +628,15 @@ public final class MethodCompiler {
         if (statik != ((declaration.access & ACC_STATIC) != 0)) throw new Unsupported("call staticness disagrees with opcode");
         if (special && (declaration.access & ACC_PRIVATE) == 0)
             throw new Unsupported("non-private invokespecial dispatch is not verified");
-        Type returned = Type.getReturnType(insn.desc);
+        emitCall(code, owner, method, insn.name, insn.desc, frame, result, statik,
+            !statik && (declaration.access & ACC_PRIVATE) != 0);
+    }
+
+    private static void emitCall(StringBuilder code, ClassNode owner, MethodNode method, String name, String descriptor,
+                                 Frame<BasicValue> frame, Type result, boolean statik, boolean nonvirtual) throws Unsupported {
+        Type returned = Type.getReturnType(descriptor);
         referenceResult(method, returned);
-        Type[] parameters = Type.getArgumentTypes(insn.desc);
+        Type[] parameters = Type.getArgumentTypes(descriptor);
         int base = frame.getStackSize() - parameters.length - (statik ? 0 : 1);
         // JVM int-stack arguments can contain values the corresponding JNI type would truncate.
         for (int i = 0; i < parameters.length; i++) {
@@ -610,7 +650,7 @@ public final class MethodCompiler {
         if (!statik) nullCheck(code, receiver, result);
         line(code, "{ jclass declaring = (*env)->FindClass(env, " + literal(owner.name) + ");");
         pending(code, result);
-        line(code, "jmethodID member = (*env)->Get" + (statik ? "Static" : "") + "MethodID(env, declaring, " + literal(insn.name) + ", " + literal(insn.desc) + ");");
+        line(code, "jmethodID member = (*env)->Get" + (statik ? "Static" : "") + "MethodID(env, declaring, " + literal(name) + ", " + literal(descriptor) + ");");
         // DeleteLocalRef is permitted while a Java exception is pending.
         line(code, "if ((*env)->ExceptionCheck(env)) { (*env)->DeleteLocalRef(env, declaring); " + zeroReturn(result) + " }");
         line(code, "jvalue arguments[" + Math.max(1, parameters.length) + "] = {{0}};");
@@ -622,7 +662,6 @@ public final class MethodCompiler {
             };
             line(code, "arguments[" + i + "]." + member + " = " + narrowed(parameter, stack(base + (statik ? 0 : 1) + i) + "." + field(parameter)) + ";");
         }
-        boolean nonvirtual = !statik && (declaration.access & ACC_PRIVATE) != 0;
         String api = "Call" + (statik ? "Static" : nonvirtual ? "Nonvirtual" : "") + suffix(returned) + "MethodA";
         String call = "(*env)->" + api + "(env, " + receiver + (nonvirtual ? ", declaring" : "") + ", member, arguments)";
         if (returned.getSort() == Type.VOID) line(code, call + ";");

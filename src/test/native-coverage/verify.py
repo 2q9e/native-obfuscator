@@ -38,11 +38,13 @@ original = work / "original.jar"
 protected = work / "protected.jar"
 run([executable("jar"), "--create", "--file", original, "--main-class", "Coverage", "-C", classes, "."])
 tool = [executable("java"), "-cp", args.distribution.resolve() / "lib" / "*", "dev.nativeobfuscator.Main"]
-report = run(tool + ["protect", "--input", original, "--output", protected, "--include", "Coverage#cov*", "--include", "RawOps#cov*", "--include", "Coverage#reject*", "--include", "RawOps#reject*", "--unsupported", "retain", "--padding", "off"] + flags)
+selection = ["--input", original, "--include", "Coverage#cov*", "--include", "RawOps#cov*",
+             "--include", "Coverage#reject*", "--include", "RawOps#reject*", "--unsupported", "retain", "--padding", "off"]
+report = run(tool + ["protect", "--output", protected] + selection + flags)
 (work / "report.jsonl").write_text(report.stdout)
 (work / "build.log").write_text(report.stderr)
 decisions = [json.loads(line) for line in report.stdout.splitlines()]
-expected = {"covRawZ", "covRawB", "covRawC", "covRawS", "covSpecial", "covReferenceCapacity"} | set(re.findall(r"\b(cov\w+)\(", (root / "Coverage.java").read_text()))
+expected = {"covRawZ", "covRawB", "covRawC", "covRawS", "covSpecial", "covReferenceCapacity", "covLinkageRaw", "covLinkageMissing"} | set(re.findall(r"\b(cov\w+)\(", (root / "Coverage.java").read_text()))
 selected = {d["method"].split("#")[1].split("(")[0] for d in decisions if d["result"] == "selected"}
 assert selected == expected, (selected, expected, report.stdout)
 declarations = run([executable("javap"), "-p", "-classpath", protected, "Coverage", "RawOps"]).stdout
@@ -56,6 +58,10 @@ assert "memory-model barriers" in retained["rejectVolatile"]
 assert "exception handlers" in retained["rejectHandler"]
 assert "local-reference lifetime" in retained["rejectReferenceLoop"]
 assert "not proven to fit JNI descriptor B" in retained["rejectRawCall"]
+verified = run(tool + ["verify", "--staged", protected] + selection + flags)
+(work / "verify.jsonl").write_text(verified.stdout)
+verification = json.loads(verified.stdout.splitlines()[-1])
+assert verification["verification"]["structurallyValid"], verification
 original_result = run([executable("java"), "-Xverify:all", "-jar", original])
 protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED", "-jar", protected])
 (work / "original.txt").write_text(original_result.stdout)

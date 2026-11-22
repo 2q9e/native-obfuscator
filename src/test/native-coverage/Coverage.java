@@ -58,6 +58,40 @@ public class Coverage {
     private static int[] arrayIdentity(int[] v) { return v; }
     public static boolean covCallIdentity(Object v) { return identity(v) == v; }
     private static Object identity(Object v) { return v; }
+    private static int linkState;
+    private static class StaticBase {
+        static { linkState += 1; }
+        static int inherited(int value) { return value + 5; }
+    }
+    private static final class StaticChild extends StaticBase {
+        static { linkState += 10; }
+        static int own(int value) { return value - 3; }
+    }
+    private interface StaticInterface {
+        static long combine(long value, double fraction, int[] data) { return value + (long)fraction + data[0]; }
+    }
+    private static class StaticPeer {
+        private static Object identity(Object value, int denominator) {
+            int ignored = 1 / denominator;
+            return value;
+        }
+    }
+    private static class StaticFail {
+        static { fail(); }
+        private static void fail() { linkState += 100; throw new IllegalStateException(); }
+        static void run() {}
+    }
+    public static int covLinkageLazy(boolean take, int value) { return take ? StaticChild.inherited(value) : value; }
+    public static int covLinkageOwn(int value) { return StaticChild.own(value); }
+    public static long covLinkageInterface(long value, double fraction, int[] data) {
+        return StaticInterface.combine(value, fraction, data);
+    }
+    public static boolean covLinkagePrivate(Object value, int denominator) {
+        Object returned = StaticPeer.identity(value, denominator);
+        effects++;
+        return returned == value;
+    }
+    public static void covLinkageFailedInit() { StaticFail.run(); effects++; }
     public static int covPending(int denominator) { throwing(denominator); effects++; return effects; }
     private static void throwing(int denominator) { effects += 10 / denominator; }
     public static int covPendingArray(int[] a, int i) { int value = a[i]; effects++; return value; }
@@ -131,6 +165,22 @@ public class Coverage {
         show(() -> covCallArray(new int[]{-17}, 0));
         show(() -> covCallArray(null, 0));
         show(() -> covCallArray(new int[0], 0));
+        show(() -> covLinkageLazy(false, 42));
+        System.out.println("linkage-skipped:" + linkState);
+        show(() -> covLinkageLazy(true, 42));
+        System.out.println("linkage-inherited:" + linkState);
+        show(() -> covLinkageOwn(42));
+        System.out.println("linkage-child:" + linkState);
+        show(() -> covLinkageInterface(Long.MAX_VALUE, -12.0, new int[]{17}));
+        show(() -> covLinkageInterface(5, 12.0, null));
+        show(() -> covLinkagePrivate(token, 1));
+        show(() -> covLinkagePrivate(null, 1));
+        show(() -> covLinkagePrivate(token, 0));
+        show(() -> { covLinkageFailedInit(); return null; });
+        show(() -> { covLinkageFailedInit(); return null; });
+        System.out.println("linkage-failed:" + linkState);
+        show(() -> RawOps.covLinkageRaw(257));
+        show(RawOps::covLinkageMissing);
         show(() -> covCallIdentity(token));
         show(() -> covCallIdentity(null));
         show(() -> covPending(0));

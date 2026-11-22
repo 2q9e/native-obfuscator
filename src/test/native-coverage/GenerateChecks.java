@@ -109,8 +109,32 @@ public final class GenerateChecks {
         rawCall.visitInsn(IRETURN);
         rawCall.visitMaxs(0, 0);
         rawCall.visitEnd();
+        var external = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covLinkageRaw", "(I)I", null, null);
+        external.visitCode();
+        external.visitVarInsn(ILOAD, 0);
+        external.visitMethodInsn(INVOKESTATIC, "RawStaticTarget", "byteAsInt", "(B)I", false);
+        external.visitInsn(IRETURN);
+        external.visitMaxs(0, 0);
+        external.visitEnd();
+        var missing = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covLinkageMissing", "()I", null, null);
+        missing.visitCode();
+        missing.visitMethodInsn(INVOKESTATIC, "RawStaticTarget", "missing", "()I", false);
+        missing.visitInsn(IRETURN);
+        missing.visitMaxs(0, 0);
+        missing.visitEnd();
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());
+
+        var peer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        peer.visit(V21, ACC_FINAL, "RawStaticTarget", null, "java/lang/Object", null);
+        var peerTarget = peer.visitMethod(ACC_STATIC, "byteAsInt", "(B)I", null, null);
+        peerTarget.visitCode();
+        peerTarget.visitVarInsn(ILOAD, 0);
+        peerTarget.visitInsn(IRETURN);
+        peerTarget.visitMaxs(0, 0);
+        peerTarget.visitEnd();
+        peer.visitEnd();
+        Files.write(Path.of(args[0]).resolve("RawStaticTarget.class"), peer.toByteArray());
         System.out.println("Malformed operand policies: 8 passed; raw narrowing methods: 4 generated; private invokespecial: 1 generated");
     }
 }

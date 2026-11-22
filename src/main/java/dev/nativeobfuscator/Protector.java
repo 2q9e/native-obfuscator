@@ -87,7 +87,7 @@ final class Protector {
     }
 
     private record MethodMetrics(int instructions, int branches) {}
-    private record Binding(MethodNode method, String symbol, String c) {}
+    private record Binding(MethodNode method, String symbol, String c, List<MethodNode> bridges) {}
 
     static int run(Config config, Consumer<Decision> report) throws IOException, InterruptedException {
         return run(config, report, analysis -> {});
@@ -131,6 +131,7 @@ final class Protector {
             String owner = node.name;
             String exclusion = classExclusion(node, exclusions, versioned);
             var bindings = new ArrayList<Binding>();
+            int bridgeCount = 0;
             boolean generatedClass = generated.classes().containsKey(entry) || utilities.classes().containsKey(entry);
             for (MethodNode method : node.methods) {
                 String name = owner + "#" + method.name + method.desc;
@@ -145,19 +146,22 @@ final class Protector {
                     String symbol = GeneratedNames.nativeFunction(id, name);
                     try {
                         var site = nativePlan != null && !required ? nativePlan.prepare(method, symbol, name) : null;
-                        String c = compile(node, method, symbol, site, utilitySections.get(name));
+                        var compiled = compile(node, method, symbol, site, utilitySections.get(name));
                         MethodMetrics metrics = measure(method);
                         if (!required && metrics.instructions < config.minInstructions) {
                             report.accept(new Decision(name, "excluded",
                                 "below minimum JVM instruction count " + config.minInstructions, metrics));
                             continue;
                         }
+                        if (!compiled.bridges().isEmpty() && node.methods.size() + bridgeCount + compiled.bridges().size() >= 65535)
+                            throw new MethodCompiler.Unsupported("generated JVM bridges exceed the class method limit");
                         if (site != null) {
                             nativePlan.accept(site);
                             report.accept(new Decision(name, site.enabled() ? "native-helper-planned" : "native-helper-skipped",
                                 site.enabled() ? site.helperCount() + " helpers for the terminal wrapping operation" : site.reason(), metrics));
                         }
-                        bindings.add(new Binding(method, symbol, c));
+                        bindings.add(new Binding(method, symbol, compiled.code(), compiled.bridges()));
+                        bridgeCount += compiled.bridges().size();
                         if (!config.analyze && config.llvmPlugin == null)
                             System.err.println("native-obfuscator: method=" + name + " function=" + symbol
                                 + " profile=compatibility transformed=0");
@@ -429,19 +433,21 @@ final class Protector {
         return exclusions.get(node.name);
     }
 
-    private static String compile(ClassNode node, MethodNode method, String symbol) throws MethodCompiler.Unsupported {
+    private static MethodCompiler.Compilation compile(ClassNode node, MethodNode method, String symbol) throws MethodCompiler.Unsupported {
         return compile(node, method, symbol, null, null);
     }
 
-    private static String compile(ClassNode node, MethodNode method, String symbol, AnalysisNative.Selection site,
-                                  String utilitySection) throws MethodCompiler.Unsupported {
+    private static MethodCompiler.Compilation compile(ClassNode node, MethodNode method, String symbol,
+                AnalysisNative.Selection site, String utilitySection) throws MethodCompiler.Unsupported {
         int sort = Type.getReturnType(method.desc).getSort();
         if (sort == Type.ARRAY || sort == Type.OBJECT)
             throw new MethodCompiler.Unsupported("reference-return assignability requires JVM resolution");
         if (utilitySection != null)
-            return MethodCompiler.compile(node, method, symbol, "__attribute__((section(\"" + utilitySection + "\"))) ", null);
-        if (site == null || !site.enabled()) return MethodCompiler.compile(node, method, symbol);
-        return site.support() + MethodCompiler.compile(node, method, symbol, site.rootAttribute(), site::lower);
+            return MethodCompiler.compileWithBridges(node, method, symbol,
+                "__attribute__((section(\"" + utilitySection + "\"))) ", null);
+        if (site == null || !site.enabled()) return MethodCompiler.compileWithBridges(node, method, symbol, "", null);
+        var compiled = MethodCompiler.compileWithBridges(node, method, symbol, site.rootAttribute(), site::lower);
+        return new MethodCompiler.Compilation(site.support() + compiled.code(), compiled.bridges());
     }
 
     private static boolean matches(List<Pattern> patterns, String method) {
@@ -461,6 +467,7 @@ final class Protector {
             method.localVariables = null;
             method.visibleLocalVariableAnnotations = null;
             method.invisibleLocalVariableAnnotations = null;
+            node.methods.addAll(binding.bridges);
         }
         MethodNode init = node.methods.stream().filter(method -> method.name.equals("<clinit>"))
             .findFirst().orElseGet(() -> {
@@ -486,8 +493,12 @@ final class Protector {
         new ClassReader(original).accept(node, 0);
         var bindings = new ArrayList<Binding>();
         for (MethodNode method : node.methods) {
-            if (methodSignatures.contains(method.name + method.desc))
-                bindings.add(new Binding(method, "", ""));
+            if (!methodSignatures.contains(method.name + method.desc)) continue;
+            try {
+                bindings.add(new Binding(method, "", "", MethodCompiler.rebuildBridges(node, method)));
+            } catch (MethodCompiler.Unsupported failure) {
+                throw new IOException("Cannot reconstruct JVM bridges for " + node.name + "#" + method.name + method.desc, failure);
+            }
         }
         if (bindings.size() != methodSignatures.size())
             throw new IOException("Expected native method is absent from trusted class " + node.name);
