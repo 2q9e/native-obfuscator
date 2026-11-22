@@ -1,12 +1,20 @@
 package dev.nativeobfuscator.translate;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.tree.VarInsnNode;
+
+import static org.objectweb.asm.Opcodes.*;
 
 /** Groups instructions by the ordered JVM handlers that cover them. */
 final class ExceptionHandlers {
@@ -29,21 +37,32 @@ final class ExceptionHandlers {
     private final Route[] sites;
     private final List<Route> routes;
     private final boolean[] referenced;
+    private final Set<LabelNode> discarded;
+    private final boolean retainsThrowable;
     private int localReferences;
 
-    private ExceptionHandlers(Route[] sites, List<Route> routes) {
+    private ExceptionHandlers(Route[] sites, List<Route> routes, Set<LabelNode> discarded, boolean retainsThrowable) {
         this.sites = sites;
         this.routes = routes;
         this.referenced = new boolean[sites.length];
+        this.discarded = discarded;
+        this.retainsThrowable = retainsThrowable;
     }
 
     static ExceptionHandlers plan(MethodNode method) throws MethodCompiler.Unsupported {
-        if (method.tryCatchBlocks.isEmpty()) return new ExceptionHandlers(new Route[0], List.of());
+        if (method.tryCatchBlocks.isEmpty())
+            return new ExceptionHandlers(new Route[0], List.of(), Set.of(), false);
         if (method.tryCatchBlocks.size() > HANDLER_COUNT_LIMIT)
             throw new MethodCompiler.Unsupported("exception table exceeds the JVM dispatch bridge size limit");
 
         int size = method.instructions.size();
         var active = new ArrayList<List<TryCatchBlockNode>>(Collections.nCopies(size, null));
+        var loadedLocals = new BitSet();
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof VarInsnNode load && load.getOpcode() == ALOAD) loadedLocals.set(load.var);
+        }
+        var discarded = new HashSet<LabelNode>();
+        boolean retainsThrowable = false;
         int edges = 0;
         for (TryCatchBlockNode block : method.tryCatchBlocks) {
             int start = method.instructions.indexOf(block.start);
@@ -53,6 +72,8 @@ final class ExceptionHandlers {
                 throw new MethodCompiler.Unsupported("invalid exception handler range");
             if (target < end)
                 throw new MethodCompiler.Unsupported("backward exception handlers require bounded JNI local-reference lifetime");
+            if (discardsThrowable(block.handler, loadedLocals)) discarded.add(block.handler);
+            else retainsThrowable = true;
 
             edges += end - start;
             if (edges > ANALYSIS_EDGE_LIMIT)
@@ -79,7 +100,15 @@ final class ExceptionHandlers {
             }
             sites[i] = route;
         }
-        return new ExceptionHandlers(sites, List.copyOf(routes.values()));
+        return new ExceptionHandlers(sites, List.copyOf(routes.values()), Set.copyOf(discarded), retainsThrowable);
+    }
+
+    private static boolean discardsThrowable(LabelNode target, BitSet loadedLocals) {
+        AbstractInsnNode instruction = target.getNext();
+        while (instruction != null && instruction.getOpcode() < 0) instruction = instruction.getNext();
+        if (instruction == null) return false;
+        if (instruction.getOpcode() == POP) return true;
+        return instruction instanceof VarInsnNode store && store.getOpcode() == ASTORE && !loadedLocals.get(store.var);
     }
 
     Supplier<String> failure(int index, Supplier<String> uncaught) {
@@ -96,5 +125,7 @@ final class ExceptionHandlers {
     }
 
     List<Route> routes() { return routes; }
-    int localReferences() { return localReferences; }
+    boolean discards(LabelNode handler) { return discarded.contains(handler); }
+    boolean retainsThrowable() { return retainsThrowable; }
+    int localReferences() { return retainsThrowable ? localReferences : Math.min(localReferences, 1); }
 }

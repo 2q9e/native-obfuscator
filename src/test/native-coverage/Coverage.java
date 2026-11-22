@@ -300,11 +300,21 @@ public class Coverage {
         try { return RawOps.covLinkageMissing(); }
         catch (NoSuchMethodError missing) { return 91; }
     }
-    public static int rejectHandlerLoop(int denominator, int steps) {
+    public static int covCatchLoop(int denominator, int steps) {
         int total = 0;
         for (int i = 0; i < steps; i++) {
             try { total += i / denominator; }
             catch (ArithmeticException ignored) { total--; }
+        }
+        return total;
+    }
+    public static int rejectLiveHandlerLoop(Throwable failure, int steps) throws Throwable {
+        int total = 0;
+        for (int i = 0; i < steps; i++) {
+            try { covThrowAlways(failure); }
+            catch (IllegalStateException observed) {
+                if (observed == failure) total++;
+            }
         }
         return total;
     }
@@ -506,7 +516,9 @@ public class Coverage {
         show(() -> RawOps.covCatchTableOrder(3));
         show(() -> RawOps.covCatchCapacity(0));
         show(() -> RawOps.covCatchCapacity(3));
-        show(() -> rejectHandlerLoop(0, 64));
+        show(() -> covCatchLoop(0, 4096));
+        show(() -> covCatchLoop(3, 4096));
+        show(() -> rejectLiveHandlerLoop(failure, 64));
         show(() -> RawOps.rejectBackwardHandler(0));
         show(() -> storesThrownIdentity(failure));
         show(() -> covPending(0));

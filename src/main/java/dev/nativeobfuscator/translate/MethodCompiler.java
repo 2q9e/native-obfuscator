@@ -76,12 +76,11 @@ public final class MethodCompiler {
             throw new Unsupported("initializer, abstract method, or already native");
         if (method.instructions.size() > 12000 || method.maxLocals > 1024 || method.maxStack > 1024)
             throw new Unsupported("method exceeds translation limits");
-        if (!method.tryCatchBlocks.isEmpty()) {
-            if (bridges == null) throw new Unsupported("exception handlers require JVM bridges");
-            if (hasCycle(method))
-                throw new Unsupported("exception handlers in cyclic methods require bounded JNI local-reference lifetime");
-        }
+        if (!method.tryCatchBlocks.isEmpty() && bridges == null)
+            throw new Unsupported("exception handlers require JVM bridges");
         var handlers = ExceptionHandlers.plan(method);
+        if (handlers.retainsThrowable() && hasCycle(method))
+            throw new Unsupported("live thrown references in cyclic methods require bounded JNI local-reference lifetime");
         final Frame<BasicValue>[] frames;
         try {
             frames = new Analyzer<>(new TypedVerifier(owner, hierarchy)).analyze(owner.name, method);
@@ -159,7 +158,7 @@ public final class MethodCompiler {
             }
         }
         for (ExceptionHandlers.Route route : handlers.routes()) {
-            if (route.used) emitExceptionRoute(code, owner, method, bridges, route, returnOnFailure);
+            if (route.used) emitExceptionRoute(code, owner, method, bridges, handlers, route, returnOnFailure);
         }
         int capacity = referenceCapacity(method) + handlers.localReferences();
         if (capacity > 16)
@@ -169,7 +168,8 @@ public final class MethodCompiler {
     }
 
     private static void emitExceptionRoute(StringBuilder code, ClassNode owner, MethodNode method,
-                                           JvmBridges bridges, ExceptionHandlers.Route route, String uncaught) {
+                                           JvmBridges bridges, ExceptionHandlers handlers, ExceptionHandlers.Route route,
+                                           String uncaught) {
         MethodNode matcher = bridges.catchException(route.start, route.handlers);
         code.append(route.label()).append(": {\n");
         line(code, "jthrowable caught = (*env)->ExceptionOccurred(env);");
@@ -177,10 +177,14 @@ public final class MethodCompiler {
         line(code, "(*env)->ExceptionClear(env);");
         line(code, "jint handler = match_exception(env, caught, " + literal(owner.name) + ", " + literal(matcher.name) + ");");
         line(code, "if ((*env)->ExceptionCheck(env)) { " + uncaught + " }");
-        line(code, "s[0].r = caught;");
         line(code, "switch (handler) {");
-        for (int i = 0; i < route.handlers.size(); i++)
-            line(code, "case " + i + ": goto " + label(method, route.handlers.get(i).handler) + ";");
+        for (int i = 0; i < route.handlers.size(); i++) {
+            LabelNode target = route.handlers.get(i).handler;
+            // A POP or store into an unread slot cannot observe the throwable.
+            String entry = handlers.discards(target)
+                ? "(*env)->DeleteLocalRef(env, caught); s[0].r = NULL;" : "s[0].r = caught;";
+            line(code, "case " + i + ": " + entry + " goto " + label(method, target) + ";");
+        }
         line(code, "default: (*env)->Throw(env, caught); " + uncaught);
         line(code, "}");
         line(code, "}");

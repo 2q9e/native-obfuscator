@@ -69,6 +69,8 @@ public final class GenerateChecks {
             capacity.visitLabel(finish);
             capacity.visitJumpInsn(GOTO, next);
             capacity.visitLabel(catchTarget);
+            capacity.visitVarInsn(ASTORE, 2);
+            capacity.visitVarInsn(ALOAD, 2);
             capacity.visitInsn(POP);
             capacity.visitIincInsn(1, 1);
             capacity.visitLabel(next);
