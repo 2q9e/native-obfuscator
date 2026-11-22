@@ -134,10 +134,17 @@ jobs:
             build/install/native-obfuscator/bin/native-obfuscator harden "${common[@]}" \
               --output "fixture/$profile.jar" --zig "$zig"
           done
+      - name: Cross-build and validate the JNI coverage fixture
+        shell: bash
+        run: |
+          python3 src/test/native-coverage/verify.py build/install/native-obfuscator \
+            --work fixture/native-coverage --target all --zig "$PWD/zig-x86_64-linux-0.15.2/zig"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cross-built-fixture
-          path: fixture/*.jar
+          path: |
+            fixture/*.jar
+            fixture/native-coverage/*.jar
           if-no-files-found: error
           retention-days: 3
 
@@ -176,6 +183,17 @@ jobs:
             java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED -jar "fixture/$artifact.jar" > "$artifact.txt"
             cmp original.txt "$artifact.txt"
           done
+      - name: Run JNI coverage on the target
+        shell: bash
+        run: |
+          cd fixture/native-coverage
+          java -Xverify:all -jar original.jar > original.txt
+          java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED \
+            -jar protected.jar > protected.txt 2> execution.log
+          cmp original.txt protected.txt
+          if grep -F 'WARNING in native method' execution.log; then
+            exit 1
+          fi
       - if: runner.os == 'Windows'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

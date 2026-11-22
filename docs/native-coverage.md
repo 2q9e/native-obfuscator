@@ -33,7 +33,7 @@ Run the standalone differential suite against an installed distribution:
 python src/test/native-coverage/verify.py build/install/native-obfuscator --work build/native-coverage --zig /path/to/zig --target all
 ```
 
-Additional native build flags, including `--profile`, `--seed`, and the matching LLVM tool paths, are forwarded to `protect`. The optional work directory preserves the original/protected JARs, Java outputs, compiler diagnostics, actual native declarations, operand-check output, and a JSON result. Keep these local artifacts outside release archives.
+Additional native build flags, including `--profile`, `--seed`, and the matching LLVM tool paths, are forwarded to `protect`. The GitHub Actions runtime matrix executes the cross-built coverage fixture on Windows and Ubuntu x64 and ARM64. The optional work directory preserves the original/protected JARs, Java outputs, compiler diagnostics, actual native declarations, operand-check output, and a JSON result. Keep these local artifacts outside release archives.
 
 On November 21, 2026, the suite passed using JDK 25.0.5 and Java 21 classfiles, Zig 0.15.2, and LLVM 23.1.6. Both the compatibility C path and balanced LLVM path with seed 42 converted 32 methods. Each build matched 126 result, exception, and state lines, including 34 array-bounds, 17 null-pointer, one array-store, and one arithmetic exception, as well as a checksum over 20,000 randomized native calls. Eight malformed operand, stack-category, field, and call cases were rejected before compilation. The suite checks actual native declarations and selection diagnostics and enables `-Xverify:all` and `-Xcheck:jni`. The compatibility run also exercised a Turkish JVM locale.
 
