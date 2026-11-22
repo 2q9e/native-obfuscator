@@ -35,10 +35,19 @@ final class JvmBridges {
 
     static boolean requiresBridge(ClassNode owner, AbstractInsnNode instruction) {
         return (instruction instanceof MethodInsnNode call && externalCall(owner, call))
-            || (instruction instanceof FieldInsnNode field && !field.owner.equals(owner.name))
+            || (instruction instanceof FieldInsnNode field && (!field.owner.equals(owner.name)
+                || isVolatile(declaredField(owner, field))))
             || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF
             || instruction.getOpcode() == NEW || arrayAllocation(instruction.getOpcode())
             || (instruction instanceof InvokeDynamicInsnNode dynamic && stringConcat(dynamic));
+    }
+
+    static FieldNode declaredField(ClassNode owner, FieldInsnNode field) {
+        return owner.fields.stream().filter(f -> f.name.equals(field.name) && f.desc.equals(field.desc)).findFirst().orElse(null);
+    }
+
+    static boolean isVolatile(FieldNode field) {
+        return field != null && (field.access & ACC_VOLATILE) != 0;
     }
 
     static boolean arrayAllocation(int opcode) {

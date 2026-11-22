@@ -55,8 +55,7 @@ native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declaratio
 assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d["result"] == "retained"}
-assert set(retained) == {"rejectAllocation", "rejectHandler", "rejectReferenceLoop", "rejectAllocationLoop", "rejectVolatile", "rejectRawCall", "rejectConcatLoop"}, retained
-assert "memory-model barriers" in retained["rejectVolatile"]
+assert set(retained) == {"rejectAllocation", "rejectHandler", "rejectReferenceLoop", "rejectAllocationLoop", "rejectRawCall", "rejectConcatLoop"}, retained
 assert "object allocation" in retained["rejectAllocation"]
 assert "exception handlers" in retained["rejectHandler"]
 assert "local-reference lifetime" in retained["rejectReferenceLoop"]

@@ -632,19 +632,22 @@ public final class MethodCompiler {
         boolean statik = insn.getOpcode() == GETSTATIC || insn.getOpcode() == PUTSTATIC;
         boolean store = insn.getOpcode() == PUTFIELD || insn.getOpcode() == PUTSTATIC;
         int depth = frame.getStackSize();
-        if (!insn.owner.equals(owner.name)) {
-            if (bridges == null) throw new Unsupported("field resolution outside the declaring class requires a JVM bridge");
+        boolean external = !insn.owner.equals(owner.name);
+        FieldNode declaration = external ? null : JvmBridges.declaredField(owner, insn);
+        if (!external) {
+            if (declaration == null) throw new Unsupported("field is not declared by the current class");
+            if (statik != ((declaration.access & ACC_STATIC) != 0))
+                throw new Unsupported("field staticness disagrees with opcode");
+            if (store && (declaration.access & ACC_FINAL) != 0)
+                throw new Unsupported("writes to final fields require JVM initializer checks");
+        }
+        if (external || JvmBridges.isVolatile(declaration)) {
+            if (bridges == null) throw new Unsupported("external and volatile field operations require a JVM bridge");
             Type receiver = statik ? null : frame.getStack(depth - (store ? 2 : 1)).getType();
             MethodNode bridge = bridges.field(insn, instructionIndex, receiver, store);
             emitCall(code, owner, method, bridge.name, bridge.desc, frame, result, true, false);
             return;
         }
-        FieldNode declaration = owner.fields.stream().filter(f -> f.name.equals(insn.name) && f.desc.equals(insn.desc)).findFirst().orElse(null);
-        if (declaration == null) throw new Unsupported("field is not declared by the current class");
-        if ((declaration.access & ACC_VOLATILE) != 0)
-            throw new Unsupported("volatile field ordering requires verified JVM memory-model barriers");
-        if (statik != ((declaration.access & ACC_STATIC) != 0)) throw new Unsupported("field staticness disagrees with opcode");
-        if (store && (declaration.access & ACC_FINAL) != 0) throw new Unsupported("writes to final fields require JVM initializer checks");
         Type type = Type.getType(insn.desc);
         if (!store) referenceResult(method, type);
         String receiver = statik ? "declaring" : stack(depth - (store ? 2 : 1)) + ".r";

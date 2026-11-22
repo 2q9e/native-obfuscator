@@ -7,6 +7,8 @@ public class Coverage {
     private Object object;
     private static long total = 9;
     private static volatile int published;
+    private static int publicationPayload;
+    private int synchronizedCount;
     private static Object shared;
     private static int effects;
     private byte signedByte;
@@ -149,7 +151,33 @@ public class Coverage {
         peer.published = value;
         return peer.published;
     }
-    public static int rejectVolatile() { return published; }
+    public static void covPublish(int payload) { publicationPayload = payload; published = 1; }
+    public static long covReadPublished() { return ((long) published << 32) | (publicationPayload & 0xffffffffL); }
+    public synchronized int covSynchronizedIncrement() {
+        return Thread.holdsLock(this) ? ++synchronizedCount : -1;
+    }
+    private static long publication() throws InterruptedException {
+        published = 0;
+        publicationPayload = 0;
+        Thread writer = Thread.ofPlatform().start(() -> covPublish(0x12345678));
+        long observed;
+        do {
+            observed = covReadPublished();
+            if ((observed >>> 32) == 0) Thread.onSpinWait();
+        } while ((observed >>> 32) == 0 && writer.isAlive());
+        writer.join();
+        return (observed >>> 32) == 0 ? covReadPublished() : observed;
+    }
+    private static int synchronization(Coverage instance) throws InterruptedException {
+        Runnable increment = () -> {
+            for (int i = 0; i < 256; i++) instance.covSynchronizedIncrement();
+        };
+        Thread first = Thread.ofPlatform().start(increment);
+        Thread second = Thread.ofPlatform().start(increment);
+        first.join();
+        second.join();
+        return instance.synchronizedCount;
+    }
     private static class VirtualPeer {
         int scale(int value) { return value * 2; }
     }
@@ -297,6 +325,8 @@ public class Coverage {
         show(() -> covExternalInstanceFields(fieldPeer, null, 1));
         show(() -> covExternalInstanceFields(null, token, 1));
         show(() -> covExternalVolatile(fieldPeer, Integer.MIN_VALUE));
+        show(Coverage::publication);
+        show(() -> synchronization(instance));
         show(RawOps::covExternalMissingField);
         show(() -> covCallIdentity(token));
         show(() -> covCallIdentity(null));
