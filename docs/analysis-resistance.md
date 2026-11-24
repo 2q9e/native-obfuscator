@@ -47,7 +47,7 @@ Enable padding with `--padding-count 12 --padding-seed 17` and markers with `--m
 
 ## Native helpers and LLVM
 
-An eligible straight-line `int` or `long` method can outline its final wrapping operation. Deeper chains compute over disjoint portions of an operand and compose the partial results using unsigned word arithmetic. The analysis seed controls partitioning and argument order. The helpers use local values and no shared state. Method diagnostics identify eligibility and skip reasons.
+An eligible straight-line `int` or `long` method can outline its final wrapping operation. Maximum also traces returned values through locals and control-flow joins in methods with up to 64 bytecode instructions. Each reachable normal return must have the same producer, either the wrapping operation itself or a call that consumes its result. The operation needs a runtime input. Methods with exception handlers or switch instructions are excluded from this tracing. Deeper chains compute over disjoint portions of an operand and compose the partial results using unsigned word arithmetic. The analysis seed controls partitioning and argument order. The helpers use local values and no shared state. Method diagnostics identify eligibility and skip reasons.
 
 When a plan contains helpers, `llvm-objdump` verifies each direct call or tail branch across the helper chain in the stripped library. Tool discovery uses `LLVM_OBJDUMP`, the configured Clang directory, then `PATH`. Missing tools, sections, or verified edges fail the corresponding build or staged verification. Structural evidence covers section entry reachability. Runtime equivalence is checked by executing protected fixtures.
 

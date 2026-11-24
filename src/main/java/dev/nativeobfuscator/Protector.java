@@ -120,7 +120,7 @@ final class Protector {
         if (analysisPlan != null && !config.emitC)
             Archive.preflight(files, analysisPlan.byteCount(), analysisPlan.entryCount() + 2);
         var nativePlan = config.analysis.nativeMethodLimit() == 0 ? null
-            : new AnalysisNative(config.analysis.seed(), config.analysis.nativeMethodLimit(), config.analysis.nativeHelpersPerRoot());
+            : new AnalysisNative(config.analysis);
         String id = runtimeId(files, config, hierarchy);
         String loader = RUNTIME.substring(0, RUNTIME.lastIndexOf('/') + 1) + id;
         var source = new StringBuilder(MethodCompiler.runtimeSupport()).append(registrationSupport());
@@ -165,7 +165,7 @@ final class Protector {
                         if (site != null) {
                             nativePlan.accept(site);
                             report.accept(new Decision(name, site.enabled() ? "native-helper-planned" : "native-helper-skipped",
-                                site.enabled() ? site.helperCount() + " helpers for the terminal wrapping operation" : site.reason(), metrics));
+                                site.enabled() ? site.helperCount() + " helpers for a wrapping operation in the return value" : site.reason(), metrics));
                         }
                         bindings.add(new Binding(method, symbol, compiled.code(), compiled.bridges()));
                         bridgeCount += compiled.bridges().size();

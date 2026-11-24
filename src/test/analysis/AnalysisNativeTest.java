@@ -22,6 +22,7 @@ public final class AnalysisNativeTest {
         MethodNode narrow = subtraction();
         MethodNode wide = multiplication();
         checkSelection(narrow, wide);
+        checkReturnSites();
         checkGraphPlans(narrow);
         if (args.length != 0) {
             require(args.length == 3, "usage: AnalysisNativeTest [zig llvm-objdump scratch-directory]");
@@ -79,6 +80,7 @@ public final class AnalysisNativeTest {
         branch.visitMaxs(2, 1);
         require(skipped.prepare(branch, "method_branch", branch.name + branch.desc).reason().contains("straight-line"),
             "multi-path method was eligible");
+        require(AnalysisReturnSite.find(branch, 64) == null, "different return producers were eligible");
 
         String baseline = MethodCompiler.compile(owner(), narrow, INT_ROOT);
         var disabledSite = skipped.prepare(constant, "method_constant", constant.name + constant.desc);
@@ -87,6 +89,42 @@ public final class AnalysisNativeTest {
         String lowered = MethodCompiler.compile(owner(), narrow, INT_ROOT, site.rootAttribute(), site::lower);
         require(lowered.contains(site.rootSection()) && lowered.contains("bits_i(" + site.helper()),
             "method compiler did not consume the selected C hook");
+    }
+
+    private static void checkReturnSites() throws Exception {
+        var balanced = new AnalysisNative(AnalysisConfig.resolve("balanced", "44", null, null));
+        var maximum = new AnalysisNative(AnalysisConfig.resolve("maximum", "44", null, null));
+        var branch = branchingAddition();
+        String signature = branch.name + branch.desc;
+        String root = "method_test_add";
+        require(!balanced.prepare(branch, root, signature).enabled(), "balanced traced through a branch");
+        var site = maximum.prepare(branch, root, signature);
+        require(site.opcode() == IADD && site.helperCount() == 3 && site.equals(maximum.prepare(branch, root, signature)),
+            "maximum did not reproducibly outline the joined arithmetic result");
+        require(compile(branch, site).contains("bits_i(" + site.helper()), "joined arithmetic was not lowered");
+
+        var call = method("call", "(II)I");
+        call.visitVarInsn(ILOAD, 0);
+        call.visitVarInsn(ILOAD, 1);
+        call.visitInsn(IOR);
+        call.visitMethodInsn(INVOKESTATIC, "Peer", "score", "(I)I", false);
+        call.visitInsn(IRETURN);
+        call.visitMaxs(2, 2);
+        require(maximum.prepare(call, "method_call", call.name + call.desc).opcode() == IOR,
+            "maximum skipped arithmetic feeding a returned call");
+
+        var folded = method("folded", "(I)I");
+        folded.visitInsn(ICONST_1);
+        folded.visitInsn(ICONST_2);
+        folded.visitInsn(IADD);
+        folded.visitVarInsn(ISTORE, 1);
+        folded.visitVarInsn(ILOAD, 1);
+        folded.visitInsn(ICONST_2);
+        folded.visitInsn(IXOR);
+        folded.visitInsn(IRETURN);
+        folded.visitMaxs(2, 2);
+        require(!maximum.prepare(folded, "method_folded", folded.name + folded.desc).enabled(),
+            "a constant expression became eligible through a local");
     }
 
     private static void checkGraphPlans(MethodNode method) {
@@ -149,6 +187,26 @@ public final class AnalysisNativeTest {
         return method;
     }
 
+    private static MethodNode branchingAddition() {
+        var method = method("add", "(II)I");
+        var zero = new LabelNode().getLabel();
+        var join = new LabelNode().getLabel();
+        method.visitVarInsn(ILOAD, 0);
+        method.visitJumpInsn(IFEQ, zero);
+        method.visitVarInsn(ILOAD, 1);
+        method.visitJumpInsn(GOTO, join);
+        method.visitLabel(zero);
+        method.visitVarInsn(ILOAD, 0);
+        method.visitLabel(join);
+        method.visitVarInsn(ILOAD, 1);
+        method.visitInsn(IADD);
+        method.visitVarInsn(ISTORE, 2);
+        method.visitVarInsn(ILOAD, 2);
+        method.visitInsn(IRETURN);
+        method.visitMaxs(2, 3);
+        return method;
+    }
+
     private static MethodNode method(String name, String descriptor) {
         return new MethodNode(ACC_PUBLIC | ACC_STATIC, name, descriptor, null, null);
     }
@@ -176,10 +234,10 @@ public final class AnalysisNativeTest {
             typedef signed char jbyte;
             """);
 
-        var analysis = new AnalysisNative(SEED, 8, 3);
+        var analysis = new AnalysisNative(AnalysisConfig.resolve("maximum", Long.toUnsignedString(SEED), null, null));
         var methods = new ArrayList<>(List.of(narrow, wide));
         methods.addAll(List.of(
-            operation("add", IADD, false), operation("or", LOR, true), operation("and", LAND, true),
+            branchingAddition(), operation("or", LOR, true), operation("and", LAND, true),
             operation("xor", IXOR, false), withConstant("constant", IADD, false), withConstant("negate", ISUB, true)));
         var sites = new ArrayList<AnalysisNative.Selection>();
         var support = new StringBuilder(MethodCompiler.runtimeSupport());
@@ -272,6 +330,8 @@ public final class AnalysisNativeTest {
                 if ((uint64_t)method_test_multiply(0, 0, -7, 17) != 119) return 4;
                 if (method_test_constant(0, 0, INT32_MAX) != INT32_MIN) return 5;
                 if (method_test_negate(0, 0, -7) != 7) return 6;
+                if (method_test_add(0, 0, 0, 7) != 7) return 7;
+                if (method_test_add(0, 0, 1, INT32_MIN) != 0) return 8;
                 return 0;
             }
             """;

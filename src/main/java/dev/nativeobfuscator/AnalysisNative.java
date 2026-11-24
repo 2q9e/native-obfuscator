@@ -24,6 +24,7 @@ final class AnalysisNative {
     private final long seed;
     private final int methodLimit;
     private final int helpersPerRoot;
+    private final boolean traceReturns;
     private final List<Selection> selected = new ArrayList<>();
 
     AnalysisNative(long seed, int methodLimit) {
@@ -31,6 +32,15 @@ final class AnalysisNative {
     }
 
     AnalysisNative(long seed, int methodLimit, int helpersPerRoot) {
+        this(seed, methodLimit, helpersPerRoot, false);
+    }
+
+    AnalysisNative(AnalysisConfig config) {
+        this(config.seed(), config.nativeMethodLimit(), config.nativeHelpersPerRoot(),
+            config.profile() == AnalysisConfig.Profile.MAXIMUM);
+    }
+
+    AnalysisNative(long seed, int methodLimit, int helpersPerRoot, boolean traceReturns) {
         if (methodLimit < 0 || methodLimit > MAX_METHODS)
             throw new IllegalArgumentException("Native helper method limit must be between 0 and " + MAX_METHODS);
         if (helpersPerRoot < 0 || helpersPerRoot > MAX_HELPERS_PER_ROOT)
@@ -38,6 +48,7 @@ final class AnalysisNative {
         this.seed = seed;
         this.methodLimit = methodLimit;
         this.helpersPerRoot = helpersPerRoot;
+        this.traceReturns = traceReturns;
     }
 
     record Helper(String section, String name, long mask) {}
@@ -125,6 +136,15 @@ final class AnalysisNative {
                         Long targetBytes, Long edgeOffset) {}
 
     Selection prepare(MethodNode method, String root, String signature) {
+        Selection expression = prepareExpression(method, root, signature);
+        if (expression.enabled() || !traceReturns || helpersPerRoot == 0 || selected.size() >= methodLimit)
+            return expression;
+        var site = AnalysisReturnSite.find(method, MAX_INSTRUCTIONS);
+        return site == null ? expression
+            : outline(method, root, signature, site.operation(), site.leftRuntime(), site.rightRuntime());
+    }
+
+    private Selection prepareExpression(MethodNode method, String root, String signature) {
         if (method.instructions.size() > 12_000)
             return Selection.skipped(root, "classfile instruction list exceeds the translator limit");
         int returnOpcode = switch (Type.getReturnType(method.desc).getSort()) {
@@ -200,12 +220,17 @@ final class AnalysisNative {
         if (selected.size() >= methodLimit) return Selection.skipped(root, "native helper method limit reached");
         if (helpersPerRoot == 0) return Selection.skipped(root, "native helpers per root limit reached");
 
+        return outline(method, root, signature, operation, leftReadsArgument, rightReadsArgument);
+    }
+
+    private Selection outline(MethodNode method, String root, String signature, AbstractInsnNode operation,
+                              boolean leftRuntime, boolean rightRuntime) {
         int methodHash = signature.hashCode();
         int ordinal = selected.size();
         String suffix = Integer.toHexString(0x1000 | (methodHash & 0xff) << 4 | ordinal).substring(1);
         var random = new SplittableRandom(seed ^ 0x5694a91d56c7ef02L ^ methodHash);
         boolean reversed = random.nextBoolean();
-        boolean partitionLeft = leftReadsArgument && (!rightReadsArgument || random.nextBoolean());
+        boolean partitionLeft = leftRuntime && (!rightRuntime || random.nextBoolean());
         int opcode = operation.getOpcode();
         List<Long> masks = partition(wide(opcode) ? 64 : 32, helpersPerRoot, random);
         var helpers = new ArrayList<Helper>(helpersPerRoot);
@@ -246,18 +271,22 @@ final class AnalysisNative {
         return instruction;
     }
 
-    private static Long literal(AbstractInsnNode insn) {
+    static Long literal(AbstractInsnNode insn) {
         int opcode = insn.getOpcode();
         return switch (opcode) {
             case ICONST_M1, ICONST_0, ICONST_1, ICONST_2, ICONST_3, ICONST_4, ICONST_5 -> (long) opcode - ICONST_0;
             case LCONST_0, LCONST_1 -> (long) opcode - LCONST_0;
             case BIPUSH, SIPUSH -> (long) ((IntInsnNode) insn).operand;
-            case LDC -> ((Number) ((LdcInsnNode) insn).cst).longValue();
+            case LDC -> switch (((LdcInsnNode) insn).cst) {
+                case Integer value -> value.longValue();
+                case Long value -> value;
+                default -> null;
+            };
             default -> null;
         };
     }
 
-    private static boolean trivial(int opcode, Long left, Long right) {
+    static boolean trivial(int opcode, Long left, Long right) {
         boolean zeroLeft = literalEquals(left, 0);
         boolean zeroRight = literalEquals(right, 0);
         return switch (opcode) {
@@ -310,7 +339,7 @@ final class AnalysisNative {
         };
     }
 
-    private static String operator(int opcode) {
+    static String operator(int opcode) {
         return switch (opcode) {
             case IADD, LADD -> "+";
             case ISUB, LSUB -> "-";

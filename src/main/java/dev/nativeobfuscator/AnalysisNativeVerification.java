@@ -35,7 +35,7 @@ final class AnalysisNativeVerification {
                                        Map<String, String> librariesByTarget, List<String> errors, String clang)
             throws IOException, InterruptedException {
         if (analysis.nativeMethodLimit() == 0 || analysis.nativeHelpersPerRoot() == 0) return List.of();
-        var nativeHelpers = new AnalysisNative(analysis.seed(), analysis.nativeMethodLimit(), analysis.nativeHelpersPerRoot());
+        var nativeHelpers = new AnalysisNative(analysis);
         Map<String, String> methodsByRoot = plan(nativeHelpers, analysis.nativeMethodLimit(), original, expectedMethods,
             runtimeId, errors);
         if (methodsByRoot.isEmpty()) return List.of();

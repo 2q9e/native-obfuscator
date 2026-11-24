@@ -332,7 +332,13 @@ def checked_build(stdout, stderr, stats, profile, seed):
                 and report["resourceBytes"] == stats["analysisResourceBytes"], "Resource metrics differ from CLI")
         limit = report.get("nativeMethodLimit", 8 if profile == "maximum" else 0)
         depth = report.get("nativeHelpersPerMethod", 1 if profile == "maximum" else 0)
-        roots = min(2, limit) if depth else 0
+        helper_candidates = {"step(I)I", "mix(II)I"}
+        if profile == "maximum":
+            helper_candidates.add("arrayUpdate([III)I")
+        roots = min(len(helper_candidates), limit) if depth else 0
+        planned_roots = {record["method"] for record in application if record["result"] == "native-helper-planned"}
+        require(len(planned_roots) == roots and planned_roots <= {f"{OWNER}#{method}" for method in helper_candidates},
+                "Unexpected methods selected for native helpers")
         functions = roots * depth
         require(report["nativeHelperMethods"] == counts["native-helper-planned"] == roots, "Unexpected helper root count")
         require(report.get("nativeHelperFunctions", roots) == functions, "Unexpected helper function count")
