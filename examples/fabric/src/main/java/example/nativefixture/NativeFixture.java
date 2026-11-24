@@ -17,8 +17,11 @@ public final class NativeFixture implements ModInitializer {
         int fallback = Kernel.identifierPriorityOrDefault(null, alternate, 41, -1);
         int registry = Kernel.rankRegistryCandidates(
             new Identifier[]{identifier, null, identifier, alternate, identifier, null}, 41);
+        var scorer = Kernel.registryScorer(41, identifier);
+        int alternateScore = scorer.applyAsInt(alternate);
         if (result != 0x3B71_AB69 || score != 28_443_952 || priority != 1030 || fallback != -1
             || registry != 1_115_680 || Kernel.rankRegistryCandidates(new Identifier[0], 41) != 41
+            || scorer.applyAsInt(identifier) != score || alternateScore != -28_507_579 || scorer.applyAsInt(null) != -1
             || Kernel.identifierPriorityOrDefault(identifier, alternate, 41, -1) != priority
             || priority != Kernel.identifierPriority(alternate, identifier, 41)
             || Kernel.identifierPriority(identifier, identifier, 41) != 41
@@ -27,7 +30,7 @@ public final class NativeFixture implements ModInitializer {
             throw new IllegalStateException("Native fixture verification failed");
         }
         LoggerFactory.getLogger("native-fixture").info(
-            "Native fixture passed (kernel = {}, identifier score = {}, priority = {}, fallback = {}, registry = {}, Mixin and access widener active)",
-            result, score, priority, fallback, registry);
+            "Native fixture passed (kernel = {}, identifier score = {}, priority = {}, fallback = {}, registry = {}, callback = {}, Mixin and access widener active)",
+            result, score, priority, fallback, registry, alternateScore);
     }
 }

@@ -1,5 +1,6 @@
 package example.nativefixture;
 
+import java.util.function.ToIntFunction;
 import net.minecraft.util.Identifier;
 
 final class Kernel {
@@ -39,5 +40,12 @@ final class Kernel {
             previous = candidate;
         }
         return total;
+    }
+
+    static ToIntFunction<Identifier> registryScorer(int salt, Identifier preferred) {
+        return candidate -> {
+            if (candidate == null) return -1;
+            return identifierScore(candidate, candidate == preferred ? salt : -salt);
+        };
     }
 }

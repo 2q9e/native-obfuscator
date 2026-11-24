@@ -17,9 +17,12 @@ declarations=$("$fixture_jdk/bin/javap" -p -classpath "$fixture_jar" example.nat
 if ! grep -F 'static native int mix(int, int);' <<< "$declarations" > /dev/null ||
     ! grep -F 'static native int identifierScore(net.minecraft.class_2960, int);' <<< "$declarations" > /dev/null ||
     ! grep -F 'static native int rankRegistryCandidates(net.minecraft.class_2960[], int);' <<< "$declarations" > /dev/null ||
+    ! grep -F 'static native java.util.function.ToIntFunction<net.minecraft.class_2960> registryScorer(int, net.minecraft.class_2960);' \
+        <<< "$declarations" > /dev/null ||
+    ! grep -F 'static native int lambda$registryScorer$0(' <<< "$declarations" > /dev/null ||
     ! grep -F 'static native int identifierPriorityOrDefault(net.minecraft.class_2960, net.minecraft.class_2960, int, int);' \
         <<< "$declarations" > /dev/null; then
-    printf 'Expected the native mix, score, fallback, and registry methods in the remapped Kernel class.\n' >&2
+    printf 'Expected native mix, score, fallback, registry ranking, and callback methods in the remapped Kernel class.\n' >&2
     exit 1
 fi
 if [ "${NATIVE_FIXTURE_EXPECT_HIERARCHY:-0}" = 1 ] &&
@@ -48,12 +51,13 @@ fi
 
 "$fixture_jdk/bin/javac" -proc:none --release 21 -cp "$fabric_cp" \
     -d "$fixture_run" "$fixture_source/BootstrapFixture.java"
-timeout 60s "$fixture_jdk/bin/java" --enable-native-access=ALL-UNNAMED -Xcheck:jni \
+timeout 60s "$fixture_jdk/bin/java" --enable-native-access=ALL-UNNAMED -Xverify:all -Xcheck:jni \
     -cp "$fixture_run:$fabric_cp" BootstrapFixture > bootstrap.log 2>&1 || {
     cat bootstrap.log >&2
     exit 1
 }
-if ! grep -F 'Native fixture passed (kernel = 997305193, identifier score = 28443952, priority = 1030, fallback = -1, registry = 1115680, Mixin and access widener active)' bootstrap.log; then
+if ! grep -F 'Native fixture passed (kernel = 997305193, identifier score = 28443952, priority = 1030, fallback = -1, registry = 1115680, callback = -28507579, Mixin and access widener active)' bootstrap.log ||
+    grep -Eq 'WARNING in native method|FATAL ERROR in native method' bootstrap.log; then
     cat bootstrap.log >&2
     exit 1
 fi

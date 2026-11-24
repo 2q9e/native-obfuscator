@@ -37,6 +37,8 @@ def defaultNativeMethods = [
     'example/nativefixture/Kernel#identifierScore*',
     'example/nativefixture/Kernel#identifierPriorityOrDefault*',
     'example/nativefixture/Kernel#rankRegistryCandidates*',
+    'example/nativefixture/Kernel#registryScorer*',
+    'example/nativefixture/Kernel#lambda$registryScorer$*',
 ]
 if (nativeHierarchyJar.isPresent()) {
     defaultNativeMethods.add('example/nativefixture/Kernel#identifierPriority(*')
