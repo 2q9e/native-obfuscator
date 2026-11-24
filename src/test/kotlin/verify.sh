@@ -86,4 +86,11 @@ with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / 
     assert original.read(metadata) == protected.read(metadata)
 PY
 
+if [[ -n ${KOTLIN_FIXTURE_DIR:-} ]]; then
+    mkdir -p -- "$KOTLIN_FIXTURE_DIR"
+    cp -- "$work/original.jar" "$work/protected.jar" "$KOTLIN_FIXTURE_DIR/"
+    cp -- "$stdlib" "$KOTLIN_FIXTURE_DIR/kotlin-stdlib.jar"
+    cp -- "$reflect" "$KOTLIN_FIXTURE_DIR/kotlin-reflect.jar"
+fi
+
 printf 'Kotlin %s native differential test passed (%s)\n' "$kotlin_version" "$(cat "$work/protected.txt")"

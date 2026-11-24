@@ -139,6 +139,13 @@ jobs:
         run: |
           python3 src/test/native-coverage/verify.py build/install/native-obfuscator \
             --work fixture/native-coverage --target all --zig "$PWD/zig-x86_64-linux-0.15.2/zig"
+      - name: Cross-build and validate the Kotlin fixture
+        shell: bash
+        run: |
+          export GRADLE_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v gradle)")")")"
+          export KOTLIN_FIXTURE_DIR="$PWD/fixture/kotlin"
+          bash src/test/kotlin/verify.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator" \
+            --target all --zig "$PWD/zig-x86_64-linux-0.15.2/zig"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cross-built-fixture
@@ -148,6 +155,7 @@ jobs:
             fixture/native-coverage/protected.jar
             fixture/native-coverage/hierarchy-protected.jar
             fixture/native-coverage/hierarchy-library.jar
+            fixture/kotlin/*.jar
           if-no-files-found: error
           retention-days: 3
 
@@ -202,6 +210,26 @@ jobs:
               exit 1
             fi
           done
+      - name: Run the Kotlin fixture on the target
+        shell: bash
+        run: |
+          cd fixture/kotlin
+          separator=:
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            separator=';'
+          fi
+          libraries="kotlin-stdlib.jar${separator}kotlin-reflect.jar"
+          main=fixture.kotlin.KotlinFixtureKt
+          java -Xverify:all -cp "original.jar${separator}$libraries" "$main" original > original.txt
+          java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED \
+            -cp "protected.jar${separator}$libraries" "$main" protected > protected.txt 2> protected.log || {
+              cat protected.log >&2
+              exit 1
+            }
+          cmp original.txt protected.txt
+          if grep -F 'WARNING in native method' protected.log; then
+            exit 1
+          fi
       - if: runner.os == 'Windows'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
