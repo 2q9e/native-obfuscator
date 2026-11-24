@@ -1,5 +1,6 @@
 package dev.nativeobfuscator.translate;
 
+import java.lang.invoke.LambdaMetafactory;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ final class JvmBridges {
     private static final String CALL_SITE = ")Ljava/lang/invoke/CallSite;";
     private static final String LAMBDA_BOOTSTRAP = CALL_SITE_BOOTSTRAP_PARAMETERS
         + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;" + CALL_SITE;
+    private static final String ALT_LAMBDA_BOOTSTRAP = CALL_SITE_BOOTSTRAP_PARAMETERS + "[Ljava/lang/Object;" + CALL_SITE;
 
     private final ClassNode owner;
     private final MethodNode caller;
@@ -161,12 +163,21 @@ final class JvmBridges {
     }
 
     private static boolean lambdaFactory(InvokeDynamicInsnNode dynamic, Handle bootstrap) {
-        return bootstrap.getName().equals("metafactory") && bootstrap.getDesc().equals(LAMBDA_BOOTSTRAP)
-            && Type.getReturnType(dynamic.desc).getSort() == Type.OBJECT && dynamic.bsmArgs.length == 3
-            && dynamic.bsmArgs[0] instanceof Type interfaceMethod && interfaceMethod.getSort() == Type.METHOD
-            && dynamic.bsmArgs[1] instanceof Handle implementation
-            && implementation.getTag() >= H_INVOKEVIRTUAL && implementation.getTag() <= H_INVOKEINTERFACE
-            && dynamic.bsmArgs[2] instanceof Type instantiated && instantiated.getSort() == Type.METHOD;
+        Object[] args = dynamic.bsmArgs;
+        if (Type.getReturnType(dynamic.desc).getSort() != Type.OBJECT || args.length < 3
+            || !(args[0] instanceof Type interfaceMethod) || interfaceMethod.getSort() != Type.METHOD
+            || !(args[1] instanceof Handle implementation)
+            || implementation.getTag() < H_INVOKEVIRTUAL || implementation.getTag() > H_INVOKEINTERFACE
+            || !(args[2] instanceof Type instantiated) || instantiated.getSort() != Type.METHOD) return false;
+        if (bootstrap.getName().equals("metafactory"))
+            return bootstrap.getDesc().equals(LAMBDA_BOOTSTRAP) && args.length == 3;
+        if (!bootstrap.getName().equals("altMetafactory") || !bootstrap.getDesc().equals(ALT_LAMBDA_BOOTSTRAP)
+            || args.length < 4 || !(args[3] instanceof Integer flags)) return false;
+        int serializable = LambdaMetafactory.FLAG_SERIALIZABLE;
+        int withBridges = serializable | LambdaMetafactory.FLAG_BRIDGES;
+        // javac also emits the bridges flag followed by a zero bridge count for this form.
+        return (flags == serializable && args.length == 4)
+            || (flags == withBridges && args.length == 5 && args[4] instanceof Integer bridges && bridges == 0);
     }
 
     MethodNode dynamic(InvokeDynamicInsnNode dynamic, int instructionIndex) {

@@ -1,5 +1,12 @@
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Random;
 import java.util.function.Function;
@@ -297,8 +304,15 @@ public class Coverage {
             return -37;
         }
     }
-    public static IntUnaryOperator rejectSerializableLambda() {
-        return (IntUnaryOperator & java.io.Serializable) Coverage::lambdaTarget;
+    public static IntUnaryOperator covSerializableReference() {
+        return (IntUnaryOperator & Serializable) Coverage::lambdaTarget;
+    }
+    public static IntUnaryOperator covSerializableCapture(int offset) {
+        return (IntUnaryOperator & Serializable) value -> lambdaTarget(value) + offset;
+    }
+    private interface LambdaMarker {}
+    public static IntUnaryOperator rejectLambdaMarkers() {
+        return (IntUnaryOperator & Serializable & LambdaMarker) value -> lambdaTarget(value);
     }
     public static int covThrow(Throwable failure, boolean fail) throws Throwable {
         if (fail) throw failure;
@@ -409,7 +423,21 @@ public class Coverage {
         try { System.out.println("value:" + attempt.run() + ":effects=" + effects); }
         catch (Throwable error) { System.out.println("exception:" + error.getClass().getName() + ":effects=" + effects); }
     }
-    public static void main(String[] args) {
+    private static String serializableRoundTrip(IntUnaryOperator function, int expected) throws Exception {
+        if (!(function instanceof Serializable) || function.applyAsInt(127) != expected)
+            throw new AssertionError("Original lambda has incorrect behavior");
+        var bytes = new ByteArrayOutputStream();
+        try (var output = new ObjectOutputStream(bytes)) {
+            output.writeObject(function);
+        }
+        byte[] serialized = bytes.toByteArray();
+        try (var input = new ObjectInputStream(new ByteArrayInputStream(serialized))) {
+            var restored = (IntUnaryOperator) input.readObject();
+            if (restored.applyAsInt(127) != expected) throw new AssertionError("Restored lambda has incorrect behavior");
+        }
+        return expected + ":" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(serialized));
+    }
+    public static void main(String[] args) throws Exception {
         Object token = new Object();
         Coverage instance = new Coverage();
         Coverage child = new Coverage() {
@@ -601,8 +629,9 @@ public class Coverage {
         show(() -> RawOps.covBoxedBoundary(value -> { throw new ClassCastException(); }, 91));
         show(() -> RawOps.covFailedLambda());
         show(() -> RawOps.covFailedLambda());
-        show(() -> rejectSerializableLambda() instanceof java.io.Serializable);
-        show(() -> rejectSerializableLambda().applyAsInt(127));
+        System.out.println("serializable-reference:" + serializableRoundTrip(covSerializableReference(), 74));
+        System.out.println("serializable-capture:" + serializableRoundTrip(covSerializableCapture(19), 93));
+        show(() -> rejectLambdaMarkers() instanceof LambdaMarker);
         Throwable failure = new IllegalStateException("identity");
         show(() -> covThrow(failure, false));
         show(() -> covThrow(failure, true));
