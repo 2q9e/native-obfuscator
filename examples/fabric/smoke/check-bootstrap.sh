@@ -16,9 +16,10 @@ trap 'rm -rf -- "$fixture_run"' EXIT
 declarations=$("$fixture_jdk/bin/javap" -p -classpath "$fixture_jar" example.nativefixture.Kernel)
 if ! grep -F 'static native int mix(int, int);' <<< "$declarations" > /dev/null ||
     ! grep -F 'static native int identifierScore(net.minecraft.class_2960, int);' <<< "$declarations" > /dev/null ||
+    ! grep -F 'static native int rankRegistryCandidates(net.minecraft.class_2960[], int);' <<< "$declarations" > /dev/null ||
     ! grep -F 'static native int identifierPriorityOrDefault(net.minecraft.class_2960, net.minecraft.class_2960, int, int);' \
         <<< "$declarations" > /dev/null; then
-    printf 'Expected the native mix, score, and fallback methods in the remapped Kernel class.\n' >&2
+    printf 'Expected the native mix, score, fallback, and registry methods in the remapped Kernel class.\n' >&2
     exit 1
 fi
 if [ "${NATIVE_FIXTURE_EXPECT_HIERARCHY:-0}" = 1 ] &&
@@ -52,7 +53,7 @@ timeout 60s "$fixture_jdk/bin/java" --enable-native-access=ALL-UNNAMED -Xcheck:j
     cat bootstrap.log >&2
     exit 1
 }
-if ! grep -F 'Native fixture passed (kernel = 997305193, identifier score = 28443952, priority = 1030, fallback = -1, Mixin and access widener active)' bootstrap.log; then
+if ! grep -F 'Native fixture passed (kernel = 997305193, identifier score = 28443952, priority = 1030, fallback = -1, registry = 1115680, Mixin and access widener active)' bootstrap.log; then
     cat bootstrap.log >&2
     exit 1
 fi

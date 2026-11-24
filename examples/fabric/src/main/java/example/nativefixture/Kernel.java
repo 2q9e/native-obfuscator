@@ -28,4 +28,16 @@ final class Kernel {
         try { return identifierPriority(current, candidate, salt); }
         catch (NullPointerException missing) { return fallback; }
     }
+
+    static int rankRegistryCandidates(Identifier[] candidates, int salt) {
+        int total = salt;
+        Identifier previous = null;
+        for (int i = 0; i < candidates.length; i++) {
+            Identifier candidate = candidates[i];
+            if (candidate == null || candidate == previous) continue;
+            total = mix(total, candidate.path.length() ^ i);
+            previous = candidate;
+        }
+        return total;
+    }
 }

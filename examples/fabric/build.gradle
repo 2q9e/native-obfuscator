@@ -36,6 +36,7 @@ def defaultNativeMethods = [
     'example/nativefixture/Kernel#mix(II)I',
     'example/nativefixture/Kernel#identifierScore*',
     'example/nativefixture/Kernel#identifierPriorityOrDefault*',
+    'example/nativefixture/Kernel#rankRegistryCandidates*',
 ]
 if (nativeHierarchyJar.isPresent()) {
     defaultNativeMethods.add('example/nativefixture/Kernel#identifierPriority(*')
@@ -46,7 +47,7 @@ def nativeZig = providers.gradleProperty('nativeZig')
 
 tasks.register('protectFabricJar', Exec) {
     group = 'build'
-    description = 'Convert the example kernel and Minecraft-linked method after Loom remaps the mod.'
+    description = 'Convert the example kernel and Minecraft-linked methods after Loom remaps the mod.'
     if (!externalJar.isPresent()) {
         dependsOn remap
     }
