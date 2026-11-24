@@ -253,7 +253,8 @@ final class AnalysisNativeEvidence {
                 return instruction;
             if ((flow == Flow.TAIL_BRANCH || flow == Flow.CONDITIONAL) && target != null)
                 pending.add(target);
-            if (flow == Flow.NEXT || flow == Flow.CONDITIONAL)
+            // A call can return to the following instruction, including indirect JNI calls.
+            if (flow == Flow.NEXT || flow == Flow.CONDITIONAL || flow == Flow.CALL)
                 pending.add(address + instruction.bytes());
         }
         return null;
@@ -264,10 +265,10 @@ final class AnalysisNativeEvidence {
         if (arm) {
             if (mnemonic.startsWith("b.") || mnemonic.startsWith("bc.")) return Flow.CONDITIONAL;
             return switch (mnemonic) {
-                case "bl" -> Flow.CALL;
+                case "bl", "blr", "blraa", "blraaz", "blrab", "blrabz" -> Flow.CALL;
                 case "b" -> Flow.TAIL_BRANCH;
                 case "cbz", "cbnz", "tbz", "tbnz" -> Flow.CONDITIONAL;
-                case "br", "braa", "braaz", "brab", "brabz", "blr", "blraa", "blraaz", "blrab", "blrabz",
+                case "br", "braa", "braaz", "brab", "brabz",
                      "ret", "retaa", "retab", "eret", "eretaa", "eretab", "drps",
                      "brk", "udf", "hlt", "svc", "hvc", "smc", "dcps1", "dcps2", "dcps3" -> Flow.STOP;
                 default -> Flow.NEXT;

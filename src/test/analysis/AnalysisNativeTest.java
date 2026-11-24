@@ -200,7 +200,16 @@ public final class AnalysisNativeTest {
         var integer = sites.getFirst();
         var longInteger = sites.get(1);
         require(longInteger.support().contains("uint64_t"), "long helper ABI was not emitted");
-        String intSource = compile(narrow, integer);
+        support.append("""
+            static __attribute__((noinline)) jint returning_call(jint value) {
+                volatile jint result = value;
+                return result;
+            }
+            static jint (*volatile returning_callback)(jint) = returning_call;
+            """);
+        String intSource = MethodCompiler.compile(owner(), narrow, INT_ROOT, integer.rootAttribute(),
+            (index, opcode, left, right) -> integer.lower(index, opcode,
+                "returning_callback(returning_call(" + left + "))", right));
         Path source = Files.writeString(scratch.resolve("native-helper.c"), support + intSource + roots + exports);
         for (NativeTarget target : NativeTarget.values()) {
             Path lib = scratch.resolve(target.key + "-" + target.file);
