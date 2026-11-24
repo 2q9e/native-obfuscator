@@ -81,3 +81,18 @@ Analysis-enabled JARs use Java 21 or later and the existing Windows and Linux x6
 ## Measurements
 
 `benchmarks/analysis-resistance.py` compares original JVM execution and the three native profiles. It records runtime checksums, elapsed time samples, executable sizes, linked control-flow instructions, helper evidence, visible utility sections, symbol exposure, and literal recall. ARM64 reports include a separate count for constants reconstructed from adjacent 32-bit move-wide instructions to the same register. Run it after `gradlew installDist`. The default run measures the host, and repeated `--target` options add cross-builds. It writes a JSON summary and disassembly under `build/`. Set `--max-runtime-overhead-percent` or `--max-startup-overhead-ms` to fail the benchmark when fixture medians exceed your limits relative to the native `off` build. These thresholds are specific to the benchmark workload and host. Reconstruction difficulty across different analysts or tools requires separate evaluation.
+
+### Headless decompiler recovery
+
+The optional Ghidra benchmark evaluates direct helper calls on project-generated stripped libraries. Extract the libraries from a staged JAR with verified helpers into a directory using the benchmark filenames, for example `x86_64-linux-libprotected.so` or `aarch64-windows-protected.dll`. Keep the corresponding `verify` JSONL output. Run the script from an installed Ghidra distribution using its `analyzeHeadless` launcher.
+
+```bash
+mkdir -p "$work/ghidra-projects"
+analyzeHeadless "$work/ghidra-projects" helper-fixture \
+  -import "$work/stripped-libraries" -recursive -readOnly \
+  -scriptPath "$PWD/benchmarks/ghidra" -postScript MeasureHelperRecovery.java > "$work/ghidra.log" 2>&1
+python3 benchmarks/ghidra/score-recovery.py "$work/staged.jar" "$work/verify.jsonl" \
+  "$work/ghidra.log" > "$work/helper-recovery.json"
+```
+
+The `auto` phase decompiles the functions Ghidra discovered. The `section-entry` phase also supplies entry points from visible helper and root sections. The scorer checks SHA-256 digests for the JAR and each imported binary before comparing the decompiler's high-level direct calls with the linked verifier's expected edges. It reports exact matches, missed edges and additional helper calls. Tail transfers can appear differently in the decompiled graph. These results measure entry-point discovery and direct-call recovery. Recovery of arithmetic and algorithms requires separate measurements.
