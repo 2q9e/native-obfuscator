@@ -18,11 +18,13 @@ final class AnalysisWorkload {
             return next;
         }
 
-        static int retainedWithHandler(int[] values, int index) {
-            try {
-                return values[index];
-            } catch (ArrayIndexOutOfBoundsException error) {
-                return -1;
+        static int retainedWithMonitor(int[] values, int index) {
+            synchronized (values) {
+                try {
+                    return values[index];
+                } catch (ArrayIndexOutOfBoundsException error) {
+                    return -1;
+                }
             }
         }
 
@@ -80,7 +82,7 @@ final class AnalysisWorkload {
             int actualBatch = Kernel.batch(value, i, 1);
             if (expectedBatch != actualBatch) throw new AssertionError("batch recurrence differs from mix");
             int updated = Kernel.arrayUpdate(window, i % window.length, expectedBatch);
-            int observed = Kernel.retainedWithHandler(window, i % (window.length + 1));
+            int observed = Kernel.retainedWithMonitor(window, i % (window.length + 1));
             checksum = Integer.rotateLeft(checksum, 5) ^ accumulator.accumulate(updated)
                 ^ observed ^ actualBatch ^ Kernel.conditional(value) ^ Kernel.step(value);
         }

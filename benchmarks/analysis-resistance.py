@@ -21,7 +21,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).with_name("analysis-workload.java")
 NATIVE_METHODS = ["step(I)I", "mix(II)I", "batch(III)I", "conditional(I)I", "accumulate(I)I", "arrayUpdate([III)I"]
-RETAINED = "retainedWithHandler([II)I"
+RETAINED = "retainedWithMonitor([II)I"
 EXCLUDED = "excluded(I)I"
 OWNER = "AnalysisWorkload$Kernel"
 TARGETS = {
@@ -318,7 +318,7 @@ def checked_build(stdout, stderr, stats, profile, seed):
     require(counts["excluded"] == 1, "Explicit exclusion was not reported")
     retained = [record for record in application if record["result"] == "retained"]
     require(len(retained) == 1 and retained[0]["method"] == f"{OWNER}#{RETAINED}"
-            and "exception handlers" in retained[0]["reason"], "Unexpected unsupported method diagnostic")
+            and "opcode 194" in retained[0]["reason"], "Unexpected unsupported monitor diagnostic")
     reports = [item for item in records if "analysisResistance" in item]
     if profile == "off":
         require(not reports and not utilities and stats["analysisResourceEntries"] == 0, "Analysis output appeared in off")
