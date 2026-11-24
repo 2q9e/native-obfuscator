@@ -281,8 +281,9 @@ def measure_case(profile, compiler_args, *, work, tool, java, java_tmp, original
         require(all(sum(passes.values()) for passes in transformed.values()),
                 f"LLVM emitted no transforms for at least one target: {transformed}")
         if profile == "maximum" and args.llvm_passes is None:
-            require(all(passes.get("native-mix", 0) > 0 and passes.get("native-route", 0) > 0
-                        for passes in transformed.values()), f"Advanced passes did not transform each target: {transformed}")
+            advanced = ("native-mix", "native-route", "native-compare")
+            require(all(passes.get(name, 0) > 0 for passes in transformed.values() for name in advanced),
+                    f"Advanced passes did not transform each target: {transformed}")
         result["llvmTransformedSitesByPass"] = transformed
     print(f"{label}: verified all {len(TARGETS)} targets; matched runtime on {host}; {len(planned)} helper methods", flush=True)
     return result

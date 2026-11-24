@@ -464,12 +464,15 @@ public final class Main {
             minInstructions, reportNativeSizes, analysis, hierarchyJars);
     }
 
-    private static String extendedAnalysisPasses(String legacy, AnalysisConfig analysis) {
+    static String extendedAnalysisPasses(String legacy, AnalysisConfig analysis) {
         String seed = Long.toUnsignedString(analysis.seed());
-        boolean route = analysis.profile() == AnalysisConfig.Profile.MAXIMUM;
-        int mixSites = analysis.llvmSites() - (route ? 1 : 0);
+        int budget = analysis.llvmSites();
+        boolean route = budget > 0 && analysis.profile() == AnalysisConfig.Profile.MAXIMUM;
+        boolean compare = route && budget >= 3;
+        int mixSites = budget - (route ? 1 : 0) - (compare ? 1 : 0);
         StringBuilder pipeline = new StringBuilder();
         if (route) pipeline.append("native-route<seed=").append(seed).append(";max=1;prefix=method_>,");
+        if (compare) pipeline.append("native-compare<seed=").append(seed).append(";max=1;prefix=method_>,");
         if (mixSites > 0)
             pipeline.append("native-mix<seed=").append(seed).append(";max=").append(mixSites).append(";prefix=method_>,");
         return pipeline.append(legacy).toString();

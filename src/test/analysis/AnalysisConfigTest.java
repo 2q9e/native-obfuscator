@@ -28,6 +28,17 @@ public final class AnalysisConfigTest {
         rejectsAdvanced("maximum", "0", "2", null, null);
         rejectsAdvanced("off", null, null, "0", null);
 
+        String route = "native-route<seed=42;max=1;prefix=method_>,";
+        String compare = "native-compare<seed=42;max=1;prefix=method_>,";
+        String mix = "native-mix<seed=42;max=1;prefix=method_>,";
+        check(extendedPipeline("maximum", "0").equals("legacy"));
+        check(extendedPipeline("maximum", "1").equals(route + "legacy"));
+        check(extendedPipeline("maximum", "2").equals(route + mix + "legacy"));
+        check(extendedPipeline("maximum", "3").equals(route + compare + mix + "legacy"));
+        check(extendedPipeline("maximum", "8").equals(
+            route + compare + "native-mix<seed=42;max=6;prefix=method_>,legacy"));
+        check(extendedPipeline("balanced", "2").equals("native-mix<seed=42;max=2;prefix=method_>,legacy"));
+
         invalid("balanced or maximum", "off", "0", null, null);
         invalid("must be off", "Balanced", null, null, null);
         invalid("unsigned 64-bit", "balanced", "18446744073709551616", null, null);
@@ -40,6 +51,11 @@ public final class AnalysisConfigTest {
         invalid("between 2 and 32", "balanced", null, null, "33");
         invalid("between 2 and 128", "maximum", null, null, "1");
         System.out.println("Analysis profile configuration passed");
+    }
+
+    private static String extendedPipeline(String profile, String budget) {
+        var analysis = AnalysisConfig.resolve(profile, "42", null, null, null, null, null, budget);
+        return Main.extendedAnalysisPasses("legacy", analysis);
     }
 
     private static void invalid(String message, String profile, String seed, String bytes, String entries) {
