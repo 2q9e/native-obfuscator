@@ -29,10 +29,8 @@ import static org.objectweb.asm.Opcodes.*;
 /** Compile with the installed distribution's libraries on the classpath, then run
  *  with a working directory argument followed by any native compiler flags. */
 public final class ArrayJoinTest {
-    private static final String NATIVE_METHODS = "abcdefgh";
-    private static final Map<String, String> RETAINED = Map.of(
-        "i", "reference-producing operation in a cyclic method requires bounded JNI local-reference lifetime",
-        "j", "constant requires JVM linkage");
+    private static final String NATIVE_METHODS = "abcdefghi";
+    private static final Map<String, String> RETAINED = Map.of("j", "constant requires JVM linkage");
 
     private static MethodVisitor start(ClassWriter writer, String name, String descriptor) {
         MethodVisitor method = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, name, descriptor, null, null);
@@ -335,6 +333,12 @@ public final class ArrayJoinTest {
             outcome(methods.get("h"), true, ints[0], longs[0], 0);
             outcome(methods.get("h"), false, ints[0], longs[0], 0);
             outcome(methods.get("i"), strings, 0);
+            String[] repeated = new String[8192];
+            Arrays.fill(repeated, "element");
+            repeated[0] = null;
+            outcome(methods.get("i"), repeated, repeated.length - 1);
+            outcome(methods.get("i"), repeated, repeated.length);
+            outcome(methods.get("i"), null, 0);
             outcome(methods.get("j"));
         }
     }
