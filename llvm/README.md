@@ -106,11 +106,23 @@ garbage collection, or `returns_twice` control flow. Each site adds at most
 three blocks and thirteen IR instructions. Lowering can convert the branch
 to conditional selection. The selected path can affect timing.
 
+`native-compare` accepts the same options and defaults to one site per function.
+It splits an ordered branch comparison between two nonconstant scalar integers
+of width 8, 16, 32, or 64. The seed and function name determine the split bit.
+If the upper portions differ, their ordering decides the branch. If they are
+equal, an unsigned comparison of the lower portions decides it. The upper
+comparison preserves the original signedness. Each site adds two blocks and
+one conditional branch in the IR, and lowering can use conditional selection.
+The compiler freezes operands it cannot prove defined before using them
+more than once. Eligibility requires the comparison to feed only the branch.
+The pass skips `samesign` comparisons and uses the same control-flow safety
+checks as route. Use the explicit pipeline `native-compare<seed=42;max=1;prefix=method_>`.
+
 The extended passes report rejected flags and types, with `skipped_undefined`
-for mix and `skipped_unsafe_blocks` and `skipped_guard` for route. Each selected
-function gets a report, including functions with zero candidates. Configure
-both passes explicitly. When composing passes, each sees the previous pass's
-output and applies its own cap to eligible instructions in that IR.
+for mix and `skipped_unsafe_blocks` and `skipped_guard` for route and compare.
+Each selected function gets a report, including functions with zero candidates.
+When composing passes, each sees the previous pass's output and applies its
+own cap to eligible instructions in that IR.
 
 The native differential test runs 100,324 boundary and seeded input pairs
 per build. It also checks that a fixed seed reproduces the bitcode, another
@@ -128,6 +140,12 @@ at all four widths, a dependent chain, and a function with an existing PHI.
 It includes every 8-bit input pair, wider boundaries, and deterministic
 pseudorandom inputs. It checks rejection reasons, caps, option parsing, seed
 reproducibility, IR verification, and representative linked instructions.
+The comparison fixture checks all eight ordered predicates across the four
+widths, an exhaustive set of 8-bit operand pairs, wider boundaries, and 128 loop
+lengths with PHIs on both successor edges. It checks the linked host executable
+and cross-compiled ELF and COFF objects for both architectures. In the LLVM
+23 comparison probe, InstCombine and SimplifyCFG converted the split branch
+into a select but retained both comparisons and the upper-bit equality test.
 Linux CTest runs this test when a Python 3 interpreter is available. To run
 it directly with a loadable plugin:
 

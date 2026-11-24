@@ -18,7 +18,7 @@
 
 namespace {
 
-enum class Transform { Encode, Diversify, Mix, Route };
+enum class Transform { Encode, Diversify, Mix, Route, Compare };
 
 llvm::StringRef passName(Transform Kind) {
   switch (Kind) {
@@ -30,6 +30,8 @@ llvm::StringRef passName(Transform Kind) {
     return "native-mix";
   case Transform::Route:
     return "native-route";
+  case Transform::Compare:
+    return "native-compare";
   }
   llvm_unreachable("unknown native transform");
 }
@@ -111,8 +113,8 @@ bool isBitwise(unsigned Opcode) {
          Opcode == llvm::Instruction::Xor;
 }
 
-bool hasSupportedWidth(const llvm::BinaryOperator &Operation) {
-  auto *Type = llvm::dyn_cast<llvm::IntegerType>(Operation.getType());
+bool hasSupportedWidth(llvm::Type *ValueType) {
+  auto *Type = llvm::dyn_cast<llvm::IntegerType>(ValueType);
   if (!Type)
     return false;
   switch (Type->getBitWidth()) {
@@ -127,7 +129,8 @@ bool hasSupportedWidth(const llvm::BinaryOperator &Operation) {
 }
 
 bool canEncode(const llvm::BinaryOperator &Operation) {
-  return isArithmetic(Operation.getOpcode()) && hasSupportedWidth(Operation) &&
+  return isArithmetic(Operation.getOpcode()) &&
+         hasSupportedWidth(Operation.getType()) &&
          !Operation.hasNoUnsignedWrap() && !Operation.hasNoSignedWrap();
 }
 
@@ -391,10 +394,124 @@ struct RewriteStatistics {
   unsigned ChangedFunctions = 0;
 };
 
+uint64_t functionState(const llvm::Function &Function, uint64_t Seed) {
+  uint64_t State = UINT64_C(0xcbf29ce484222325);
+  for (unsigned char C : Function.getName()) {
+    State ^= C;
+    State *= UINT64_C(0x100000001b3);
+  }
+  return State ^ Seed;
+}
+
+void splitComparison(llvm::CondBrInst &Branch, llvm::ICmpInst &Comparison,
+                     uint64_t &State) {
+  auto *Initial = Branch.getParent();
+  auto *Join = Initial->splitBasicBlock(Branch.getIterator(),
+                                       "native.compare.join");
+  auto *Function = Initial->getParent();
+  auto &Context = Function->getContext();
+  auto *Lower = llvm::BasicBlock::Create(Context, "native.compare.lower",
+                                         Function, Join);
+  auto *Left = Comparison.getOperand(0);
+  auto *Right = Comparison.getOperand(1);
+  auto *Type = llvm::cast<llvm::IntegerType>(Left->getType());
+  unsigned Width = Type->getBitWidth();
+  unsigned Split = 1 + nextRandom(State) % (Width - 1);
+  auto *Mask = llvm::ConstantInt::get(Type,
+                                     llvm::APInt::getLowBitsSet(Width, Split));
+
+  Initial->getTerminator()->eraseFromParent();
+  llvm::IRBuilder<> Builder(Initial);
+  Builder.SetCurrentDebugLocation(Branch.getDebugLoc());
+  // The original comparison feeds only a branch, which already requires a
+  // defined condition. Freeze before duplicating a potentially undef operand.
+  if (!llvm::isGuaranteedNotToBeUndefOrPoison(Left))
+    Left = Builder.CreateFreeze(Left, "native.compare.left");
+  if (!llvm::isGuaranteedNotToBeUndefOrPoison(Right))
+    Right = Builder.CreateFreeze(Right, "native.compare.right");
+  bool Signed = Comparison.isSigned();
+  auto *UpperLeft = Signed ? Builder.CreateAShr(Left, Split)
+                           : Builder.CreateLShr(Left, Split);
+  auto *UpperRight = Signed ? Builder.CreateAShr(Right, Split)
+                            : Builder.CreateLShr(Right, Split);
+  auto *UpperResult =
+      Builder.CreateICmp(Comparison.getPredicate(), UpperLeft, UpperRight);
+  Builder.CreateCondBr(Builder.CreateICmpEQ(UpperLeft, UpperRight), Lower, Join);
+
+  Builder.SetInsertPoint(Lower);
+  Builder.SetCurrentDebugLocation(Branch.getDebugLoc());
+  // Equal upper portions leave only the unsigned order of the low bits.
+  auto *LowerLeft = Builder.CreateAnd(Left, Mask);
+  auto *LowerRight = Builder.CreateAnd(Right, Mask);
+  auto *LowerResult =
+      Builder.CreateICmp(Comparison.getUnsignedPredicate(), LowerLeft, LowerRight);
+  Builder.CreateBr(Join);
+
+  Builder.SetInsertPoint(&Branch);
+  Builder.SetCurrentDebugLocation(Branch.getDebugLoc());
+  auto *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "native.compare.result");
+  Result->addIncoming(UpperResult, Initial);
+  Result->addIncoming(LowerResult, Lower);
+  Branch.setCondition(Result);
+  Comparison.eraseFromParent();
+}
+
+bool rewriteComparisons(llvm::Function &Function, const Options &Config,
+                        RewriteStatistics &Statistics) {
+  if (!canDiversify(Function, true)) {
+    ++Statistics.UnsafeControlFlowFunctions;
+    return false;
+  }
+  llvm::SmallVector<llvm::CondBrInst *, 4> Sites;
+  for (llvm::BasicBlock &Block : Function) {
+    auto *Branch = llvm::dyn_cast<llvm::CondBrInst>(Block.getTerminator());
+    if (!Branch)
+      continue;
+    auto *Comparison = llvm::dyn_cast<llvm::ICmpInst>(Branch->getCondition());
+    if (!Comparison || Comparison->isEquality())
+      continue;
+    ++Statistics.CandidateSites;
+    if (!hasSupportedWidth(Comparison->getOperand(0)->getType())) {
+      ++Statistics.TypeFilteredSites;
+      continue;
+    }
+    if (Comparison->hasSameSign()) {
+      ++Statistics.FlagFilteredSites;
+      continue;
+    }
+    if (!Comparison->hasOneUse() ||
+        llvm::isa<llvm::Constant>(Comparison->getOperand(0)) ||
+        llvm::isa<llvm::Constant>(Comparison->getOperand(1))) {
+      ++Statistics.GuardFilteredSites;
+      continue;
+    }
+    if (Block.isEHPad() || Block.hasAddressTaken()) {
+      ++Statistics.UnsafeBlockSites;
+      continue;
+    }
+    ++Statistics.EligibleSites;
+    if (Sites.size() == Config.MaxSites) {
+      ++Statistics.CapSkippedSites;
+      continue;
+    }
+    Sites.push_back(Branch);
+  }
+
+  uint64_t State = functionState(Function, Config.Seed);
+  for (auto *Branch : Sites)
+    splitComparison(*Branch, *llvm::cast<llvm::ICmpInst>(Branch->getCondition()),
+                    State);
+  Statistics.TransformedSites += static_cast<unsigned>(Sites.size());
+  if (!Sites.empty())
+    ++Statistics.ChangedFunctions;
+  return !Sites.empty();
+}
+
 void writeSiteRejections(llvm::raw_ostream &Stream, Transform Kind,
                          const RewriteStatistics &Statistics,
                          const RewriteStatistics &Before = {}) {
-  if (Kind == Transform::Mix || Kind == Transform::Route)
+  if (Kind == Transform::Mix || Kind == Transform::Route ||
+      Kind == Transform::Compare)
     Stream << " skipped_flags="
            << Statistics.FlagFilteredSites - Before.FlagFilteredSites
            << " skipped_type="
@@ -402,7 +519,7 @@ void writeSiteRejections(llvm::raw_ostream &Stream, Transform Kind,
   if (Kind == Transform::Mix)
     Stream << " skipped_undefined="
            << Statistics.UndefinedOperandSites - Before.UndefinedOperandSites;
-  if (Kind == Transform::Route)
+  if (Kind == Transform::Route || Kind == Transform::Compare)
     Stream << " skipped_unsafe_blocks="
            << Statistics.UnsafeBlockSites - Before.UnsafeBlockSites;
 }
@@ -417,6 +534,8 @@ bool rewriteFunction(llvm::Function &Function, const Options &Config,
     ++Statistics.OptimizeNoneFunctions;
     return false;
   }
+  if (Config.Kind == Transform::Compare)
+    return rewriteComparisons(Function, Config, Statistics);
   bool IsMix = Config.Kind == Transform::Mix;
   bool IsRoute = Config.Kind == Transform::Route;
   bool UseBranches = IsRoute || Config.Kind == Transform::Diversify;
@@ -445,7 +564,7 @@ bool rewriteFunction(llvm::Function &Function, const Options &Config,
     ++Statistics.CandidateSites;
 
     if (IsMix || IsRoute) {
-      if (!hasSupportedWidth(*Operation)) {
+      if (!hasSupportedWidth(Operation->getType())) {
         ++Statistics.TypeFilteredSites;
         continue;
       }
@@ -479,12 +598,7 @@ bool rewriteFunction(llvm::Function &Function, const Options &Config,
     Sites.push_back({Operation, GuardOperand});
   }
 
-  uint64_t State = UINT64_C(0xcbf29ce484222325);
-  for (unsigned char C : Function.getName()) {
-    State ^= C;
-    State *= UINT64_C(0x100000001b3);
-  }
-  State ^= Config.Seed;
+  uint64_t State = functionState(Function, Config.Seed);
 
   for (const auto &[Operation, GuardOperand] : Sites) {
     llvm::IRBuilder<> Builder(Operation);
@@ -585,6 +699,9 @@ void registerPass(llvm::PassBuilder &Builder) {
           Config.MaxSites = 4;
         } else if (Pass == passName(Transform::Route)) {
           Config.Kind = Transform::Route;
+          Config.MaxSites = 1;
+        } else if (Pass == passName(Transform::Compare)) {
+          Config.Kind = Transform::Compare;
           Config.MaxSites = 1;
         } else if (Pass != passName(Transform::Encode)) {
           return false;

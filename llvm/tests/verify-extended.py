@@ -202,20 +202,195 @@ def test(args, work):
             if seed == 43:
                 assert first_output != output.read_bytes()
 
+    test_compare(args, work, tool, driver, triple)
+
+
+def compare_fixture():
+    functions = []
+    export = "dllexport " if os.name == "nt" else ""
+    for width in (8, 16, 32, 64):
+        for predicate in ("slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge"):
+            operands = ("%left", "%right")
+            body = ""
+            if width != 64:
+                operands = ("%x", "%y")
+                body = (f"  %x = trunc i64 %left to i{width}\n"
+                        f"  %y = trunc i64 %right to i{width}\n")
+            functions.append(f"""define {export}i32 @method_{predicate}{width}(i64 noundef %left, i64 noundef %right) {{
+{body}  %cmp = icmp {predicate} i{width} {operands[0]}, {operands[1]}
+  br i1 %cmp, label %yes, label %no
+yes:
+  %a = call i32 @compare_true()
+  ret i32 %a
+no:
+  %b = call i32 @compare_false()
+  ret i32 %b
+}}""")
+    return "\n\n".join(functions) + """
+
+declare i32 @compare_true()
+declare i32 @compare_false()
+
+define i32 @method_compare_loop(i32 %limit) {
+entry:
+  br label %loop
+loop:
+  %value = phi i32 [ 0, %entry ], [ %next, %loop ]
+  %next = add i32 %value, 1
+  %cmp = icmp ult i32 %next, %limit
+  br i1 %cmp, label %loop, label %exit
+exit:
+  %result = phi i32 [ %next, %loop ]
+  ret i32 %result
+}
+
+define i1 @method_shared(i32 %left, i32 %right) {
+  %cmp = icmp slt i32 %left, %right
+  br i1 %cmp, label %yes, label %no
+yes:
+  ret i1 %cmp
+no:
+  ret i1 false
+}
+
+define i32 @method_same_sign(i32 %left, i32 %right) {
+  %cmp = icmp samesign ult i32 %left, %right
+  br i1 %cmp, label %yes, label %no
+yes:
+  ret i32 %left
+no:
+  ret i32 %right
+}
+
+define i32 @method_pointer(ptr %left, ptr %right) {
+  %cmp = icmp ult ptr %left, %right
+  br i1 %cmp, label %yes, label %no
+yes:
+  ret i32 1
+no:
+  ret i32 0
+}
+
+define i32 @method_constant(i32 %left) {
+  %cmp = icmp slt i32 %left, 37
+  br i1 %cmp, label %yes, label %no
+yes:
+  ret i32 -1
+no:
+  ret i32 %left
+}
+"""
+
+
+def test_compare(args, work, tool, driver, triple):
+    source = work / "compare.ll"
+    source.write_text(compare_fixture(), encoding="utf-8")
+    baseline = work / "compare-baseline.bc"
+    run(tool("opt"), "-passes=verify", source, "-o", baseline)
+    original, _ = run(tool("opt"), "-S", baseline, "-o", "-")
+    bodies = function_bodies(original)
+    targets = ("x86_64-linux-gnu", "aarch64-linux-gnu",
+               "x86_64-windows-gnu", "aarch64-windows-gnu")
+    expected = "checked 727040 integer relations and 128 loop lengths"
+
+    def rewrite(seed, output, cap=1):
+        pipeline = f"native-compare<seed={seed};max={cap};prefix=method_>"
+        _, log = run(*driver, f"-passes=verify,{pipeline},verify", baseline, "-o", output)
+        return verify_reports(log, "native-compare", bodies)
+
+    def compile_object(bitcode, obj, target):
+        run(tool("llc"), "-O=2", "-filetype=obj", "-relocation-model=pic",
+            *target, bitcode, "-o", obj)
+
+    variants = [baseline]
+    for seed in (42, 43):
+        output = work / f"compare-{seed}.bc"
+        reports, totals = rewrite(seed, output)
+        assert totals["eligible"] == totals["transformed"] == 33, totals
+        assert reports["method_shared"]["skipped_guard"] == 1
+        assert reports["method_constant"]["skipped_guard"] == 1
+        assert reports["method_same_sign"]["skipped_flags"] == 1
+        assert reports["method_pointer"]["skipped_type"] == 1
+        ir, _ = run(tool("opt"), "-S", output, "-o", "-")
+        rewritten = function_bodies(ir)
+        for name, before in bodies.items():
+            after = rewritten[name]
+            if not reports[name]["transformed"]:
+                assert after == before, name
+                continue
+            assert after.count(" br i1 ") == before.count(" br i1 ") + 1, name
+            assert "native.compare.result = phi i1" in after, name
+            if name == "method_compare_loop":
+                assert after.count("freeze i32") == 2
+                assert "[ %next, %native.compare.join ]" in after
+            else:
+                assert " freeze " not in after, name
+        variants.append(output)
+
+    disabled = work / "compare-disabled.bc"
+    _, totals = rewrite(42, disabled, cap=0)
+    assert totals["transformed"] == 0 and totals["skipped_cap"] == 33
+    disabled_ir, _ = run(tool("opt"), "-S", disabled, "-o", "-")
+    assert disabled_ir.splitlines()[1:] == original.splitlines()[1:]
+    repeated = work / "compare-repeat.bc"
+    rewrite(42, repeated)
+    assert repeated.read_bytes() == variants[1].read_bytes()
+    assert variants[2].read_bytes() != variants[1].read_bytes()
+    normalized, _ = run(tool("opt"), "-passes=instcombine,simplifycfg,instcombine,verify",
+                        "-S", variants[1], "-o", "-")
+    normalized_comparison = function_bodies(normalized)["method_slt32"]
+    assert normalized_comparison.count("icmp ") >= 3
+
+    def compare_shape(before, after, arch):
+        conditions = (r"j(?!mp)[a-z]+" if arch in ("x86_64", "amd64") else
+                      r"(tb|cb)n?z|b\.[a-z]{2}|csel|csinc|csinv|csneg")
+        counts = [sum(bool(re.fullmatch(conditions, op)) for op in ops)
+                  for ops in (before, after)]
+        assert counts[1] > counts[0], (arch, before, after)
+        return counts
+
+    linked = []
+    for bitcode in variants:
+        obj = bitcode.with_suffix(".o")
+        compile_object(bitcode, obj, triple)
+        exe = bitcode.with_suffix(".exe" if os.name == "nt" else ".test")
+        run(args.cc, *args.cc_arg, "-O2", FIXTURES / "compare.c", obj, "-o", exe)
+        result, _ = run(exe)
+        assert result.strip() == expected, (bitcode, result)
+        print(f"{bitcode.stem}: {result.strip()}", flush=True)
+        linked.append(exe)
+
+    host = platform.machine().lower()
+    if host in ("x86_64", "amd64", "aarch64", "arm64"):
+        before, after = (mnemonics(tool("llvm-objdump"), "method_slt32", exe)
+                         for exe in linked[:2])
+        base, routed = compare_shape(before, after, host)
+        print(f"linked {host} comparison decisions: {base} -> {routed}", flush=True)
+
+    for target in targets:
+        names = []
+        for bitcode in variants[:2]:
+            obj = work / f"{bitcode.stem}-{target}.o"
+            compile_object(bitcode, obj, [f"-mtriple={target}"])
+            names.append(mnemonics(tool("llvm-objdump"), "method_slt32", obj))
+        base, routed = compare_shape(*names, target.split("-", 1)[0])
+        print(f"{target} comparison decisions: {base} -> {routed}", flush=True)
+
+
+def mnemonics(objdump, symbol, binary):
+    assembly, _ = run(objdump, "-d", "--no-show-raw-insn",
+                      f"--disassemble-symbols={symbol}", binary)
+    assert f"<{symbol}>:" in assembly, f"missing symbol {symbol} in {binary}"
+    result = re.findall(r"(?m)^ *[0-9a-f]+:\s+([a-z][a-z0-9.]*)", assembly)
+    assert result, f"missing instructions in {symbol} from {binary}"
+    return result
+
 
 def check_linked(objdump, pass_name, baseline, transformed, split_product=False):
     arch = platform.machine().lower()
     if arch not in ("x86_64", "amd64", "aarch64", "arm64"):
         print(f"Linked mnemonic check unavailable for {arch}")
         return
-    def mnemonics(symbol, exe):
-        assembly, _ = run(objdump, "-d", "--no-show-raw-insn",
-                          f"--disassemble-symbols={symbol}", exe)
-        assert f"<{symbol}>:" in assembly, f"missing symbol {symbol} in {exe}"
-        result = re.findall(r"(?m)^ *[0-9a-f]+:\s+([a-z][a-z0-9.]*)", assembly)
-        assert result, f"missing instructions in {symbol} from {exe}"
-        return result
-
     x86 = arch in ("x86_64", "amd64")
     if split_product:
         symbols = ("method_mul32",)
@@ -224,8 +399,8 @@ def check_linked(objdump, pass_name, baseline, transformed, split_product=False)
     else:
         symbols = ("method_add32", "method_mul32")
     for symbol in symbols:
-        before = mnemonics(symbol, baseline)
-        after = mnemonics(symbol, transformed)
+        before = mnemonics(objdump, symbol, baseline)
+        after = mnemonics(objdump, symbol, transformed)
         if split_product:
             multiply = r"imul[bwlq]?" if x86 else r"mul|madd"
             assert sum(bool(re.fullmatch(multiply, op)) for op in before) == 1
