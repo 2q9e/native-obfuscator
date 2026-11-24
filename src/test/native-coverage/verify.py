@@ -49,13 +49,15 @@ raw_methods = {"covRawZ", "covRawB", "covRawC", "covRawS", "covSpecial", "covRef
                "covLinkageRaw", "covLinkageMissing", "covExternalNull", "covExternalProtected", "covExternalMissingField",
                "covCastMissing", "covAllocateMissingArray", "covPlainConcat"}
 expected = raw_methods | set(re.findall(r"\b(cov\w+)\(", (root / "Coverage.java").read_text()))
-selected = {d["method"].split("#")[1].split("(")[0] for d in decisions if d["result"] == "selected"}
-assert selected == expected, (selected, expected, report.stdout)
+utilities = {d["method"] for d in decisions if d.get("result") == "analysis-utility"}
+selected = {d["method"].split("#")[1].split("(")[0] for d in decisions
+            if d.get("result") == "selected" and d["method"] not in utilities}
+assert selected == expected, {"unexpected": sorted(selected - expected), "missing": sorted(expected - selected)}
 declarations = run([executable("javap"), "-p", "-classpath", protected, "Coverage", "RawOps"]).stdout
 native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declarations))
 assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
-retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d["result"] == "retained"}
+retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d.get("result") == "retained"}
 assert set(retained) == {"rejectAllocation", "rejectRawCall", "rejectDirectHierarchy", "rejectUnknownHierarchy",
                          "rejectLambdaMarkers"}, retained
 assert "bytecode verification failed" in retained["rejectDirectHierarchy"]
