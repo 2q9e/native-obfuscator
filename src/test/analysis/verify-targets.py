@@ -333,9 +333,13 @@ def check_unverified_maximum(tool, original, work, env, seed):
     with zipfile.ZipFile(source) as verified, zipfile.ZipFile(tampered, "w", zipfile.ZIP_DEFLATED) as changed:
         target = next(name for name in verified.namelist() if name.endswith("/x86_64-windows/protected.dll"))
         binary = verified.read(target)
-        roots = re.findall(rb"\.nar[0-9a-f]{2}0\0", binary)
-        require(len(roots) == 1, "Expected exactly one first root section header")
-        binary = binary.replace(roots[0], b".bad000\0")
+        section_log = work / "maximum" / "x86_64-windows-sections.stdout"
+        roots = [section[1] for line in section_log.read_text(encoding="utf-8").splitlines()
+                 if (section := SECTION.fullmatch(line)) and section[1].startswith(".nar")]
+        require(roots, "Expected at least one root section header")
+        header = roots[0].encode("ascii")
+        require(len(header) == 8 and binary.count(header) == 1, "Expected a unique PE root section header")
+        binary = binary.replace(header, b".bad0000", 1)
         for name in verified.namelist():
             if name == target:
                 data = binary

@@ -2,10 +2,12 @@ package dev.nativeobfuscator;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.SplittableRandom;
+import java.util.TreeMap;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.IntInsnNode;
@@ -25,6 +27,7 @@ final class AnalysisNative {
     private final int methodLimit;
     private final int helpersPerRoot;
     private final boolean traceReturns;
+    private final String[] sectionIds;
     private final List<Selection> selected = new ArrayList<>();
 
     AnalysisNative(long seed, int methodLimit) {
@@ -49,9 +52,11 @@ final class AnalysisNative {
         this.methodLimit = methodLimit;
         this.helpersPerRoot = helpersPerRoot;
         this.traceReturns = traceReturns;
+        this.sectionIds = sectionIds(seed, methodLimit * (helpersPerRoot + 1));
     }
 
     record Helper(String section, String name, long mask) {}
+    private record HelperSource(String declaration, String definition) {}
 
     record Selection(String root, String reason, int instructionIndex, int opcode, String rootSection,
                      List<Helper> helpers, boolean reversed, boolean partitionLeft) {
@@ -84,39 +89,44 @@ final class AnalysisNative {
         }
 
         String support() {
-            if (!enabled()) return "";
-            boolean longOperation = wide(opcode);
+            var code = new StringBuilder();
+            for (int i = helpers.size() - 1; i >= 0; i--) code.append(definition(i));
+            return code.toString();
+        }
+
+        private String header(Helper part) {
+            String type = wide(opcode) ? "uint64_t" : "uint32_t";
+            // Hidden linkage keeps the arithmetic generic during frontend optimization.
+            return "__attribute__((noinline, visibility(\"hidden\"), section(\"" + part.section() + "\"))) "
+                + type + " " + part.name() + "(" + type + " a, " + type + " b)";
+        }
+
+        String definition(int i) {
             boolean split = helpers.size() > 1;
+            boolean longOperation = wide(opcode);
             String type = longOperation ? "uint64_t" : "uint32_t";
             String left = reversed ? "b" : "a";
             String right = reversed ? "a" : "b";
-            var code = new StringBuilder();
-            for (int i = helpers.size() - 1; i >= 0; i--) {
-                Helper part = helpers.get(i);
-                // Hidden linkage keeps the arithmetic generic during frontend optimization.
-                code.append("__attribute__((noinline, visibility(\"hidden\"), section(\"").append(part.section())
-                    .append("\"))) ").append(type).append(" ").append(part.name())
-                    .append("(").append(type).append(" a, ").append(type).append(" b) {\n");
-                if (split) {
-                    String mask = longOperation ? "UINT64_C(0x" + HexFormat.of().toHexDigits(part.mask()) + ")"
-                        : "UINT32_C(0x" + HexFormat.of().toHexDigits((int) part.mask()) + ")";
-                    code.append("    ").append(type).append(" part = ")
-                        .append(partitionLeft ? left : right).append(" & ").append(mask).append(";\n");
-                }
-                String leftPart = split && partitionLeft ? "part" : left;
-                String rightPart = split && !partitionLeft ? "part" : right;
-                if (i == helpers.size() - 1) {
-                    code.append("    return ").append(leftPart).append(" ").append(operator(opcode))
-                        .append(" ").append(rightPart).append(";\n");
-                } else {
-                    code.append("    ").append(type).append(" prior = ").append(helpers.get(i + 1).name())
-                        .append("(a, b);\n")
-                        .append("    return ").append(combine(opcode, partitionLeft, leftPart, rightPart))
-                        .append(";\n");
-                }
-                code.append("}\n\n");
+            Helper part = helpers.get(i);
+            var code = new StringBuilder(header(part)).append(" {\n");
+            if (split) {
+                String mask = longOperation ? "UINT64_C(0x" + HexFormat.of().toHexDigits(part.mask()) + ")"
+                    : "UINT32_C(0x" + HexFormat.of().toHexDigits((int) part.mask()) + ")";
+                code.append("    ").append(type).append(" part = ")
+                    .append(partitionLeft ? left : right).append(" & ").append(mask).append(";\n");
             }
-            return code.toString();
+            String leftPart = split && partitionLeft ? "part" : left;
+            String rightPart = split && !partitionLeft ? "part" : right;
+            if (i == helpers.size() - 1) {
+                code.append("    return ").append(leftPart).append(" ").append(operator(opcode))
+                    .append(" ").append(rightPart).append(";\n");
+            } else {
+                code.append("    ").append(type).append(" prior = ").append(helpers.get(i + 1).name())
+                    .append("(a, b);\n")
+                    .append("    return ").append(combine(opcode, partitionLeft, leftPart, rightPart))
+                    .append(";\n");
+            }
+            return code.append("}\n\n").toString();
         }
 
         String lower(int index, int operation, String left, String right) {
@@ -226,8 +236,7 @@ final class AnalysisNative {
     private Selection outline(MethodNode method, String root, String signature, AbstractInsnNode operation,
                               boolean leftRuntime, boolean rightRuntime) {
         int methodHash = signature.hashCode();
-        int ordinal = selected.size();
-        String suffix = Integer.toHexString(0x1000 | (methodHash & 0xff) << 4 | ordinal).substring(1);
+        int offset = selected.size() * (helpersPerRoot + 1);
         var random = new SplittableRandom(seed ^ 0x5694a91d56c7ef02L ^ methodHash);
         boolean reversed = random.nextBoolean();
         boolean partitionLeft = leftRuntime && (!rightRuntime || random.nextBoolean());
@@ -235,11 +244,40 @@ final class AnalysisNative {
         List<Long> masks = partition(wide(opcode) ? 64 : 32, helpersPerRoot, random);
         var helpers = new ArrayList<Helper>(helpersPerRoot);
         for (int i = 0; i < helpersPerRoot; i++) {
-            String helperSuffix = i == 0 ? suffix : suffix + i;
+            String helperSuffix = sectionIds[offset + i + 1];
             helpers.add(new Helper(".nah" + helperSuffix, "native_analysis_" + helperSuffix, masks.get(i)));
         }
-        return new Selection(root, "", method.instructions.indexOf(operation), opcode, ".nar" + suffix,
+        return new Selection(root, "", method.instructions.indexOf(operation), opcode, ".nar" + sectionIds[offset],
             helpers, reversed, partitionLeft);
+    }
+
+    private static String[] sectionIds(long seed, int count) {
+        var ids = new String[count];
+        var used = new BitSet(1 << 16);
+        var random = new SplittableRandom(seed ^ 0x62e07ad9bf85c943L);
+        var hex = HexFormat.of();
+        for (int i = 0; i < ids.length; i++) {
+            int id = random.nextInt(1 << 16);
+            while (used.get(id)) id = (id + 1) & 0xffff;
+            used.set(id);
+            ids[i] = hex.toHexDigits((short) id);
+        }
+        return ids;
+    }
+
+    String support() {
+        var helpers = new TreeMap<String, HelperSource>();
+        for (Selection site : selected) {
+            for (int i = 0; i < site.helperCount(); i++) {
+                Helper helper = site.helpers().get(i);
+                helpers.put(helper.section(), new HelperSource(site.header(helper), site.definition(i)));
+            }
+        }
+        // Seeded section IDs order the definitions independently of their call chains.
+        var code = new StringBuilder();
+        helpers.values().forEach(helper -> code.append(helper.declaration()).append(";\n"));
+        helpers.values().forEach(helper -> code.append(helper.definition()));
+        return code.toString();
     }
 
     void accept(Selection site) {

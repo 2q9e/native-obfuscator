@@ -124,6 +124,7 @@ final class Protector {
         String id = runtimeId(files, config, hierarchy);
         String loader = RUNTIME.substring(0, RUNTIME.lastIndexOf('/') + 1) + id;
         var source = new StringBuilder(MethodCompiler.runtimeSupport()).append(registrationSupport());
+        int helperOffset = source.length();
         var registrationResources = new LinkedHashMap<String, byte[]>();
         var registrations = new StringBuilder();
         var outputs = new LinkedHashMap<String, byte[]>();
@@ -206,6 +207,7 @@ final class Protector {
             return ordinal;
         }
         if (outputs.isEmpty()) throw new IOException("No supported methods were selected");
+        if (nativePlan != null) source.insert(helperOffset, nativePlan.support());
         if (analysisPlan != null && applicationMethods == 0)
             throw new IOException("Analysis resistance requires a supported application method");
         if (files.containsKey(loader + ".class")) throw new IOException("Injected runtime path collides with input");
@@ -500,8 +502,7 @@ final class Protector {
             return MethodCompiler.compileWithBridges(node, method, symbol,
                 "__attribute__((section(\"" + utilitySection + "\"))) ", null, hierarchy);
         if (site == null || !site.enabled()) return MethodCompiler.compileWithBridges(node, method, symbol, "", null, hierarchy);
-        var compiled = MethodCompiler.compileWithBridges(node, method, symbol, site.rootAttribute(), site::lower, hierarchy);
-        return new MethodCompiler.Compilation(site.support() + compiled.code(), compiled.bridges());
+        return MethodCompiler.compileWithBridges(node, method, symbol, site.rootAttribute(), site::lower, hierarchy);
     }
 
     private static boolean matches(List<Pattern> patterns, String method) {

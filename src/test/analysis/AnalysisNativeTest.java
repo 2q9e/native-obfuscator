@@ -129,18 +129,19 @@ public final class AnalysisNativeTest {
 
     private static void checkGraphPlans(MethodNode method) {
         var analysis = new AnalysisNative(SEED, AnalysisNative.MAX_METHODS, AnalysisNative.MAX_HELPERS_PER_ROOT);
-        var sections = new HashSet<String>();
+        var sectionIds = new HashSet<String>();
         for (int i = 0; i < AnalysisNative.MAX_METHODS; i++) {
             String root = INT_ROOT + i;
             String signature = method.name + method.desc + i;
             var site = analysis.prepare(method, root, signature);
             require(site.equals(analysis.prepare(method, root, signature)) && site.helperCount() == 3,
                 "three-helper chain was not reproducible");
-            require(sections.add(site.rootSection()), "duplicate root section");
+            require(sectionIds.add(site.rootSection().substring(4)) && site.rootSection().length() == 8,
+                "duplicate or malformed root section ID");
             long covered = 0;
             for (var helper : site.helpers()) {
-                require(sections.add(helper.section()) && helper.section().length() <= 8,
-                    "duplicate or overlong PE section name");
+                require(sectionIds.add(helper.section().substring(4)) && helper.section().length() == 8,
+                    "duplicate or malformed helper section ID");
                 require(helper.mask() != 0 && (covered & helper.mask()) == 0, "input parts overlap or are empty");
                 covered |= helper.mask();
             }
@@ -158,12 +159,15 @@ public final class AnalysisNativeTest {
 
         String signature = method.name + method.desc;
         var reference = new AnalysisNative(SEED, 1, 3).prepare(method, INT_ROOT, signature);
-        var orders = new HashSet<List<AnalysisNative.Helper>>();
+        var orders = new HashSet<List<Long>>();
+        var layouts = new HashSet<String>();
         for (long seed = 0; seed < 64; seed++) {
             var site = new AnalysisNative(seed, 1, 3).prepare(method, INT_ROOT, signature);
-            orders.add(site.helpers());
+            orders.add(site.helpers().stream().map(AnalysisNative.Helper::mask).toList());
+            layouts.add(site.rootSection());
         }
         require(orders.size() > 1 && reference.helperCount() == 3, "seed had no effect on helper partitions");
+        require(layouts.size() > 1, "seed had no effect on section IDs");
     }
 
     private static MethodNode subtraction() {
@@ -250,11 +254,11 @@ public final class AnalysisNativeTest {
             require(site.enabled(), "linked fixture was not eligible " + method.name);
             analysis.accept(site);
             sites.add(site);
-            support.append(site.support());
             if (i != 0) roots.append(compile(method, site));
             exports.append("JNIEXPORT void *export_").append(method.name)
                 .append("(void) { return (void *)").append(root).append("; }\n");
         }
+        support.append(analysis.support());
         var integer = sites.getFirst();
         var longInteger = sites.get(1);
         require(longInteger.support().contains("uint64_t"), "long helper ABI was not emitted");
@@ -313,7 +317,8 @@ public final class AnalysisNativeTest {
                 && brokenEvidence.edges().get(2).status().equals("verified"),
             "unreachable transfer within a helper incorrectly verified: " + brokenEvidence);
 
-        String missingSupport = support.toString().replace(integer.support(), "");
+        String missingSupport = support.toString();
+        for (int i = 0; i < integer.helperCount(); i++) missingSupport = missingSupport.replace(integer.definition(i), "");
         Path missing = Files.writeString(scratch.resolve("missing-helper.c"), missingSupport + unrelatedIntSource + roots + exports);
         Path missingLib = scratch.resolve("missing-" + host.file);
         link(zig, host, jni, scratch, missing, missingLib, true);
