@@ -15,6 +15,8 @@ import static org.objectweb.asm.Opcodes.*;
 public final class MethodCompiler {
     private static final Type OBJECT_TYPE = Type.getObjectType("java/lang/Object");
 
+    private enum ReferenceResult { UNTRACKED, OWNED, FRAMED }
+
     private MethodCompiler() {}
 
     public static final class Unsupported extends Exception {
@@ -141,6 +143,8 @@ public final class MethodCompiler {
             }
             if (insn.getOpcode() >= 0) {
                 Supplier<String> failure = handlers.failure(i, uncaught);
+                var references = ReferenceResult.UNTRACKED;
+                if (tracking) references = failure == uncaught ? ReferenceResult.OWNED : ReferenceResult.FRAMED;
                 try {
                     if (insn.getOpcode() == NEW && bridges != null) {
                         var allocation = (TypeInsnNode) insn;
@@ -151,12 +155,12 @@ public final class MethodCompiler {
                         // argument slots while the combined JVM operation remains pending.
                         for (int argument = i + 2; argument < end; argument++)
                             emit(code, owner, method, insns[argument], frames[argument], type.getReturnType(), argument,
-                                wrappingOperation, bridges, uncaught, tracking);
+                                wrappingOperation, bridges, uncaught, ReferenceResult.UNTRACKED);
                         // The contiguous constructor sequence contains no boundary labels.
-                        emitCall(code, owner, method, bridge.name, bridge.desc, frames[end], failure, tracking, true, false, -2);
+                        emitCall(code, owner, method, bridge.name, bridge.desc, frames[end], failure, references, true, false, -2);
                         i = end;
                     } else {
-                        emit(code, owner, method, insn, frames[i], type.getReturnType(), i, wrappingOperation, bridges, failure, tracking);
+                        emit(code, owner, method, insn, frames[i], type.getReturnType(), i, wrappingOperation, bridges, failure, references);
                     }
                 } catch (Unsupported e) {
                     throw new Unsupported("instruction " + i + " (opcode " + insn.getOpcode() + "): " + e.getMessage());
@@ -215,7 +219,7 @@ public final class MethodCompiler {
     private static void emit(StringBuilder code, ClassNode owner, MethodNode method, AbstractInsnNode insn,
                              Frame<BasicValue> frame, Type result, int instructionIndex,
                              WrappingOperation wrappingOperation, JvmBridges bridges,
-                             Supplier<String> failure, boolean tracking) throws Unsupported {
+                             Supplier<String> failure, ReferenceResult references) throws Unsupported {
         int depth = frame.getStackSize();
         String out = "s[" + depth + "]";
         String a = "s[" + (depth - 1) + "]";
@@ -263,11 +267,11 @@ public final class MethodCompiler {
             }
             case IALOAD, LALOAD, FALOAD, DALOAD, AALOAD, BALOAD, CALOAD, SALOAD,
                  IASTORE, LASTORE, FASTORE, DASTORE, AASTORE, BASTORE, CASTORE, SASTORE ->
-                arrayAccess(code, insn, frame, failure, tracking);
+                arrayAccess(code, insn, frame, failure, references);
             case GETFIELD, PUTFIELD, GETSTATIC, PUTSTATIC ->
-                fieldAccess(code, owner, method, (FieldInsnNode)insn, frame, failure, instructionIndex, bridges, tracking);
+                fieldAccess(code, owner, method, (FieldInsnNode)insn, frame, failure, instructionIndex, bridges, references);
             case INVOKESTATIC, INVOKEVIRTUAL, INVOKESPECIAL, INVOKEINTERFACE ->
-                methodCall(code, owner, method, (MethodInsnNode)insn, frame, failure, instructionIndex, bridges, tracking);
+                methodCall(code, owner, method, (MethodInsnNode)insn, frame, failure, instructionIndex, bridges, references);
             case IADD, ISUB, IMUL, IAND, IOR, IXOR, LADD, LSUB, LMUL, LAND, LOR, LXOR -> {
                 boolean wide = op == LADD || op == LSUB || op == LMUL || op == LAND || op == LOR || op == LXOR;
                 String f = wide ? ".j" : ".i";
@@ -387,17 +391,17 @@ public final class MethodCompiler {
                 if (bridges == null) throw new Unsupported("array allocation requires a JVM bridge");
                 Type type = arrayAllocationType(insn);
                 MethodNode bridge = bridges.allocateArray(insn, instructionIndex, type);
-                emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, tracking, true, false);
+                emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false);
             }
             case CHECKCAST, INSTANCEOF -> {
                 if (bridges == null) throw new Unsupported("reference type resolution requires a JVM bridge");
                 MethodNode bridge = bridges.typeCheck((TypeInsnNode) insn, instructionIndex);
-                emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, tracking, true, false);
+                emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false);
             }
             case ATHROW -> {
                 if (bridges == null) throw new Unsupported("explicit throw requires a JVM bridge");
                 MethodNode bridge = bridges.throwException(instructionIndex);
-                emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, tracking, true, false);
+                emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false);
                 line(code, zeroReturn(result));
             }
             case MONITORENTER, MONITOREXIT -> throw new Unsupported("explicit monitor ownership and exception cleanup are not verified");
@@ -406,7 +410,7 @@ public final class MethodCompiler {
                 if (bridges == null || !JvmBridges.stringConcat(dynamic))
                     throw new Unsupported("dynamic call-site linkage is not verified for this bootstrap");
                 MethodNode bridge = bridges.concat(dynamic, instructionIndex);
-                emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, tracking, true, false);
+                emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false);
             }
             default -> throw new Unsupported("unsupported operation");
         }
@@ -622,21 +626,23 @@ public final class MethodCompiler {
     }
 
     private static void emitReferenceResult(StringBuilder code, String destination, String call,
-                                            Supplier<String> failure, boolean tracking) {
-        if (!tracking) {
+                                            Supplier<String> failure, ReferenceResult references) {
+        String retain = "remember_local(owned, &owned_count, " + destination + ", declaring);";
+        if (references != ReferenceResult.FRAMED) {
             line(code, destination + " = " + call + ";");
             pending(code, failure);
+            if (references == ReferenceResult.OWNED) line(code, retain);
             return;
         }
-        // An exceptional object-returning JNI call has no usable result. Pop its
-        // temporary frame before resuming a handler, keeping earlier handles valid.
+        // A handler can resume in this invocation. Discard any temporary
+        // references from a failed call while keeping earlier handles valid.
         line(code, "{");
         line(code, "if ((*env)->PushLocalFrame(env, 1) < 0) { " + failure.get() + " }");
         line(code, "jobject result = " + call + ";");
         line(code, "if ((*env)->ExceptionCheck(env)) { (void)(*env)->PopLocalFrame(env, NULL); "
             + failure.get() + " }");
         line(code, destination + " = (*env)->PopLocalFrame(env, result);");
-        line(code, "remember_local(owned, &owned_count, " + destination + ", declaring);");
+        line(code, retain);
         pending(code, failure);
         line(code, "}");
     }
@@ -644,7 +650,7 @@ public final class MethodCompiler {
     private static String stack(int index) { return "s[" + index + "]"; }
 
     private static void arrayAccess(StringBuilder code, AbstractInsnNode insn, Frame<BasicValue> frame,
-                                    Supplier<String> failure, boolean tracking) throws Unsupported {
+                                    Supplier<String> failure, ReferenceResult references) throws Unsupported {
         int op = insn.getOpcode();
         boolean store = op >= IASTORE && op <= SASTORE;
         int base = frame.getStackSize() - (store ? 3 : 2);
@@ -689,7 +695,7 @@ public final class MethodCompiler {
             if (store)
                 line(code, "(*env)->SetObjectArrayElement(env, (jobjectArray)" + ref + ", " + index + ", " + stack(base + 2) + ".r);");
             else emitReferenceResult(code, ref, "(*env)->GetObjectArrayElement(env, (jobjectArray)" + ref + ", " + index + ")",
-                failure, tracking);
+                failure, references);
         } else {
             String arrayType = "j" + kind.toLowerCase(Locale.ROOT) + "Array";
             line(code, jni(element) + " element;");
@@ -746,7 +752,7 @@ public final class MethodCompiler {
 
     private static void fieldAccess(StringBuilder code, ClassNode owner, MethodNode method, FieldInsnNode insn,
                                     Frame<BasicValue> frame, Supplier<String> failure, int instructionIndex, JvmBridges bridges,
-                                    boolean tracking) throws Unsupported {
+                                    ReferenceResult references) throws Unsupported {
         boolean statik = insn.getOpcode() == GETSTATIC || insn.getOpcode() == PUTSTATIC;
         boolean store = insn.getOpcode() == PUTFIELD || insn.getOpcode() == PUTSTATIC;
         int depth = frame.getStackSize();
@@ -763,7 +769,7 @@ public final class MethodCompiler {
             if (bridges == null) throw new Unsupported("external and volatile field operations require a JVM bridge");
             Type receiver = statik ? null : frame.getStack(depth - (store ? 2 : 1)).getType();
             MethodNode bridge = bridges.field(insn, instructionIndex, receiver, store);
-            emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, tracking, true, false);
+            emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false);
             return;
         }
         Type type = Type.getType(insn.desc);
@@ -778,7 +784,7 @@ public final class MethodCompiler {
             (store ? ", " + narrowed(type, stack(depth - 1) + "." + field(type)) : "") + ")";
         String destination = stack(depth - (statik ? 0 : 1)) + "." + field(type);
         if (!store && isReferenceType(type)) {
-            emitReferenceResult(code, destination, call, failure, tracking);
+            emitReferenceResult(code, destination, call, failure, references);
         } else {
             line(code, store ? call + ";" : destination + " = " + call + ";");
             pending(code, failure);
@@ -788,7 +794,7 @@ public final class MethodCompiler {
 
     private static void methodCall(StringBuilder code, ClassNode owner, MethodNode method, MethodInsnNode insn,
                                    Frame<BasicValue> frame, Supplier<String> failure, int instructionIndex, JvmBridges bridges,
-                                    boolean tracking) throws Unsupported {
+                                    ReferenceResult references) throws Unsupported {
         if (insn.name.startsWith("<")) throw new Unsupported("constructor calls require uninitialized-object tracking");
         if (!insn.owner.equals(owner.name)) {
             if (bridges == null || !JvmBridges.externalCall(owner, insn))
@@ -802,7 +808,7 @@ public final class MethodCompiler {
                 if (isReferenceType(expected) && !referenceSubtype(actual, expected)) parameters[i] = actual;
             }
             MethodNode bridge = bridges.call(insn, instructionIndex, receiver, parameters);
-            emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, tracking, true, false);
+            emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false);
             return;
         }
         MethodNode declaration = owner.methods.stream().filter(m -> m.name.equals(insn.name) && m.desc.equals(insn.desc)).findFirst().orElse(null);
@@ -814,18 +820,19 @@ public final class MethodCompiler {
         if (statik != ((declaration.access & ACC_STATIC) != 0)) throw new Unsupported("call staticness disagrees with opcode");
         if (special && (declaration.access & ACC_PRIVATE) == 0)
             throw new Unsupported("non-private invokespecial dispatch is not verified");
-        emitCall(code, owner, method, insn.name, insn.desc, frame, failure, tracking, statik,
+        emitCall(code, owner, method, insn.name, insn.desc, frame, failure, references, statik,
             !statik && (declaration.access & ACC_PRIVATE) != 0);
     }
 
     private static void emitCall(StringBuilder code, ClassNode owner, MethodNode method, String name, String descriptor,
-                                 Frame<BasicValue> frame, Supplier<String> failure, boolean tracking, boolean statik, boolean nonvirtual) throws Unsupported {
-        emitCall(code, owner, method, name, descriptor, frame, failure, tracking, statik, nonvirtual, 0);
+                                 Frame<BasicValue> frame, Supplier<String> failure, ReferenceResult references,
+                                 boolean statik, boolean nonvirtual) throws Unsupported {
+        emitCall(code, owner, method, name, descriptor, frame, failure, references, statik, nonvirtual, 0);
     }
 
     private static void emitCall(StringBuilder code, ClassNode owner, MethodNode method, String name, String descriptor,
-                                 Frame<BasicValue> frame, Supplier<String> failure, boolean tracking, boolean statik, boolean nonvirtual,
-                                 int resultOffset) throws Unsupported {
+                                 Frame<BasicValue> frame, Supplier<String> failure, ReferenceResult references,
+                                 boolean statik, boolean nonvirtual, int resultOffset) throws Unsupported {
         Type returned = Type.getReturnType(descriptor);
         Type[] parameters = Type.getArgumentTypes(descriptor);
         int base = frame.getStackSize() - parameters.length - (statik ? 0 : 1);
@@ -856,7 +863,7 @@ public final class MethodCompiler {
         String call = "(*env)->" + api + "(env, " + receiver + (nonvirtual ? ", declaring" : "") + ", member, arguments)";
         String destination = stack(base + resultOffset) + "." + field(returned);
         if (isReferenceType(returned)) {
-            emitReferenceResult(code, destination, call, failure, tracking);
+            emitReferenceResult(code, destination, call, failure, references);
         } else {
             line(code, returned.getSort() == Type.VOID ? call + ";" : destination + " = " + call + ";");
             pending(code, failure);

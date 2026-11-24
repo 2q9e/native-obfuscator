@@ -111,6 +111,7 @@ final class ExceptionHandlers {
 
     Supplier<String> failure(int index, Supplier<String> uncaught) {
         Route route = sites.length == 0 ? null : sites[index];
+        // Direct exits share this supplier so the emitter can distinguish local recovery.
         if (route == null) return uncaught;
         return () -> {
             route.used = true;
