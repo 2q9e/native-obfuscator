@@ -2,10 +2,8 @@ package dev.nativeobfuscator.translate;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
@@ -30,15 +28,14 @@ final class ReferenceLocals {
         this.liveCapacity = liveCapacity;
     }
 
-    static ReferenceLocals plan(MethodNode method, Frame<BasicValue>[] frames, boolean producesReferences)
+    static ReferenceLocals plan(MethodNode method, Frame<BasicValue>[] frames, boolean producesReferences,
+                                Map<LabelNode, Integer> backEdges)
             throws MethodCompiler.Unsupported {
-        if (!producesReferences) return EMPTY;
-        var targets = backwardTargets(method);
-        if (targets.isEmpty()) return EMPTY;
+        if (!producesReferences || backEdges.isEmpty()) return EMPTY;
         var cleanup = new HashMap<LabelNode, List<Integer>>();
         int liveCapacity = 0;
         int cleanupSlots = 0;
-        for (LabelNode target : targets) {
+        for (LabelNode target : backEdges.keySet()) {
             Frame<BasicValue> frame = frames[method.instructions.indexOf(target)];
             if (frame == null) continue;
             var slots = new ArrayList<Integer>();
@@ -57,8 +54,8 @@ final class ReferenceLocals {
         return new ReferenceLocals(cleanup, liveCapacity);
     }
 
-    private static Set<LabelNode> backwardTargets(MethodNode method) {
-        var targets = new HashSet<LabelNode>();
+    static Map<LabelNode, Integer> backEdges(MethodNode method) {
+        var targets = new HashMap<LabelNode, Integer>();
         for (AbstractInsnNode instruction : method.instructions) {
             int index = method.instructions.indexOf(instruction);
             if (instruction instanceof JumpInsnNode jump) {
@@ -76,9 +73,9 @@ final class ReferenceLocals {
         return targets;
     }
 
-    private static void addBackward(MethodNode method, Set<LabelNode> targets, LabelNode target, int source) {
+    private static void addBackward(MethodNode method, Map<LabelNode, Integer> targets, LabelNode target, int source) {
         int index = method.instructions.indexOf(target);
-        if (index >= 0 && index <= source) targets.add(target);
+        if (index >= 0 && index <= source) targets.merge(target, source, Math::max);
     }
 
     boolean tracking() { return !cleanup.isEmpty(); }

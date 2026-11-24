@@ -32,6 +32,8 @@ The unsupported policy applies to unproven super dispatch, construction with eff
 
 External calls, external and volatile fields, and type checks execute their original JVM instruction in a private synthetic method in the caller class. The bridge remains visible in bytecode and adds a Java stack frame. JNI passes narrow primitive arguments as full stack integers to these bridges.
 
+Call sites in backward control-flow ranges can reuse a successful JNI method lookup during the same native invocation. Direct calls and bridge calls both use the invocation's live declaring-class reference. Each method reserves at most 32 local lookup slots. Class loading, Java calls and exception checks still run at their original call sites.
+
 A wrapper `valueOf` followed immediately by an erased instance call, a return cast, and an unbox can share one bridge. The JVM executes the four instructions in their original order. Labelled instruction boundaries keep the calls in separate bridges. Use the same compiler version for staging and verification because the verifier reconstructs the exact bridge bytecode.
 
 Exception tests compare exception classes and observable state, including side effects after a failed JNI operation. Bounds errors include the index and length. Helpful null-pointer and array-store messages and JVM stack frames can differ after conversion.

@@ -82,6 +82,25 @@ public final class GenerateChecks {
         method.maxLocals = 8;
         return method;
     }
+
+    private static void checkMethodLookupCache(ClassNode owner) throws Exception {
+        owner.methods.add(method("lookupTarget", "(I)I", new VarInsnNode(ILOAD, 0), new InsnNode(IRETURN)));
+        var call = new MethodInsnNode(INVOKESTATIC, owner.name, "lookupTarget", "(I)I", false);
+        var once = method("lookupOnce", "(I)I", new VarInsnNode(ILOAD, 0), call.clone(null), new InsnNode(IRETURN));
+        if (MethodCompiler.compile(owner, once, "once").contains("cached_method_"))
+            throw new AssertionError("Acyclic call should use a direct lookup");
+
+        var header = new LabelNode();
+        var loop = method("lookupLoop", "(I)I", header, new VarInsnNode(ILOAD, 0), call,
+            new VarInsnNode(ISTORE, 0), new IincInsnNode(0, -1), new VarInsnNode(ILOAD, 0),
+            new JumpInsnNode(IFGT, header), new VarInsnNode(ILOAD, 0), new InsnNode(IRETURN));
+        String compiled = MethodCompiler.compile(owner, loop, "loop");
+        int declaration = compiled.indexOf("jmethodID cached_method_2 = NULL;");
+        int reuse = compiled.indexOf("jmethodID member = cached_method_2;");
+        int successful = compiled.indexOf("cached_method_2 = member;");
+        if (declaration < 0 || reuse <= declaration || successful <= reuse)
+            throw new AssertionError("Expected invocation-local storage and reuse for a loop lookup");
+    }
     private static void exceptionFixtures(ClassWriter writer) {
         var order = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covCatchTableOrder", "(I)I", null, null);
         var start = new Label();
@@ -237,6 +256,7 @@ public final class GenerateChecks {
         rejectSuper(owner, method("wrongSuperTarget", "(LMalformed;)I", new VarInsnNode(ALOAD, 0),
             new MethodInsnNode(INVOKESPECIAL, "Unrelated", "score", "()I", false), new InsnNode(IRETURN)),
             "invokespecial target is not a proven superclass or direct superinterface");
+        checkMethodLookupCache(owner);
         var writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         writer.visit(V21, ACC_PUBLIC | ACC_FINAL | ACC_SUPER, "RawOps", null, "RawSpecialMiddle",
             new String[]{"java/lang/Cloneable"});
@@ -431,5 +451,6 @@ public final class GenerateChecks {
         conflicting.visitEnd();
         Files.write(Path.of(args[0]).resolveSibling("conflicting-dispatch.class"), conflicting.toByteArray());
         System.out.println("Malformed operand policies: 13 passed; raw narrowing and special dispatch fixtures generated");
+        System.out.println("Invocation-local method lookup cache generation: passed");
     }
 }
