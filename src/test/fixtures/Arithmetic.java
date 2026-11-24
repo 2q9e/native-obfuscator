@@ -140,7 +140,7 @@ public final class Arithmetic {
         check(calcDoubleToLong(Double.NaN) == 0L, "double NaN conversion");
         check(Float.floatToRawIntBits(calcFloat(0.0f, -0.0f, 5)) == Integer.MIN_VALUE, "float signed zero");
         check(Double.doubleToRawLongBits(calcDouble(-0.0d, 5.0d, 4)) == Long.MIN_VALUE, "double signed zero");
-        check(calcLambda(42) == (42 ^ 67), "lambda fallback");
+        check(calcLambda(42) == (42 ^ 67), "lambda capture and invocation");
         int[] array = {5, -7, 9};
         check(calcArray(array, 1) == -7, "array fallback");
         expectException(IllegalStateException.class, "fixture failure", Arithmetic::calcThrow);

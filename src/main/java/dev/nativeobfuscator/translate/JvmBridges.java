@@ -11,9 +11,11 @@ import static org.objectweb.asm.Opcodes.*;
 
 /** Keeps symbolic JVM linkage in the original caller class. */
 final class JvmBridges {
-    private static final String CONCAT_BOOTSTRAP_PARAMETERS =
+    private static final String CALL_SITE_BOOTSTRAP_PARAMETERS =
         "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;";
     private static final String CALL_SITE = ")Ljava/lang/invoke/CallSite;";
+    private static final String LAMBDA_BOOTSTRAP = CALL_SITE_BOOTSTRAP_PARAMETERS
+        + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;" + CALL_SITE;
 
     private final ClassNode owner;
     private final MethodNode caller;
@@ -39,7 +41,7 @@ final class JvmBridges {
                 || isVolatile(declaredField(owner, field))))
             || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF
             || instruction.getOpcode() == NEW || instruction.getOpcode() == ATHROW || arrayAllocation(instruction.getOpcode())
-            || (instruction instanceof InvokeDynamicInsnNode dynamic && stringConcat(dynamic));
+            || (instruction instanceof InvokeDynamicInsnNode dynamic && supportsDynamic(dynamic));
     }
 
     static FieldNode declaredField(ClassNode owner, FieldInsnNode field) {
@@ -82,15 +84,22 @@ final class JvmBridges {
         return create(instructionIndex, null, Type.VOID_TYPE, arguments, new InsnNode(ATHROW));
     }
 
-    static boolean stringConcat(InvokeDynamicInsnNode dynamic) {
+    static boolean supportsDynamic(InvokeDynamicInsnNode dynamic) {
         Handle bootstrap = dynamic.bsm;
-        if (bootstrap.getTag() != H_INVOKESTATIC || bootstrap.isInterface()
-            || !bootstrap.getOwner().equals("java/lang/invoke/StringConcatFactory")
-            || !Type.getReturnType(dynamic.desc).equals(Type.getType(String.class))) return false;
+        if (bootstrap.getTag() != H_INVOKESTATIC || bootstrap.isInterface()) return false;
+        return switch (bootstrap.getOwner()) {
+            case "java/lang/invoke/StringConcatFactory" -> stringConcat(dynamic, bootstrap);
+            case "java/lang/invoke/LambdaMetafactory" -> lambdaFactory(dynamic, bootstrap);
+            default -> false;
+        };
+    }
+
+    private static boolean stringConcat(InvokeDynamicInsnNode dynamic, Handle bootstrap) {
+        if (!Type.getReturnType(dynamic.desc).equals(Type.getType(String.class))) return false;
         if (bootstrap.getName().equals("makeConcat"))
-            return bootstrap.getDesc().equals(CONCAT_BOOTSTRAP_PARAMETERS + CALL_SITE) && dynamic.bsmArgs.length == 0;
+            return bootstrap.getDesc().equals(CALL_SITE_BOOTSTRAP_PARAMETERS + CALL_SITE) && dynamic.bsmArgs.length == 0;
         if (!bootstrap.getName().equals("makeConcatWithConstants")
-            || !bootstrap.getDesc().equals(CONCAT_BOOTSTRAP_PARAMETERS + "Ljava/lang/String;[Ljava/lang/Object;" + CALL_SITE)
+            || !bootstrap.getDesc().equals(CALL_SITE_BOOTSTRAP_PARAMETERS + "Ljava/lang/String;[Ljava/lang/Object;" + CALL_SITE)
             || dynamic.bsmArgs.length == 0 || !(dynamic.bsmArgs[0] instanceof String)) return false;
         for (Object constant : dynamic.bsmArgs) {
             if (!(constant instanceof String || constant instanceof Integer || constant instanceof Long
@@ -99,7 +108,17 @@ final class JvmBridges {
         return true;
     }
 
-    MethodNode concat(InvokeDynamicInsnNode dynamic, int instructionIndex) {
+    private static boolean lambdaFactory(InvokeDynamicInsnNode dynamic, Handle bootstrap) {
+        return bootstrap.getName().equals("metafactory") && bootstrap.getDesc().equals(LAMBDA_BOOTSTRAP)
+            && Type.getReturnType(dynamic.desc).getSort() == Type.OBJECT && dynamic.bsmArgs.length == 3
+            && dynamic.bsmArgs[0] instanceof Type interfaceMethod && interfaceMethod.getSort() == Type.METHOD
+            && dynamic.bsmArgs[1] instanceof Handle implementation
+            && implementation.getTag() >= H_INVOKEVIRTUAL && implementation.getTag() <= H_INVOKEINTERFACE
+            && dynamic.bsmArgs[2] instanceof Type instantiated && instantiated.getSort() == Type.METHOD;
+    }
+
+    MethodNode dynamic(InvokeDynamicInsnNode dynamic, int instructionIndex) {
+        // Keep one instruction per original site and let the JVM link it using this caller class.
         return create(instructionIndex, null, Type.getReturnType(dynamic.desc),
             Type.getArgumentTypes(dynamic.desc), dynamic.clone(null));
     }

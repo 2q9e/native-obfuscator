@@ -2,6 +2,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.function.IntUnaryOperator;
+import java.util.function.LongSupplier;
+import java.util.function.LongUnaryOperator;
 
 /** Differential fixture: helper targets remain Java unless explicitly selected. */
 public class Coverage {
@@ -248,6 +251,38 @@ public class Coverage {
     public static String covConcatLoop(String name, int count) {
         for (int i = 0; i < count; i++) name = name + i;
         return name;
+    }
+    public static LongUnaryOperator covLambdaCapture(Object token, long offset, int scale) {
+        return value -> token == null ? value - offset : (value + offset) * scale;
+    }
+    private static int lambdaTarget(int value) { return value ^ 53; }
+    public static IntUnaryOperator covLambdaSite(boolean first) {
+        if (first) return Coverage::lambdaTarget;
+        return Coverage::lambdaTarget;
+    }
+    private interface AllocationFactory {
+        AllocationPeer create(long amount, String label);
+    }
+    private static AllocationPeer covLambdaConstructor(long amount, String label) {
+        AllocationFactory factory = AllocationPeer::new;
+        return factory.create(amount, label);
+    }
+    public static LongSupplier covBoundLambda(String value) {
+        return value::length;
+    }
+    public static long covLambdaLoop(int repeats, long seed) {
+        LongUnaryOperator prior = value -> value;
+        long total = 0;
+        for (int i = 0; i < repeats; i++) {
+            int capture = i;
+            LongUnaryOperator current = value -> value + capture;
+            total += prior.applyAsLong(seed);
+            prior = current;
+        }
+        return total + prior.applyAsLong(seed);
+    }
+    public static IntUnaryOperator rejectSerializableLambda() {
+        return (IntUnaryOperator & java.io.Serializable) Coverage::lambdaTarget;
     }
     public static int covThrow(Throwable failure, boolean fail) throws Throwable {
         if (fail) throw failure;
@@ -530,6 +565,20 @@ public class Coverage {
         }, 8));
         show(() -> RawOps.covPlainConcat("literal", -4));
         show(() -> covConcatLoop("loop:", 128));
+        show(() -> covLambdaCapture(token, Long.MAX_VALUE, -3).applyAsLong(7));
+        show(() -> covLambdaCapture(null, Long.MIN_VALUE, 5).applyAsLong(19));
+        show(() -> covLambdaSite(true) == covLambdaSite(true));
+        show(() -> covLambdaSite(true) == covLambdaSite(false));
+        show(() -> covLambdaSite(false).applyAsInt(97));
+        show(() -> covLambdaConstructor(41L, sameString).label == sameString);
+        show(() -> covLambdaConstructor(0L, sameString));
+        show(() -> covBoundLambda(sameString).getAsLong());
+        show(() -> covBoundLambda(null));
+        show(() -> covLambdaLoop(8192, Long.MIN_VALUE));
+        show(() -> RawOps.covFailedLambda());
+        show(() -> RawOps.covFailedLambda());
+        show(() -> rejectSerializableLambda() instanceof java.io.Serializable);
+        show(() -> rejectSerializableLambda().applyAsInt(127));
         Throwable failure = new IllegalStateException("identity");
         show(() -> covThrow(failure, false));
         show(() -> covThrow(failure, true));

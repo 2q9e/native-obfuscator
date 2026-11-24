@@ -56,11 +56,13 @@ native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declaratio
 assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d["result"] == "retained"}
-assert set(retained) == {"rejectAllocation", "rejectRawCall", "rejectDirectHierarchy", "rejectUnknownHierarchy"}, retained
+assert set(retained) == {"rejectAllocation", "rejectRawCall", "rejectDirectHierarchy", "rejectUnknownHierarchy",
+                         "rejectSerializableLambda"}, retained
 assert "bytecode verification failed" in retained["rejectDirectHierarchy"]
 assert "bytecode verification failed" in retained["rejectUnknownHierarchy"]
 assert "object allocation" in retained["rejectAllocation"]
 assert "not proven to fit JNI descriptor B" in retained["rejectRawCall"]
+assert "dynamic call-site linkage" in retained["rejectSerializableLambda"]
 verified = run(tool + ["verify", "--staged", protected] + selection + flags)
 (work / "verify.jsonl").write_text(verified.stdout)
 verification = json.loads(verified.stdout.splitlines()[-1])

@@ -5,6 +5,7 @@ import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.*;
 import static org.objectweb.asm.Opcodes.*;
 
@@ -305,6 +306,25 @@ public final class GenerateChecks {
         plainConcat.visitInsn(ARETURN);
         plainConcat.visitMaxs(0, 0);
         plainConcat.visitEnd();
+        var target = writer.visitMethod(ACC_PRIVATE | ACC_STATIC, "lambdaTarget", "(I)I", null, null);
+        target.visitCode();
+        target.visitVarInsn(ILOAD, 0);
+        target.visitInsn(IRETURN);
+        target.visitMaxs(0, 0);
+        target.visitEnd();
+        String factory = "()Ljava/util/function/IntUnaryOperator;";
+        var failedLambda = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covFailedLambda", factory, null, null);
+        failedLambda.visitCode();
+        failedLambda.visitInvokeDynamicInsn("applyAsInt", factory, new Handle(H_INVOKESTATIC,
+            "java/lang/invoke/LambdaMetafactory", "metafactory",
+            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;"
+                + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)"
+                + "Ljava/lang/invoke/CallSite;", false),
+            Type.getMethodType("(I)I"), new Handle(H_INVOKESTATIC, "RawOps", "lambdaTarget", "(I)I", false),
+            Type.getMethodType("(II)I"));
+        failedLambda.visitInsn(ARETURN);
+        failedLambda.visitMaxs(0, 0);
+        failedLambda.visitEnd();
         exceptionFixtures(writer);
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());
