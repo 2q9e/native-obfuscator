@@ -190,6 +190,33 @@ def score_literals(observations, truth):
     }
 
 
+def arm_move_wide(raw):
+    # Decode the instruction word because objdump can print MOVZ and MOVN as MOV.
+    parts = raw.split()
+    word = int(parts[0], 16) if len(parts) == 1 else int.from_bytes(bytes.fromhex(raw), "little")
+    opcode = (word >> 29) & 3
+    register = word & 31
+    if word & 0x9fc00000 != 0x12800000 or opcode == 1 or register == 31:
+        return None
+    shift = ((word >> 21) & 1) * 16
+    value = ((word >> 5) & 0xffff) << shift
+    if opcode == 0:  # MOVN initializes with the complemented immediate.
+        value ^= 0xffffffff
+    patch_mask = (0xffff << shift) if opcode == 3 else 0
+    return register, patch_mask, value
+
+
+def move_wide_literals(moves, entries):
+    observations = Counter()
+    for address, (register, patch_mask, value) in moves.items():
+        if not patch_mask or address in entries:
+            continue
+        initial = moves.get(address - 4)
+        if initial is not None and initial[:2] == (register, 0):
+            observations[(initial[2] & ~patch_mask) | value] += 1
+    return observations
+
+
 def bytecode_metrics(disassembly, truth):
     opcodes = re.findall(r"^\s*\d+:\s+(\w+)", disassembly, re.M)
     observations = Counter(int(value) & 0xffffffff
@@ -228,6 +255,8 @@ def linked_metrics(disassembly, target, truth):
     require(sections, f"No executable sections for {target}")
     instructions = defaultdict(dict)
     labels = defaultdict(set)
+    arm = target.startswith("aarch64-")
+    wide_moves = defaultdict(dict)
     observations = Counter()
     active = None
     for line in lines:
@@ -243,9 +272,12 @@ def linked_metrics(disassembly, target, truth):
                 continue
             mnemonic = match[3].lower()
             operands = re.split(r"\s+(?:#(?:\s|$)|//)", match[4], maxsplit=1)[0]
-            kind = flow(mnemonic, target.startswith("aarch64-"))
+            kind = flow(mnemonic, arm)
             dest = BRANCH_TARGET.search(operands)
             instructions[active][address] = (size, kind, int(dest[1], 16) if dest else None)
+            if arm and size == 4 and mnemonic in {"mov", "movn", "movz", "movk"}:
+                if (move := arm_move_wide(match[2])) is not None:
+                    wide_moves[active][address] = move
             for operand in IMMEDIATE.findall(operands):
                 value = int(operand, 16 if "0x" in operand.lower() else 10)
                 if -(1 << 31) <= value < 1 << 32:
@@ -266,13 +298,21 @@ def linked_metrics(disassembly, target, truth):
             if kind in {"branch", "call"} and destination in helper_entries:
                 helper_transfers.append({"sourceSection": source, "targetSection": helper_entries[destination],
                                          "edgeOffset": address - entry, "kind": kind})
-    return {
+    result = {
         "wholeLibraryExecutableTotals": dict(totals),
         "executableSections": metrics,
         "decodedHelperTransfers": helper_transfers,
         "symbols": symbol_metrics(lines, sections),
         "integerLiteralRecall": score_literals(observations, truth),
     }
+    if arm:
+        destinations = {dest for section in instructions.values() for _, kind, dest in section.values()
+                        if kind in {"conditional", "branch", "call"} and dest is not None}
+        reconstructed = Counter()
+        for name, moves in wide_moves.items():
+            reconstructed.update(move_wide_literals(moves, destinations | labels[name]))
+        result["moveWideLiteralRecall"] = score_literals(reconstructed, truth)
+    return result
 
 
 def jar_metrics(jar, directory, targets, objdump, truth, env):
@@ -605,7 +645,7 @@ def main():
             "steadyState": "Median of per-fork medians after warmup. The per_call and batched_32 kernels run the same recurrence with one protected call per update or per 32 updates. JIT and native optimization can also affect the difference.",
             "nativeCode": "Linear disassembly of executable sections includes registration, toolchain code, and padding. Block-leader estimates count section entries, visible labels, local branch targets, and decoded successors after branches and returns. Decoded helper transfers match section entries directly, with reachability checked by the protection CLI.",
             "utilityDetection": "Counts executable .nou sections visible to llvm-objdump. These sections make the utility locations identifiable in the current artifact format.",
-            "literalRecall": "Counts exact 32-bit fixture literal values in javap ldc entries or native disassembly immediate operands. This reports presence anywhere in the scanned code and does not reconstruct constants, attribute values to functions, or measure decompilation effort.",
+            "literalRecall": "Counts exact 32-bit fixture literals in javap ldc entries or native disassembly immediate operands. On ARM64, moveWideLiteralRecall separately counts values reconstructed from adjacent 32-bit MOVZ or MOVN followed by MOVK to the same register, with no known entry between them. These metrics report presence anywhere in the scanned code.",
         },
         "cases": cases,
     }
