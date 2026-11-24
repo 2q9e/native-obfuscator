@@ -325,6 +325,29 @@ public final class GenerateChecks {
         failedLambda.visitInsn(ARETURN);
         failedLambda.visitMaxs(0, 0);
         failedLambda.visitEnd();
+        var boxedBoundary = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covBoxedBoundary",
+            "(Ljava/util/function/Function;I)I", null, null);
+        var castStart = new Label();
+        var castEnd = new Label();
+        var castFailure = new Label();
+        boxedBoundary.visitCode();
+        boxedBoundary.visitTryCatchBlock(castStart, castEnd, castFailure, "java/lang/ClassCastException");
+        boxedBoundary.visitVarInsn(ALOAD, 0);
+        boxedBoundary.visitVarInsn(ILOAD, 1);
+        boxedBoundary.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;", false);
+        boxedBoundary.visitMethodInsn(INVOKEINTERFACE, "java/util/function/Function", "apply",
+            "(Ljava/lang/Object;)Ljava/lang/Object;", true);
+        boxedBoundary.visitLabel(castStart);
+        boxedBoundary.visitTypeInsn(CHECKCAST, "java/lang/Number");
+        boxedBoundary.visitLabel(castEnd);
+        boxedBoundary.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Number", "intValue", "()I", false);
+        boxedBoundary.visitInsn(IRETURN);
+        boxedBoundary.visitLabel(castFailure);
+        boxedBoundary.visitInsn(POP);
+        boxedBoundary.visitIntInsn(BIPUSH, -93);
+        boxedBoundary.visitInsn(IRETURN);
+        boxedBoundary.visitMaxs(0, 0);
+        boxedBoundary.visitEnd();
         exceptionFixtures(writer);
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());

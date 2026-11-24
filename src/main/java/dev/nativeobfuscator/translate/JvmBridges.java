@@ -1,7 +1,9 @@
 package dev.nativeobfuscator.translate;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.*;
@@ -57,6 +59,56 @@ final class JvmBridges {
     }
 
     List<MethodNode> methods() { return methods; }
+
+    record BoxedCallback(MethodInsnNode box, MethodInsnNode call, TypeInsnNode cast, MethodInsnNode unbox) {}
+
+    Map<AbstractInsnNode, BoxedCallback> boxedCallbacks() {
+        var callbacks = new HashMap<AbstractInsnNode, BoxedCallback>();
+        for (AbstractInsnNode instruction : caller.instructions) {
+            var callback = boxedCallback(instruction);
+            if (callback != null) callbacks.put(instruction, callback);
+        }
+        return callbacks;
+    }
+
+    private BoxedCallback boxedCallback(AbstractInsnNode instruction) {
+        if (!(instruction instanceof MethodInsnNode box) || box.getOpcode() != INVOKESTATIC || box.itf
+            || !box.name.equals("valueOf") || Type.getArgumentCount(box.desc) != 1
+            || !box.owner.equals(wrapper(Type.getArgumentTypes(box.desc)[0]))
+            || !Type.getReturnType(box.desc).equals(Type.getObjectType(box.owner))) return null;
+        // Match adjacent instructions only. A label can mark a handler boundary or an entry edge.
+        if (!(box.getNext() instanceof MethodInsnNode call) || call.getOpcode() == INVOKESTATIC
+            || !externalCall(owner, call) || !call.desc.equals("(Ljava/lang/Object;)Ljava/lang/Object;")
+            || !(call.getNext() instanceof TypeInsnNode cast) || cast.getOpcode() != CHECKCAST
+            || !(cast.getNext() instanceof MethodInsnNode unbox) || unbox.getOpcode() != INVOKEVIRTUAL || unbox.itf
+            || !unbox.owner.equals(cast.desc) || Type.getArgumentCount(unbox.desc) != 0) return null;
+        Type result = Type.getReturnType(unbox.desc);
+        String wrapper = wrapper(result);
+        if (wrapper == null || !unbox.name.equals(result.getClassName() + "Value")) return null;
+        boolean number = unbox.owner.equals("java/lang/Number")
+            && result.getSort() != Type.BOOLEAN && result.getSort() != Type.CHAR;
+        return number || unbox.owner.equals(wrapper) ? new BoxedCallback(box, call, cast, unbox) : null;
+    }
+
+    private static String wrapper(Type primitive) {
+        return switch (primitive.getSort()) {
+            case Type.BOOLEAN -> "java/lang/Boolean";
+            case Type.BYTE -> "java/lang/Byte";
+            case Type.CHAR -> "java/lang/Character";
+            case Type.SHORT -> "java/lang/Short";
+            case Type.INT -> "java/lang/Integer";
+            case Type.LONG -> "java/lang/Long";
+            case Type.FLOAT -> "java/lang/Float";
+            case Type.DOUBLE -> "java/lang/Double";
+            default -> null;
+        };
+    }
+
+    MethodNode boxedCallback(BoxedCallback callback, int instructionIndex, Type receiver) {
+        return create(instructionIndex, receiver, Type.getReturnType(callback.unbox.desc),
+            Type.getArgumentTypes(callback.box.desc), callback.box.clone(null), callback.call.clone(null),
+            callback.cast.clone(null), callback.unbox.clone(null));
+    }
 
     MethodNode call(MethodInsnNode call, int instructionIndex, Type receiver, Type[] parameters) {
         var operation = new MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf);

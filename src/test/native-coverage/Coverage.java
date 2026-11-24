@@ -2,6 +2,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
@@ -280,6 +281,21 @@ public class Coverage {
             prior = current;
         }
         return total + prior.applyAsLong(seed);
+    }
+    public static long covBoxedWide(Function<Object, Object> callback, long offset, long input) {
+        return offset + ((Number) callback.apply(Long.valueOf(input))).longValue();
+    }
+    public static char covBoxedChar(Function<Object, Object> callback, char input) {
+        return ((Character) callback.apply(Character.valueOf(input))).charValue();
+    }
+    public static int covBoxedCatch(Function<Object, Object> callback, int input) {
+        try {
+            return ((Number) callback.apply(Integer.valueOf(input))).intValue();
+        } catch (ClassCastException wrongType) {
+            return -31;
+        } catch (NullPointerException missing) {
+            return -37;
+        }
     }
     public static IntUnaryOperator rejectSerializableLambda() {
         return (IntUnaryOperator & java.io.Serializable) Coverage::lambdaTarget;
@@ -575,6 +591,14 @@ public class Coverage {
         show(() -> covBoundLambda(sameString).getAsLong());
         show(() -> covBoundLambda(null));
         show(() -> covLambdaLoop(8192, Long.MIN_VALUE));
+        show(() -> covBoxedWide(value -> ((Long) value) + 3, Long.MAX_VALUE, 81));
+        show(() -> (int) covBoxedChar(value -> value, '\ufffe'));
+        show(() -> covBoxedCatch(value -> ((Integer) value) + 1, 87));
+        show(() -> covBoxedCatch(value -> sameString, 99));
+        show(() -> covBoxedCatch(value -> null, 99));
+        show(() -> covBoxedCatch(null, 99));
+        show(() -> RawOps.covBoxedBoundary(value -> sameString, 91));
+        show(() -> RawOps.covBoxedBoundary(value -> { throw new ClassCastException(); }, 91));
         show(() -> RawOps.covFailedLambda());
         show(() -> RawOps.covFailedLambda());
         show(() -> rejectSerializableLambda() instanceof java.io.Serializable);

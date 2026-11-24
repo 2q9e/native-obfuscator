@@ -42,10 +42,12 @@ selection=(
 "$java_home/bin/java" -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED \
     -cp "$work/protected.jar:$stdlib:$reflect" "$main" protected > "$work/protected.txt"
 cmp "$work/original.txt" "$work/protected.txt"
+"$java_home/bin/javap" -p -c -classpath "$work/protected.jar" fixture.kotlin.KotlinFixture > "$work/bytecode.txt"
 
 python3 - "$work" <<'PY'
 import json
 import pathlib
+import re
 import sys
 import zipfile
 
@@ -73,6 +75,13 @@ for report, supported in (("analysis", "eligible"), ("protection", "selected")):
     assert reasons[reference] == "", decisions
     assert reasons[lambda_body] == "", decisions
 metadata = "META-INF/native_obfuscator_fixture.kotlin_module"
+bytecode = (work / "bytecode.txt").read_text(encoding="utf-8")
+assert re.search(
+    r"invokestatic[^\n]*java/lang/Integer\.valueOf[^\n]*\n"
+    r"\s*\d+: invokeinterface[^\n]*kotlin/jvm/functions/Function1\.invoke[^\n]*\n"
+    r"\s*\d+: checkcast[^\n]*java/lang/Number[^\n]*\n"
+    r"\s*\d+: invokevirtual[^\n]*java/lang/Number\.intValue", bytecode
+), bytecode
 with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / "protected.jar") as protected:
     assert original.read(metadata) == protected.read(metadata)
 PY

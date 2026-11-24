@@ -3,6 +3,7 @@ package dev.nativeobfuscator.translate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.objectweb.asm.Type;
@@ -89,7 +90,9 @@ public final class MethodCompiler {
             throw new Unsupported("bytecode verification failed: " + e.getMessage());
         }
 
-        int baseCapacity = referenceCapacity(method);
+        var callbacks = bridges == null ? Map.<AbstractInsnNode, JvmBridges.BoxedCallback>of() : bridges.boxedCallbacks();
+        // A boxed value and the callback result stay on the JVM stack in a combined bridge.
+        int baseCapacity = referenceCapacity(method) - 2 * callbacks.size();
         var locals = ReferenceLocals.plan(method, frames, baseCapacity > 2 || handlers.retainsThrowable());
         boolean tracking = locals.tracking();
         var code = new StringBuilder();
@@ -146,7 +149,14 @@ public final class MethodCompiler {
                 var references = ReferenceResult.UNTRACKED;
                 if (tracking) references = failure == uncaught ? ReferenceResult.OWNED : ReferenceResult.FRAMED;
                 try {
-                    if (insn.getOpcode() == NEW && bridges != null) {
+                    var callback = callbacks.get(insn);
+                    if (callback != null) {
+                        Frame<BasicValue> frame = frames[i];
+                        Type receiver = frame.getStack(frame.getStackSize() - 2).getType();
+                        MethodNode bridge = bridges.boxedCallback(callback, i, receiver);
+                        emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false);
+                        i = method.instructions.indexOf(callback.unbox());
+                    } else if (insn.getOpcode() == NEW && bridges != null) {
                         var allocation = (TypeInsnNode) insn;
                         MethodInsnNode constructor = JvmBridges.constructor(allocation);
                         int end = method.instructions.indexOf(constructor);
