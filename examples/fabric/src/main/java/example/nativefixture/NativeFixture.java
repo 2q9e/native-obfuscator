@@ -15,12 +15,15 @@ public final class NativeFixture implements ModInitializer {
         Identifier alternate = Identifier.of("native_fixture", "aaa_path");
         int priority = Kernel.identifierPriority(identifier, alternate, 41);
         int fallback = Kernel.identifierPriorityOrDefault(null, alternate, 41, -1);
-        int registry = Kernel.rankRegistryCandidates(
-            new Identifier[]{identifier, null, identifier, alternate, identifier, null}, 41);
+        var candidates = new Identifier[]{identifier, null, identifier, alternate, identifier, null};
+        int registry = Kernel.rankRegistryCandidates(candidates, 41);
+        var view = new RegistryView(candidates);
         var scorer = Kernel.registryScorer(41, identifier);
         int alternateScore = scorer.applyAsInt(alternate);
         if (result != 0x3B71_AB69 || score != 28_443_952 || priority != 1030 || fallback != -1
             || registry != 1_115_680 || Kernel.rankRegistryCandidates(new Identifier[0], 41) != 41
+            || view.rankPresent(Identifier.of("native_fixture", "widened_path"), 41) != registry
+            || view.rankPresent(Identifier.of("native_fixture", "missing"), 41) != 41
             || scorer.applyAsInt(identifier) != score || alternateScore != -28_507_579 || scorer.applyAsInt(null) != -1
             || Kernel.identifierPriorityOrDefault(identifier, alternate, 41, -1) != priority
             || priority != Kernel.identifierPriority(alternate, identifier, 41)

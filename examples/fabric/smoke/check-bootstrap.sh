@@ -25,6 +25,11 @@ if ! grep -F 'static native int mix(int, int);' <<< "$declarations" > /dev/null 
     printf 'Expected native mix, score, fallback, registry ranking, and callback methods in the remapped Kernel class.\n' >&2
     exit 1
 fi
+registry_declarations=$("$fixture_jdk/bin/javap" -p -classpath "$fixture_jar" example.nativefixture.RegistryView)
+if ! grep -F 'native int rankPresent(net.minecraft.class_2960, int);' <<< "$registry_declarations" > /dev/null; then
+    printf 'Expected native registry ranking through the superclass lookup.\n' >&2
+    exit 1
+fi
 if [ "${NATIVE_FIXTURE_EXPECT_HIERARCHY:-0}" = 1 ] &&
     ! grep -F 'static native int identifierPriority(net.minecraft.class_2960, net.minecraft.class_2960, int);' \
         <<< "$declarations" > /dev/null; then
