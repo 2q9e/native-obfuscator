@@ -40,6 +40,7 @@ protected = work / "protected.jar"
 run([executable("jar"), "--create", "--file", original, "--main-class", "Coverage", "-C", classes, "."])
 tool = [executable("java"), "-cp", args.distribution.resolve() / "lib" / "*", "dev.nativeobfuscator.Main"]
 selection = ["--input", original, "--include", "Coverage#cov*", "--include", "RawOps#cov*",
+             "--include", "Coverage$SuperDispatch#cov*",
              "--include", "Coverage#reject*", "--include", "RawOps#reject*", "--unsupported", "retain", "--padding", "off"]
 report = run(tool + ["protect", "--output", protected] + selection + flags)
 (work / "report.jsonl").write_text(report.stdout)
@@ -47,13 +48,14 @@ report = run(tool + ["protect", "--output", protected] + selection + flags)
 decisions = [json.loads(line) for line in report.stdout.splitlines()]
 raw_methods = {"covRawZ", "covRawB", "covRawC", "covRawS", "covSpecial", "covReferenceCapacity",
                "covLinkageRaw", "covLinkageMissing", "covExternalNull", "covExternalProtected", "covExternalMissingField",
-               "covCastMissing", "covAllocateMissingArray", "covPlainConcat"}
+               "covCastMissing", "covAllocateMissingArray", "covPlainConcat", "covAncestorSuper", "covNullSuper",
+               "covMissingSuper"}
 expected = raw_methods | set(re.findall(r"\b(cov\w+)\(", (root / "Coverage.java").read_text()))
 utilities = {d["method"] for d in decisions if d.get("result") == "analysis-utility"}
 selected = {d["method"].split("#")[1].split("(")[0] for d in decisions
             if d.get("result") == "selected" and d["method"] not in utilities}
 assert selected == expected, {"unexpected": sorted(selected - expected), "missing": sorted(expected - selected)}
-declarations = run([executable("javap"), "-p", "-classpath", protected, "Coverage", "RawOps"]).stdout
+declarations = run([executable("javap"), "-p", "-classpath", protected, "Coverage", "RawOps", "Coverage$SuperDispatch"]).stdout
 native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declarations))
 assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
@@ -132,7 +134,7 @@ protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--en
 assert protected_result.stdout == original_result.stdout, "Differential mismatch; compare original.txt and protected.txt"
 assert "WARNING in native method" not in protected_result.stderr, protected_result.stderr
 assert "WARNING in native method" not in protected_result.stdout, protected_result.stdout
-summary = {"malformedOperandChecks": 11, "randomizedNativeCalls": 20000, "selectedMethods": len(selected), "retainedMethods": retained, "outcomesCompared": len(original_result.stdout.splitlines()), "result": "pass", "compilerArguments": flags}
+summary = {"malformedOperandChecks": 13, "randomizedNativeCalls": 20000, "selectedMethods": len(selected), "retainedMethods": retained, "outcomesCompared": len(original_result.stdout.splitlines()), "result": "pass", "compilerArguments": flags}
 (work / "result.json").write_text(json.dumps(summary, indent=2) + "\n")
 print(json.dumps(summary, indent=2))
 if managed:

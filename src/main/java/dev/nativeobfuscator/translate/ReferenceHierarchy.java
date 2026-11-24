@@ -56,6 +56,20 @@ public final class ReferenceHierarchy {
         return cached != null ? cached : search(query);
     }
 
+    boolean provesSuperclass(String direct, String expected) {
+        if (direct == null) return false;
+        if (expected.equals("java/lang/Object")) return true;
+        // Header indexing records interfaces first and the superclass last.
+        var visited = new HashSet<String>();
+        for (String current = direct; visited.add(current); ) {
+            if (current.equals(expected)) return true;
+            var supers = parents.get(current);
+            if (supers == null || supers.isEmpty()) return false;
+            current = supers.getLast();
+        }
+        return false;
+    }
+
     private boolean search(Assignment query) {
         var visited = new HashSet<String>();
         var pending = new ArrayDeque<String>();

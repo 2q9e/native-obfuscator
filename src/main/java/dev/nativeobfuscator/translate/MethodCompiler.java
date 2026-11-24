@@ -445,7 +445,16 @@ public final class MethodCompiler {
             Type[] parameters = Type.getArgumentTypes(call.desc);
             int firstArgument = call.getOpcode() == INVOKESTATIC ? 0 : 1;
             ArrayList<BasicValue> checked = null;
-            for (int i = 0; i < values.size(); i++) {
+            int start = 0;
+            if (call.getOpcode() == INVOKESPECIAL) {
+                validateSuperCall(call, values.getFirst());
+                // BasicVerifier expects the named owner. The JVM requires the caller type,
+                // which was checked above and will be used in the bridge descriptor.
+                checked = new ArrayList<>(values);
+                checked.set(0, newValue(Type.getObjectType(call.owner)));
+                start = 1;
+            }
+            for (int i = start; i < values.size(); i++) {
                 Type expected = i < firstArgument ? Type.getObjectType(call.owner) : parameters[i - firstArgument];
                 BasicValue value = values.get(i);
                 if (!value.isReference() || !isReferenceType(expected)
@@ -456,6 +465,17 @@ public final class MethodCompiler {
                 checked.set(i, newValue(expected));
             }
             return super.naryOperation(instruction, checked == null ? values : checked);
+        }
+
+        private void validateSuperCall(MethodInsnNode call, BasicValue receiver) throws AnalyzerException {
+            boolean validTarget = call.itf ? owner.interfaces.contains(call.owner)
+                : hierarchy.provesSuperclass(owner.superName, call.owner);
+            if (!validTarget)
+                throw new AnalyzerException(call, "invokespecial target is not a proven superclass or direct superinterface");
+            Type caller = Type.getObjectType(owner.name);
+            if (!receiver.isReference()
+                || (!referenceSubtype(receiver.getType(), caller) && !hierarchy.proves(receiver.getType(), caller)))
+                throw new AnalyzerException(call, "invokespecial receiver is not assignable to the caller class");
         }
         @Override public BasicValue newValue(Type type) {
             if (type != null && (type.getSort() == Type.ARRAY || type.getSort() == Type.OBJECT || isNarrow(type)))
@@ -812,6 +832,7 @@ public final class MethodCompiler {
             Type[] parameters = Type.getArgumentTypes(insn.desc);
             int firstArgument = frame.getStackSize() - parameters.length;
             Type receiver = insn.getOpcode() == INVOKESTATIC ? null : frame.getStack(firstArgument - 1).getType();
+            if (insn.getOpcode() == INVOKESPECIAL) receiver = Type.getObjectType(owner.name);
             for (int i = 0; i < parameters.length; i++) {
                 Type expected = parameters[i];
                 Type actual = frame.getStack(firstArgument + i).getType();

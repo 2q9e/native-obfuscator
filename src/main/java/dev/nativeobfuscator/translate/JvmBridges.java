@@ -34,7 +34,7 @@ final class JvmBridges {
     static boolean externalCall(ClassNode owner, MethodInsnNode call) {
         if (call.owner.equals(owner.name) || call.name.startsWith("<")) return false;
         return switch (call.getOpcode()) {
-            case INVOKESTATIC, INVOKEVIRTUAL, INVOKEINTERFACE -> true;
+            case INVOKESTATIC, INVOKEVIRTUAL, INVOKEINTERFACE, INVOKESPECIAL -> true;
             default -> false;
         };
     }
@@ -79,7 +79,8 @@ final class JvmBridges {
             || !box.owner.equals(wrapper(Type.getArgumentTypes(box.desc)[0]))
             || !Type.getReturnType(box.desc).equals(Type.getObjectType(box.owner))) return null;
         // Match adjacent instructions only. A label can mark a handler boundary or an entry edge.
-        if (!(box.getNext() instanceof MethodInsnNode call) || call.getOpcode() == INVOKESTATIC
+        if (!(box.getNext() instanceof MethodInsnNode call)
+            || (call.getOpcode() != INVOKEVIRTUAL && call.getOpcode() != INVOKEINTERFACE)
             || !externalCall(owner, call) || !call.desc.equals("(Ljava/lang/Object;)Ljava/lang/Object;")
             || !(call.getNext() instanceof TypeInsnNode cast) || cast.getOpcode() != CHECKCAST
             || !(cast.getNext() instanceof MethodInsnNode unbox) || unbox.getOpcode() != INVOKEVIRTUAL || unbox.itf

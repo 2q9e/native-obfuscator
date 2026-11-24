@@ -201,6 +201,10 @@ public class Coverage {
     }
     private static class VirtualPeer {
         int scale(int value) { return value * 2; }
+        protected Object echo(Object value, RuntimeException failure) {
+            if (failure != null) throw failure;
+            return value;
+        }
     }
     private static final class VirtualChild extends VirtualPeer {
         @Override int scale(int value) { return value * 3; }
@@ -212,6 +216,16 @@ public class Coverage {
     private static final class InheritedDispatch extends DefaultDispatch {}
     private static final class OverrideDispatch implements DispatchPeer {
         @Override public long fold(long value, double fraction) { return value - (long)fraction; }
+    }
+    private static final class SuperDispatch extends VirtualPeer implements DispatchPeer {
+        @Override int scale(int value) { return value * 7; }
+        @Override public long fold(long value, double fraction) { return value - (long) fraction; }
+        int covClassSuper(int value) { return super.scale(value); }
+        long covInterfaceSuper(long value, double fraction) { return DispatchPeer.super.fold(value, fraction); }
+        Object covClassSuperCatch(Object token, RuntimeException failure) {
+            try { return super.echo(token, failure); }
+            catch (RuntimeException caught) { return caught; }
+        }
     }
     public static int covExternalVirtual(String value) { return value.length(); }
     private static int covExternalOverride(VirtualPeer peer, int value) { return peer.scale(value); }
@@ -523,6 +537,15 @@ public class Coverage {
         show(() -> covInterfaceDispatch(new DefaultDispatch(), Long.MAX_VALUE, 12.0));
         show(() -> covInterfaceDispatch(new OverrideDispatch(), Long.MAX_VALUE, 12.0));
         show(() -> covInterfaceDispatch(null, 7, 12.0));
+        var dispatch = new SuperDispatch();
+        var dispatchFailure = new IllegalStateException();
+        show(() -> dispatch.covClassSuper(-7));
+        show(() -> dispatch.covInterfaceSuper(Long.MAX_VALUE, 12.0));
+        show(() -> dispatch.covClassSuperCatch(token, null) == token);
+        show(() -> dispatch.covClassSuperCatch(token, dispatchFailure) == dispatchFailure);
+        show(() -> new RawOps().covAncestorSuper(7));
+        show(() -> RawOps.covNullSuper(null));
+        show(() -> RawOps.covMissingSuper(null));
         show(() -> covHierarchyReceiver(new VirtualChild(), 7));
         show(() -> covHierarchyReceiver(null, 7));
         show(() -> covHierarchyInterface(new InheritedDispatch(), Long.MAX_VALUE, 1.0));

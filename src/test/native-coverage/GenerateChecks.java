@@ -19,6 +19,62 @@ public final class GenerateChecks {
         }
         throw new AssertionError("Malformed operand shape accepted: " + method.name);
     }
+
+    private static void rejectSuper(ClassNode owner, MethodNode method, String diagnostic) throws Exception {
+        try { MethodCompiler.compileWithBridges(owner, method, "invalid", "", null); }
+        catch (MethodCompiler.Unsupported expected) {
+            if (expected.getMessage().contains(diagnostic)) return;
+            throw new AssertionError("Unexpected super call diagnostic", expected);
+        }
+        throw new AssertionError("Malformed super call accepted: " + method.name);
+    }
+
+    private static void superFixtures(ClassWriter raw, Path classes) throws Exception {
+        String parent = "java/lang/Object";
+        for (int multiplier = 2; multiplier <= 3; multiplier++) {
+            String name = multiplier == 2 ? "RawSpecialBase" : "RawSpecialMiddle";
+            var writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+            writer.visit(V21, ACC_SUPER, name, null, parent, null);
+            var constructor = writer.visitMethod(0, "<init>", "()V", null, null);
+            constructor.visitCode();
+            constructor.visitVarInsn(ALOAD, 0);
+            constructor.visitMethodInsn(INVOKESPECIAL, parent, "<init>", "()V", false);
+            constructor.visitInsn(RETURN);
+            constructor.visitMaxs(0, 0);
+            constructor.visitEnd();
+            var score = writer.visitMethod(ACC_PROTECTED, "score", "(I)I", null, null);
+            score.visitCode();
+            score.visitVarInsn(ILOAD, 1);
+            score.visitIntInsn(BIPUSH, multiplier);
+            score.visitInsn(IMUL);
+            score.visitInsn(IRETURN);
+            score.visitMaxs(0, 0);
+            score.visitEnd();
+            writer.visitEnd();
+            Files.write(classes.resolve(name + ".class"), writer.toByteArray());
+            parent = name;
+        }
+        var ancestor = raw.visitMethod(ACC_PUBLIC, "covAncestorSuper", "(I)I", null, null);
+        ancestor.visitCode();
+        ancestor.visitVarInsn(ALOAD, 0);
+        ancestor.visitVarInsn(ILOAD, 1);
+        ancestor.visitMethodInsn(INVOKESPECIAL, "RawSpecialBase", "score", "(I)I", false);
+        ancestor.visitInsn(IRETURN);
+        ancestor.visitMaxs(0, 0);
+        ancestor.visitEnd();
+        for (boolean missing : new boolean[]{false, true}) {
+            var method = raw.visitMethod(ACC_PUBLIC | ACC_STATIC, missing ? "covMissingSuper" : "covNullSuper",
+                "(LRawOps;)I", null, null);
+            method.visitCode();
+            method.visitVarInsn(ALOAD, 0);
+            method.visitInsn(ICONST_1);
+            method.visitMethodInsn(INVOKESPECIAL, "RawSpecialMiddle", missing ? "missing" : "score", "(I)I", false);
+            method.visitInsn(IRETURN);
+            method.visitMaxs(0, 0);
+            method.visitEnd();
+        }
+    }
+
     private static MethodNode method(String name, String descriptor, AbstractInsnNode... instructions) {
         var method = new MethodNode(ACC_PUBLIC | ACC_STATIC, name, descriptor, null, null);
         for (var instruction : instructions) method.instructions.add(instruction);
@@ -175,8 +231,16 @@ public final class GenerateChecks {
             new VarInsnNode(ALOAD, 0), new InsnNode(ARETURN)));
         reject(owner, method("wrongArrayReturn", "([I)[J", new VarInsnNode(ALOAD, 0), new InsnNode(ARETURN)));
         reject(owner, method("wrongThrow", "(Ljava/lang/Object;)V", new VarInsnNode(ALOAD, 0), new InsnNode(ATHROW)));
+        rejectSuper(owner, method("wrongSuperReceiver", "(Ljava/lang/Object;)I", new VarInsnNode(ALOAD, 0),
+            new MethodInsnNode(INVOKESPECIAL, "java/lang/Object", "hashCode", "()I", false), new InsnNode(IRETURN)),
+            "invokespecial receiver is not assignable to the caller class");
+        rejectSuper(owner, method("wrongSuperTarget", "(LMalformed;)I", new VarInsnNode(ALOAD, 0),
+            new MethodInsnNode(INVOKESPECIAL, "Unrelated", "score", "()I", false), new InsnNode(IRETURN)),
+            "invokespecial target is not a proven superclass or direct superinterface");
         var writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
-        writer.visit(V21, ACC_PUBLIC | ACC_FINAL, "RawOps", null, "java/lang/Object", new String[]{"java/lang/Cloneable"});
+        writer.visit(V21, ACC_PUBLIC | ACC_FINAL | ACC_SUPER, "RawOps", null, "RawSpecialMiddle",
+            new String[]{"java/lang/Cloneable"});
+        superFixtures(writer, Path.of(args[0]));
         for (int i = 0; i < 4; i++) {
             char arrayType = "ZBCS".charAt(i);
             int store = new int[]{BASTORE, BASTORE, CASTORE, SASTORE}[i];
@@ -210,7 +274,7 @@ public final class GenerateChecks {
         MethodVisitor constructor = writer.visitMethod(ACC_PUBLIC, "<init>", "()V", null, null);
         constructor.visitCode();
         constructor.visitVarInsn(ALOAD, 0);
-        constructor.visitMethodInsn(INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false);
+        constructor.visitMethodInsn(INVOKESPECIAL, "RawSpecialMiddle", "<init>", "()V", false);
         constructor.visitInsn(RETURN);
         constructor.visitMaxs(0, 0);
         constructor.visitEnd();
@@ -366,6 +430,6 @@ public final class GenerateChecks {
         conflicting.visit(V21, ACC_PUBLIC, "Coverage$DefaultDispatch", null, "java/lang/Object", null);
         conflicting.visitEnd();
         Files.write(Path.of(args[0]).resolveSibling("conflicting-dispatch.class"), conflicting.toByteArray());
-        System.out.println("Malformed operand policies: 11 passed; raw narrowing methods: 4 generated; private invokespecial: 1 generated");
+        System.out.println("Malformed operand policies: 13 passed; raw narrowing and special dispatch fixtures generated");
     }
 }
