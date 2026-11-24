@@ -280,6 +280,16 @@ def measure_case(profile, compiler_args, *, work, tool, java, java_tmp, original
             transformed[target][pass_name] = transformed[target].get(pass_name, 0) + int(sites)
         require(all(sum(passes.values()) for passes in transformed.values()),
                 f"LLVM emitted no transforms for at least one target: {transformed}")
+        if profile != "off":
+            report = next(row for row in build_reports if row.get("analysisResistance") == profile)
+            for target in report["targets"]:
+                by_pass = {}
+                for record in target["llvmPasses"]:
+                    require(record["transformed"] <= record["eligible"] <= record["candidates"],
+                            f"Invalid LLVM pass counts: {record}")
+                    name = record["pass"]
+                    by_pass[name] = by_pass.get(name, 0) + record["transformed"]
+                require(by_pass == transformed[target["target"]], f"JSON and log pass counts differ for {target['target']}")
         if profile == "maximum" and args.llvm_passes is None:
             advanced = ("native-mix", "native-route", "native-compare")
             require(all(passes.get(name, 0) > 0 for passes in transformed.values() for name in advanced),
@@ -291,12 +301,14 @@ def measure_case(profile, compiler_args, *, work, tool, java, java_tmp, original
 
 def check_llvm_noop(tool, original, directory, env, args):
     directory.mkdir()
+    passes = ["native-encode", "native-compare", "native-encode"]
+    pipeline = ",".join(f"{name}<seed=42;max=0;prefix=method_>" for name in passes)
     result = run([*tool, "protect", "--input", original, "--output", directory / "protected.jar",
                   "--include", "Arithmetic#calc*", "--unsupported", "retain", "--padding", "off",
                   "--target", "all", "--analysis-resistance", "balanced", "--analysis-helper-methods", "0",
                   "--analysis-decoy-methods", "0", "--zig", args.zig, "--clang", args.clang, "--llvm-opt",
                   args.llvm_opt, "--llvm-plugin", args.llvm_plugin,
-                  "--llvm-passes", "native-encode<seed=42;max=0;prefix=method_>"],
+                  "--llvm-passes", pipeline],
                  directory / "protect", env=env)
     reports = [row for row in read_json_lines(result) if row.get("analysisResistance") == "balanced"]
     require(len(reports) == 1 and reports[0]["llvmStatus"] == "configured", "Missing LLVM no-op report")
@@ -304,6 +316,9 @@ def check_llvm_noop(tool, original, directory, env, args):
     require({row["target"] for row in targets} == set(TARGETS), "Missing LLVM no-op targets")
     for row in targets:
         target = row["target"]
+        require([entry["pass"] for entry in row["llvmPasses"]] == passes
+                and all(entry["transformed"] == 0 for entry in row["llvmPasses"]),
+                f"Missing or misordered zero-site passes in the {target} LLVM report")
         comparison = row["llvmComparison"]
         require(not comparison["executableChanged"]
                 and comparison["baselineExecutableSha256"] == comparison["executableSha256"],

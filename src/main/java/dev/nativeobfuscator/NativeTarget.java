@@ -19,6 +19,8 @@ enum NativeTarget {
 
     private static final Pattern TRANSFORM_FUNCTION =
         Pattern.compile("^native-obfuscator-function: pass=\\S+ function=(\\S+) ");
+    private static final Pattern TRANSFORM_SUMMARY = Pattern.compile(
+        "^native-obfuscator: (\\S+) candidates=(\\d{1,10}) eligible=(\\d{1,10}) transformed=(\\d{1,10})(?: |$)");
     final String key;
     final String triple;
     final String file;
@@ -56,7 +58,13 @@ enum NativeTarget {
                             String baselineExecutableSha256, String executableSha256,
                             boolean executableChanged) {}
 
-    record Build(byte[] binary, long executableBytes, LinkedComparison llvmComparison) {}
+    record LlvmPassReport(String pass, long candidates, long eligible, long transformed) {}
+
+    record Build(byte[] binary, long executableBytes, LinkedComparison llvmComparison, List<LlvmPassReport> llvmPasses) {
+        Build {
+            llvmPasses = List.copyOf(llvmPasses);
+        }
+    }
 
     Build compile(Path workspace, Path source, Protector.Config config,
                    Map<String, String> selectedSymbols, Consumer<Map<String, Long>> sizes)
@@ -92,6 +100,7 @@ enum NativeTarget {
         boolean linux = key.endsWith("-linux");
         String clangTriple = machine + (linux ? "-unknown-linux-gnu" : "-w64-windows-gnu");
         byte[] baseline = null;
+        var llvmPasses = new ArrayList<LlvmPassReport>();
         if (config.llvmPlugin() != null) {
             var frontend = new ArrayList<String>();
             frontend.add(config.clang());
@@ -120,6 +129,11 @@ enum NativeTarget {
                 "LLVM protection for " + key, output.resolveSibling("llvm-protection.log"), line -> {
                     var match = TRANSFORM_FUNCTION.matcher(line);
                     String method = match.find() ? selectedSymbols.get(match.group(1)) : null;
+                    var summary = TRANSFORM_SUMMARY.matcher(line);
+                    if (summary.find()) {
+                        llvmPasses.add(new LlvmPassReport(summary.group(1), Long.parseLong(summary.group(2)),
+                            Long.parseLong(summary.group(3)), Long.parseLong(summary.group(4))));
+                    }
                     System.err.println("target=" + key + " " + line + (method == null ? "" : " method=" + method));
                 });
             if (config.maxGrowth() >= 0 || config.analysis().enabled()) {
@@ -152,7 +166,7 @@ enum NativeTarget {
                     System.err.println(key + " LLVM pipeline left final executable sections unchanged");
             }
         }
-        return new Build(binary, protectedCode, comparison);
+        return new Build(binary, protectedCode, comparison, llvmPasses);
     }
 
     private byte[] readLibrary(Path path) throws IOException {

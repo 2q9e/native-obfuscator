@@ -84,10 +84,11 @@ final class Protector {
 
     record TargetAnalysis(String target, int libraryBytes, long executableBytes,
                           List<AnalysisNative.Evidence> helpers, Map<String, Long> utilityCodeBytes,
-                          NativeTarget.LinkedComparison llvmComparison) {
+                          NativeTarget.LinkedComparison llvmComparison, List<NativeTarget.LlvmPassReport> llvmPasses) {
         TargetAnalysis {
             helpers = List.copyOf(helpers);
             utilityCodeBytes = Map.copyOf(utilityCodeBytes);
+            llvmPasses = List.copyOf(llvmPasses);
         }
     }
 
@@ -286,7 +287,8 @@ final class Protector {
                                 + " " + selectedSymbols.get(helper.root()) + ": " + helper.reason());
                     }
                     targetAnalysis.add(new TargetAnalysis(target.key, binary.length, build.executableBytes(), helpers,
-                        AnalysisUtilitySections.require(binary, target, utilitySections), build.llvmComparison()));
+                        AnalysisUtilitySections.require(binary, target, utilitySections),
+                        build.llvmComparison(), build.llvmPasses()));
                 }
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
                 files.put(base, binary);

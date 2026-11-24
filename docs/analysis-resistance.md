@@ -53,7 +53,7 @@ When a plan contains helpers, `llvm-objdump` verifies each direct call or tail b
 
 `--profile` still selects the LLVM presets. With a complete LLVM toolchain, balanced adds `native-mix` to the preset. Maximum reserves one site per function for `native-route` and, when `--analysis-llvm-sites` is at least three, one for `native-compare`. The remainder of that per-function budget goes to `native-mix`. Passes supplied through `--llvm-passes` retain full control of the pipeline. Rebuild the plugin when updating to this version of the extended presets. Builds without LLVM report that status and still apply their configured native helper and resource mechanisms. [LLVM passes](../llvm/README.md)
 
-When LLVM and an analysis profile are enabled, the build compares the executable sections against a matching LLVM frontend baseline. The report contains both executable fingerprints and sizes. `--max-growth` enforces a caller-supplied percentage cap against that baseline. Fingerprint differences establish changed code for the pipeline as a whole. IR rewrite counts and individual linked helper edges have separate meanings.
+When LLVM and an analysis profile are enabled, the build compares the executable sections against a matching LLVM frontend baseline. The report contains both executable fingerprints and sizes. The `targets[].llvmPasses` array records each plugin-reported pass invocation in execution order with its candidate, eligible, and transformed site counts, including zero. `--max-growth` enforces a caller-supplied percentage cap against the executable baseline. Fingerprint differences establish changed code for the pipeline as a whole. IR rewrite counts and individual linked helper edges have separate meanings.
 
 ## Stage, verify, and promote
 
