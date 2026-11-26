@@ -124,6 +124,24 @@ Each selected function gets a report, including functions with zero candidates.
 When composing passes, each sees the previous pass's output and applies its
 own cap to eligible instructions in that IR.
 
+`native-dispatch` uses a shared switch dispatcher for a function's eligible
+control flow. It lowers PHIs and values shared across blocks to stack slots so
+each branch can store a seeded destination label and return to the dispatcher.
+The private state slot uses volatile reads and writes so the dispatcher survives
+normal optimization. A function must contain a conditional branch and have at
+most 32 blocks and 384 instructions when the pass starts. The default `max=16`
+is the budget for original branch sites per function. If the function exceeds
+the cap or uses unsupported control flow, the pass keeps its body unchanged.
+The `maximum` CLI preset runs this pass after its other LLVM passes. For an
+explicit pipeline use `native-dispatch<seed=42;max=16;prefix=method_>`.
+
+The differential fixture compares dispatch results over 727,040 integer
+relations and 128 loop lengths, including a loop with critical edges and PHIs.
+It also checks seed reproducibility, budget rejection, dispatcher survival at
+`-O2`, and object generation for all four targets. The dispatcher can increase
+code size and slow loops. Measuring reconstruction difficulty requires a
+separate decompiler or analyst benchmark.
+
 The native differential test runs 100,324 boundary and seeded input pairs
 per build. It also checks that a fixed seed reproduces the bitcode, another
 seed changes it, malformed options fail, and the prefix and per-function cap

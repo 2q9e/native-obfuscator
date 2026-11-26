@@ -1,16 +1,20 @@
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Scalar/Reg2Mem.h"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -18,7 +22,7 @@
 
 namespace {
 
-enum class Transform { Encode, Diversify, Mix, Route, Compare };
+enum class Transform { Encode, Diversify, Mix, Route, Compare, Dispatch };
 
 llvm::StringRef passName(Transform Kind) {
   switch (Kind) {
@@ -32,6 +36,8 @@ llvm::StringRef passName(Transform Kind) {
     return "native-route";
   case Transform::Compare:
     return "native-compare";
+  case Transform::Dispatch:
+    return "native-dispatch";
   }
   llvm_unreachable("unknown native transform");
 }
@@ -228,10 +234,10 @@ llvm::Value *buildMixing(llvm::IRBuilder<> &Builder,
   case llvm::Instruction::Mul: {
     if (Alternate) {
       unsigned Width = Type->getBitWidth();
-      auto Mask = llvm::APInt(Width, nextRandom(State));
+      auto Mask = llvm::APInt(64, nextRandom(State)).zextOrTrunc(Width);
       Mask.clearBit(0);
       if (Mask.isZero())
-        Mask = llvm::APInt(Width, UINT64_C(0x5555555555555554));
+        Mask = llvm::APInt(64, UINT64_C(0x5555555555555554)).zextOrTrunc(Width);
       return buildSplitProduct(Builder, Left, Right, Mask);
     }
     return buildOffsetProduct(Builder, Left, Right,
@@ -403,6 +409,121 @@ uint64_t functionState(const llvm::Function &Function, uint64_t Seed) {
   return State ^ Seed;
 }
 
+bool canDispatch(const llvm::Function &Function) {
+  if (!canDiversify(Function, true) || Function.hasFnAttribute(llvm::Attribute::Speculatable))
+    return false;
+  for (const auto &Block : Function) {
+    if (Block.hasAddressTaken() || Block.isEHPad() ||
+        !llvm::isa<llvm::CondBrInst, llvm::UncondBrInst, llvm::ReturnInst,
+                   llvm::UnreachableInst>(Block.getTerminator()))
+      return false;
+    if (auto *Branch = llvm::dyn_cast<llvm::CondBrInst>(Block.getTerminator());
+        Branch && Branch->getSuccessor(0) == Branch->getSuccessor(1))
+      return false;
+    bool EntryAlloca = Block.isEntryBlock();
+    for (const auto &Instruction : Block) {
+      if (auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(&Instruction)) {
+        if (!EntryAlloca || !Alloca->isStaticAlloca() || Alloca->isSwiftError() ||
+            Alloca->isUsedWithInAlloca())
+          return false;
+      } else {
+        EntryAlloca = false;
+      }
+      if (auto *Call = llvm::dyn_cast<llvm::CallInst>(&Instruction)) {
+        auto *Callee = Call->getCalledFunction();
+        if (Call->isMustTailCall() || Call->isInlineAsm() || Call->hasOperandBundles() ||
+            (Callee && Callee->isIntrinsic() && !Call->doesNotAccessMemory() &&
+             !llvm::isa<llvm::AssumeInst, llvm::MemIntrinsic>(Call)))
+          return false;
+      }
+      if (Instruction.getType()->isTokenTy())
+        return false;
+    }
+  }
+  return true;
+}
+
+bool rewriteDispatch(llvm::Function &Function, llvm::FunctionAnalysisManager &Analysis,
+                     const Options &Config, RewriteStatistics &Statistics) {
+  unsigned Branches = 0;
+  bool HasConditional = false;
+  for (const auto &Block : Function) {
+    auto *End = Block.getTerminator();
+    Branches += llvm::isa<llvm::CondBrInst, llvm::UncondBrInst>(End);
+    HasConditional |= llvm::isa<llvm::CondBrInst>(End);
+  }
+  if (!HasConditional)
+    return false;
+  Statistics.CandidateSites += Branches;
+  if (Function.size() > 32 || Function.getInstructionCount() > 384 || !canDispatch(Function)) {
+    ++Statistics.UnsafeControlFlowFunctions;
+    return false;
+  }
+  Statistics.EligibleSites += Branches;
+  if (Branches > Config.MaxSites) {
+    Statistics.CapSkippedSites += Branches;
+    return false;
+  }
+
+  // Dispatcher edges change dominance. Demote PHIs and cross-block values
+  // before replacing edges, with critical edges split for PHI stores.
+  llvm::RegToMemPass().run(Function, Analysis);
+  auto &Entry = Function.getEntryBlock();
+  auto FirstInstruction = Entry.begin();
+  while (llvm::isa<llvm::AllocaInst>(*FirstInstruction))
+    ++FirstInstruction;
+  auto *First = Entry.splitBasicBlock(FirstInstruction, "dispatch.first");
+  auto &Context = Function.getContext();
+  auto *Dispatch = llvm::BasicBlock::Create(Context, "dispatch", &Function, First);
+  auto *Invalid = llvm::BasicBlock::Create(Context, "dispatch.invalid", &Function);
+  llvm::IRBuilder<>(Invalid).CreateUnreachable();
+  llvm::SmallVector<llvm::BasicBlock *, 32> Blocks;
+  for (auto &Block : Function)
+    if (&Block != &Entry && &Block != Dispatch && &Block != Invalid)
+      Blocks.push_back(&Block);
+
+  uint64_t State = functionState(Function, Config.Seed);
+  llvm::DenseMap<llvm::BasicBlock *, llvm::ConstantInt *> States;
+  llvm::SmallDenseSet<uint32_t, 32> Used;
+  llvm::IRBuilder<> Setup(Entry.getTerminator());
+  for (auto *Block : Blocks) {
+    uint32_t Label;
+    do {
+      Label = static_cast<uint32_t>(nextRandom(State));
+    } while (!Used.insert(Label).second);
+    States[Block] = Setup.getInt32(Label);
+  }
+  auto *Slot = Setup.CreateAlloca(Setup.getInt32Ty(), nullptr, "dispatch.state");
+  Setup.CreateStore(States.lookup(First), Slot, true);
+  Entry.getTerminator()->setSuccessor(0, Dispatch);
+  llvm::IRBuilder<> Router(Dispatch);
+  auto *Switch = Router.CreateSwitch(Router.CreateLoad(Router.getInt32Ty(), Slot, true),
+                                     Invalid, Blocks.size());
+  for (auto *Block : Blocks) {
+    Switch->addCase(States.lookup(Block), Block);
+    auto *End = Block->getTerminator();
+    llvm::IRBuilder<> Transition(End);
+    Transition.SetCurrentDebugLocation(End->getDebugLoc());
+    llvm::Value *Next;
+    if (auto *Conditional = llvm::dyn_cast<llvm::CondBrInst>(End)) {
+      Next = Transition.CreateSelect(Conditional->getCondition(),
+                                     States.lookup(Conditional->getSuccessor(0)),
+                                     States.lookup(Conditional->getSuccessor(1)));
+    } else if (auto *Branch = llvm::dyn_cast<llvm::UncondBrInst>(End)) {
+      Next = States.lookup(Branch->getSuccessor(0));
+    } else {
+      continue;
+    }
+    Transition.CreateStore(Next, Slot, true);
+    Transition.CreateBr(Dispatch);
+    End->eraseFromParent();
+  }
+  Function.removeFnAttr(llvm::Attribute::Memory);
+  Statistics.TransformedSites += Branches;
+  ++Statistics.ChangedFunctions;
+  return true;
+}
+
 void splitComparison(llvm::CondBrInst &Branch, llvm::ICmpInst &Comparison,
                      uint64_t &State) {
   auto *Initial = Branch.getParent();
@@ -525,7 +646,8 @@ void writeSiteRejections(llvm::raw_ostream &Stream, Transform Kind,
 }
 
 bool rewriteFunction(llvm::Function &Function, const Options &Config,
-                     RewriteStatistics &Statistics) {
+                     RewriteStatistics &Statistics,
+                     llvm::FunctionAnalysisManager *Analysis) {
   if (!Function.getName().starts_with(Config.Prefix)) {
     ++Statistics.PrefixFilteredFunctions;
     return false;
@@ -536,6 +658,8 @@ bool rewriteFunction(llvm::Function &Function, const Options &Config,
   }
   if (Config.Kind == Transform::Compare)
     return rewriteComparisons(Function, Config, Statistics);
+  if (Config.Kind == Transform::Dispatch)
+    return rewriteDispatch(Function, *Analysis, Config, Statistics);
   bool IsMix = Config.Kind == Transform::Mix;
   bool IsRoute = Config.Kind == Transform::Route;
   bool UseBranches = IsRoute || Config.Kind == Transform::Diversify;
@@ -633,13 +757,16 @@ public:
   explicit NativeEncode(Options Config) : Config(std::move(Config)) {}
 
   llvm::PreservedAnalyses run(llvm::Module &Module,
-                              llvm::ModuleAnalysisManager &) {
+                              llvm::ModuleAnalysisManager &Analysis) {
     bool Changed = false;
     RewriteStatistics Statistics;
+    auto *Functions = Config.Kind == Transform::Dispatch
+        ? &Analysis.getResult<llvm::FunctionAnalysisManagerModuleProxy>(Module).getManager()
+        : nullptr;
     for (llvm::Function &Function : Module) {
       if (!Function.isDeclaration()) {
         RewriteStatistics Before = Statistics;
-        Changed |= rewriteFunction(Function, Config, Statistics);
+        Changed |= rewriteFunction(Function, Config, Statistics, Functions);
         if (Function.getName().starts_with(Config.Prefix)) {
           auto &Stream = llvm::errs();
           Stream << "native-obfuscator-function: pass=" << passName(Config.Kind)
@@ -703,6 +830,9 @@ void registerPass(llvm::PassBuilder &Builder) {
         } else if (Pass == passName(Transform::Compare)) {
           Config.Kind = Transform::Compare;
           Config.MaxSites = 1;
+        } else if (Pass == passName(Transform::Dispatch)) {
+          Config.Kind = Transform::Dispatch;
+          Config.MaxSites = 16;
         } else if (Pass != passName(Transform::Encode)) {
           return false;
         }

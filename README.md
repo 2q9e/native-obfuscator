@@ -81,6 +81,19 @@ Run Native Obfuscator on the JAR after Fabric Loom's `remapJar` task. If you als
 
 The [Fabric 1.21.11 example](examples/fabric/README.md) includes a `protectFabricJar` Gradle task and a bootstrap test that exercises the generated JNI code, a Mixin accessor, and an access widener. Place the protected JAR in your Fabric instance's `mods` directory.
 
+## Rename internal class paths
+
+Supply `--class-map path/to/classes.map` (JSON key `classMap`) to rename internal classes before JNI translation. Use one original and replacement JVM class name per line:
+
+```text
+app/internal/Kernel=q7/A8
+app/internal/Kernel$Worker=q7/A8$C6
+```
+
+Select methods by their new names, for example `--include 'q7/A8#mix(II)I'`. Use the same map for `analyze`, `protect`, `harden`, `verify`, and `apply`. Keep the map outside the release JAR.
+
+The tool rewrites JAR entries, bytecode references, descriptors, generic signatures, and class metadata together. Nested classes must map under their new enclosing class name. Member, local, and anonymous class metadata stays intact. To relocate a package, map all its classes into one unused package. Select internal classes whose callers ship in the same JAR, and keep names used by reflection, serialization, other mods, or custom resources. Fabric metadata targets, manifest entrypoints, and service providers keep their names. The class map supports ordinary Java JARs. Use a metadata-aware external remapper for Kotlin, modular, or multi-release JARs.
+
 ## Native targets
 
 | Platform | x64 | ARM64 |
@@ -99,7 +112,7 @@ Packaged Linux libraries omit the local symbol table. Windows builds suppress PD
 
 ## LLVM obfuscation
 
-Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `clang` and `opt`. The default `compatibility` profile builds JNI code with standard optimization. `balanced` adds arithmetic substitutions, while `aggressive` and `maximum` also attempt equivalent conditional paths.
+Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `clang` and `opt`. The `compatibility` profile builds JNI code with standard optimization. `balanced` adds arithmetic substitutions and `aggressive` adds equivalent conditional paths. `maximum` also flattens eligible functions into a shared dispatcher with seeded state labels. This adds dispatch overhead to affected branches, so measure runtime cost on your selected methods.
 
 ```sh
 "$tool" protect --input input.jar --output protected.jar \

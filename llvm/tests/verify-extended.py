@@ -327,6 +327,31 @@ def test_compare(args, work, tool, driver, triple):
                 assert " freeze " not in after, name
         variants.append(output)
 
+    dispatch = work / "dispatch.bc"
+    dispatch_options = "native-dispatch<seed=42;max=16;prefix=method_>"
+    _, log = run(*driver, f"-passes=verify,{dispatch_options},verify", baseline, "-o", dispatch)
+    reports, totals = verify_reports(log, "native-dispatch", bodies)
+    assert totals["transformed"] == len(bodies) + 1, totals
+    assert reports["method_compare_loop"]["transformed"] == 2
+    dispatched_ir, _ = run(tool("opt"), "-passes=default<O2>,verify", "-S", dispatch, "-o", "-")
+    loop = function_bodies(dispatched_ir)["method_compare_loop"]
+    assert "switch i32" in loop and "load volatile i32" in loop and "store volatile i32" in loop
+    variants.append(dispatch)
+
+    dispatch_repeat = work / "dispatch-repeat.bc"
+    run(*driver, f"-passes={dispatch_options},verify", baseline, "-o", dispatch_repeat)
+    assert dispatch_repeat.read_bytes() == dispatch.read_bytes()
+    dispatch_other = work / "dispatch-other.bc"
+    run(*driver, f"-passes={dispatch_options.replace('42', '43')},verify", baseline, "-o", dispatch_other)
+    assert dispatch_other.read_bytes() != dispatch.read_bytes()
+    dispatch_capped = work / "dispatch-capped.bc"
+    _, capped_log = run(*driver, f"-passes={dispatch_options.replace('max=16', 'max=1')},verify",
+                        baseline, "-o", dispatch_capped)
+    capped_reports, _ = verify_reports(capped_log, "native-dispatch", bodies)
+    assert capped_reports["method_compare_loop"]["skipped_cap"] == 2
+    capped_ir, _ = run(tool("opt"), "-S", dispatch_capped, "-o", "-")
+    assert function_bodies(capped_ir)["method_compare_loop"] == bodies["method_compare_loop"]
+
     disabled = work / "compare-disabled.bc"
     _, totals = rewrite(42, disabled, cap=0)
     assert totals["transformed"] == 0 and totals["skipped_cap"] == 33
@@ -375,6 +400,9 @@ def test_compare(args, work, tool, driver, triple):
             names.append(mnemonics(tool("llvm-objdump"), "method_slt32", obj))
         base, routed = compare_shape(*names, target.split("-", 1)[0])
         print(f"{target} comparison decisions: {base} -> {routed}", flush=True)
+        dispatched_obj = work / f"dispatch-{target}.o"
+        compile_object(dispatch, dispatched_obj, [f"-mtriple={target}"])
+        assert len(mnemonics(tool("llvm-objdump"), "method_compare_loop", dispatched_obj)) > 10
 
 
 def mnemonics(objdump, symbol, binary):

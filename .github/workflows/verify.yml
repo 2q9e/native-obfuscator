@@ -35,6 +35,7 @@ jobs:
       - run: bash src/test/integration.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
         env:
           JAVA_RELEASE: ${{ matrix.java }}
+      - run: bash src/test/class-paths/verify.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
       - run: bash src/test/modern/verify.sh "$PWD/build/install/native-obfuscator/bin/native-obfuscator"
         env:
           JAVA_RELEASE: ${{ matrix.java }}

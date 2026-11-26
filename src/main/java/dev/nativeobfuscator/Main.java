@@ -73,6 +73,7 @@ public final class Main {
                 --markers COUNT       Add 1-1000 inert analysis markers (disabled by default).
                 --marker-seed UINT64  Reproducible marker seed (default 0).
                 --emit-c              Write generated C to --output for inspection.
+                --class-map PATH      Remap internal class paths before method selection.
                 --clang PATH          Clang executable for optional LLVM processing.
                 --llvm-opt PATH       Matching opt executable.
                 --llvm-plugin PATH    Trusted local LLVM pass plugin.
@@ -134,7 +135,7 @@ public final class Main {
             });
             report = Workflow.verify(config.input(), candidate, expected, targetKeys(config.targets()),
                 config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(),
-                config.clang(), config.hierarchyJars());
+                config.clang(), config.hierarchyJars(), config.classPaths());
             if (report.structurallyValid()) Workflow.publishStage(candidate, config.output(), report);
         } finally {
             Files.deleteIfExists(candidate);
@@ -205,7 +206,7 @@ public final class Main {
         var config = coverage.config;
         return Workflow.verify(config.input(), staged, coverage.methods, verificationTargets(config),
             config.paddingCount(), config.paddingSeed(), config.markers(), config.markerSeed(), config.analysis(), clang,
-            config.hierarchyJars());
+            config.hierarchyJars(), config.classPaths());
     }
 
     private static int runProtection(Protector.Config config, Gson gson, Consumer<Protector.Decision> collect)
@@ -257,7 +258,7 @@ public final class Main {
     }
 
     private static Set<String> coverageOptions() {
-        return Set.of("--input", "--include", "--exclude", "--target", "--unsupported", "--hierarchy-jar",
+        return Set.of("--input", "--include", "--exclude", "--target", "--unsupported", "--hierarchy-jar", "--class-map",
             "--min-instructions", "--padding", "--padding-count", "--padding-seed", "--markers",
             "--marker-seed", "--analysis-resistance", "--analysis-seed", "--analysis-resource-budget",
             "--analysis-entry-budget", "--analysis-helper-methods", "--analysis-helpers-per-method",
@@ -375,7 +376,7 @@ public final class Main {
                     if (value.equals("all")) targets.addAll(List.of(NativeTarget.values()));
                     else targets.add(NativeTarget.parse(value));
                 }
-                case "--input", "--output", "--zig", "--unsupported", "--clang", "--llvm-opt", "--llvm-plugin",
+                case "--input", "--output", "--zig", "--unsupported", "--class-map", "--clang", "--llvm-opt", "--llvm-plugin",
                      "--llvm-passes", "--min-instructions", "--profile", "--seed", "--max-growth", "--padding",
                      "--padding-count", "--padding-seed", "--markers", "--marker-seed", "--analysis-resistance",
                      "--analysis-seed", "--analysis-resource-budget", "--analysis-entry-budget",
@@ -440,6 +441,8 @@ public final class Main {
             throw new IllegalArgumentException("--analysis-llvm-sites needs the preset LLVM pipeline and its toolchain");
         if (llvm && sites > 0 && !customPasses && analysis.llvmSites() > 0)
             preset = extendedAnalysisPasses(preset, analysis);
+        if (profile.equals("maximum") && !customPasses)
+            preset += ",native-dispatch<seed=" + seed + ";max=16;prefix=method_>";
         String passes = options.getOrDefault("--llvm-passes", preset);
         if (targets.isEmpty() && !analyze && !emitC) targets.add(NativeTarget.host());
         Path plugin = llvm && sites > 0 ? path(options, "--llvm-plugin") : null;
@@ -461,7 +464,8 @@ public final class Main {
         return new Protector.Config(input, output, List.copyOf(includes), List.copyOf(excludes), orderedTargets,
             options.get("--zig"), skip, analyze || dryRun, emitC, options.get("--clang"), options.get("--llvm-opt"),
             plugin, plugin == null ? null : passes, growth, markers, markerSeed, paddingCount, paddingSeed,
-            minInstructions, reportNativeSizes, analysis, hierarchyJars);
+            minInstructions, reportNativeSizes, analysis, hierarchyJars,
+            options.containsKey("--class-map") ? ClassPaths.read(path(options, "--class-map")) : Map.of());
     }
 
     static String extendedAnalysisPasses(String legacy, AnalysisConfig analysis) {
@@ -537,6 +541,7 @@ public final class Main {
                 JsonElement value = field.getValue();
                 String flag = "--" + switch (key) {
                     case "hierarchyJar" -> "hierarchy-jar";
+                    case "classMap" -> "class-map";
                     case "paddingCount" -> "padding-count";
                     case "paddingSeed" -> "padding-seed";
                     case "analysisResistance" -> "analysis-resistance";
