@@ -39,9 +39,10 @@ final class Protector {
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
                   boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed,
                   int paddingCount, long paddingSeed, int minInstructions, boolean reportNativeSizes,
-                  AnalysisConfig analysis, List<Path> hierarchyJars) {
+                  AnalysisConfig analysis, List<Path> hierarchyJars, Map<String, String> classPaths) {
         Config {
             hierarchyJars = List.copyOf(hierarchyJars);
+            classPaths = Map.copyOf(classPaths);
         }
 
         Config(Path input, Path output, List<Pattern> includes, List<Pattern> excludes,
@@ -51,13 +52,13 @@ final class Protector {
                int minInstructions, boolean reportNativeSizes) {
             this(input, output, includes, excludes, targets, zig, skipUnsupported, analyze, emitC, clang,
                 llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount, paddingSeed,
-                minInstructions, reportNativeSizes, AnalysisConfig.OFF, List.of());
+                minInstructions, reportNativeSizes, AnalysisConfig.OFF, List.of(), Map.of());
         }
 
         Config withOutput(Path replacement) {
             return new Config(input, replacement, includes, excludes, targets, zig, skipUnsupported, analyze,
                 emitC, clang, llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount,
-                paddingSeed, minInstructions, reportNativeSizes, analysis, hierarchyJars);
+                paddingSeed, minInstructions, reportNativeSizes, analysis, hierarchyJars, classPaths);
         }
     }
     record Decision(String method, String result, String reason, Integer instructions,
@@ -101,7 +102,7 @@ final class Protector {
 
     static int run(Config config, Consumer<Decision> report, Consumer<AnalysisReport> analysisReport)
             throws IOException, InterruptedException {
-        var files = Archive.read(config.input);
+        var files = ClassPaths.remap(Archive.read(config.input), config.classPaths);
         if (files.keySet().stream().anyMatch(name -> name.startsWith(RESOURCE)))
             throw new IOException("Input already uses the native-obfuscator resource namespace");
         var exclusions = FabricExclusions.from(files);
