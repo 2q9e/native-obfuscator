@@ -1,8 +1,10 @@
 # LLVM native protection
 
-`NativeEncode` is an LLVM 23 new-pass-manager plugin. Use the same LLVM build for the
-development headers, `clang`, `opt`, and `llc`. The plugin has been tested with LLVM
-23.1.4 on Fedora Linux AArch64.
+`NativeEncode` supports the LLVM 22 and 23 new pass managers. Build the plugin
+against the LLVM installation that provides `clang`, `opt`, and `llc` for the
+pipeline. The plugin tests ran on Fedora Linux AArch64 with LLVM 22.1.8 and 23.1.4.
+The pass registry lives in `NativeEncode.cpp`. Integer and control-flow rewrites
+each have a separate translation unit.
 
 Build with a complete LLVM development installation:
 
@@ -13,14 +15,14 @@ cmake --build build/llvm
 ctest --test-dir build/llvm --output-on-failure
 ```
 
-Fedora's LLVM CMake package expects the static component archives from
-`llvm-static`. With an extracted LLVM SDK and matching system shared library,
-this direct Linux build also works:
+Fedora's LLVM CMake package expects the static component archives in the
+matching development installation. With an extracted LLVM SDK and matching
+shared library, this direct Linux build also works:
 
 ```sh
 c++ -std=c++17 -O2 -Wall -Wextra -Werror -fPIC -shared \
-  -isystem "$llvm_sdk/include" llvm/NativeEncode.cpp \
-  /usr/lib64/libLLVM.so.23.1 -o NativeEncode.so
+  -isystem "$llvm_sdk/include" llvm/NativeEncode.cpp llvm/IntegerTransforms.cpp \
+  llvm/ControlFlowTransforms.cpp "$llvm_library" -o NativeEncode.so
 bash llvm/tests/verify.sh "$PWD/NativeEncode.so" "$llvm_sdk/bin"
 bash llvm/tests/verify.sh "$PWD/NativeEncode.so" "$llvm_sdk/bin" cc native-diversify
 bash llvm/tests/verify-cross.sh "$PWD/NativeEncode.so" "$llvm_sdk/bin"
@@ -42,7 +44,11 @@ llc -O=2 -filetype=obj -relocation-model=pic encoded.bc -o encoded.o
 how many eligible instructions each function can transform and defaults to
 eight. A value of zero disables the pass. `prefix` limits the pass to named
 functions with that prefix. Generated JNI implementations use `method_`. Omit
-`prefix` to allow every function. Options can appear in any order.
+`prefix` to allow every function. Use `functions=NAME+NAME` to select exact
+symbols or `functions-file=BASENAME` to read exact symbols, one per line, from
+a file in `opt`'s working directory. An empty file selects zero functions.
+The exact selection and prefix must both match when supplied together. Options
+can appear in any order.
 
 `native-encode` substitutes scalar 8-, 16-, 32-, and 64-bit integer addition,
 subtraction, and multiplication. For addition and subtraction, it multiplies
@@ -118,8 +124,11 @@ more than once. Eligibility requires the comparison to feed only the branch.
 The pass skips `samesign` comparisons and uses the same control-flow safety
 checks as route. Use the explicit pipeline `native-compare<seed=42;max=1;prefix=method_>`.
 
-The extended passes report rejected flags and types, with `skipped_undefined`
-for mix and `skipped_unsafe_blocks` and `skipped_guard` for route and compare.
+Integer and comparison passes report rejected flags and types.
+Mix also reports `skipped_undefined`. Control-flow passes report unsafe
+blocks or functions, and passes requiring a selector report guard rejections.
+Dispatch reports candidate branches rejected by its graph limits as
+`skipped_size` and those rejected by spill types as `skipped_type`.
 Each selected function gets a report, including functions with zero candidates.
 When composing passes, each sees the previous pass's output and applies its
 own cap to eligible instructions in that IR.
@@ -131,7 +140,8 @@ The private state slot uses volatile reads and writes so the dispatcher survives
 normal optimization. A function must contain a conditional branch and have at
 most 32 blocks and 384 instructions when the pass starts. The default `max=16`
 is the budget for original branch sites per function. If the function exceeds
-the cap or uses unsupported control flow, the pass keeps its body unchanged.
+the cap or uses unsupported control flow or value types such as x86 AMX tiles,
+the pass keeps its body unchanged.
 The `maximum` CLI preset runs this pass after its other LLVM passes. For an
 explicit pipeline use `native-dispatch<seed=42;max=16;prefix=method_>`.
 
@@ -170,7 +180,15 @@ it directly with a loadable plugin:
 ```sh
 python3 llvm/tests/verify-extended.py --llvm-bin "$llvm_sdk/bin" \
   --plugin "$PWD/NativeEncode.so" --cc cc
+python3 llvm/tests/verify-randomized.py --llvm-bin "$llvm_sdk/bin" \
+  --plugin "$PWD/NativeEncode.so" --cc cc
 ```
+
+The randomized suite generates 32 functions per program seed across four
+integer widths. It links and executes each individual pass and two combined
+pipelines against the same boundary and random inputs. It also checks
+bitcode reproducibility and dispatcher handling of AMX values and the full
+32-bit range of state labels.
 
 With the Windows LLVM 23.1.6 static `opt` wrapper and Zig 0.15.2, the baseline,
 four mix seeds, and two route seeds each passed the differential test. In the
