@@ -18,8 +18,8 @@ java_home = os.environ.get("JAVA_HOME")
 def executable(name):
     return str(Path(java_home) / "bin" / name) if java_home else name
 
-def run(command, expected=0):
-    result = subprocess.run([str(x) for x in command], text=True, capture_output=True)
+def run(command, expected=0, timeout=None):
+    result = subprocess.run([str(x) for x in command], text=True, capture_output=True, timeout=timeout)
     if result.returncode != expected:
         raise AssertionError(f"Command failed ({result.returncode}): {command}\n{result.stdout}\n{result.stderr}")
     return result
@@ -34,14 +34,17 @@ run([executable("javac"), "--release", "21", "-Xlint:all", "-Werror", "-cp", cla
 checks = run([executable("java"), "-cp", str(classes) + os.pathsep + str(classpath), "GenerateChecks", classes])
 (work / "operand-checks.txt").write_text(checks.stdout)
 (classes / "GenerateChecks.class").unlink()
-run([executable("javac"), "--release", "21", "-Xlint:all", "-Werror", "-cp", classes, "-d", classes, root / "Coverage.java"])
+java_sources = [root / "Coverage.java", root / "ConcurrentCoverage.java"]
+run([executable("javac"), "--release", "21", "-Xlint:all", "-Werror", "-cp", classes, "-d", classes, *java_sources])
 original = work / "original.jar"
 protected = work / "protected.jar"
 run([executable("jar"), "--create", "--file", original, "--main-class", "Coverage", "-C", classes, "."])
 tool = [executable("java"), "-cp", args.distribution.resolve() / "lib" / "*", "dev.nativeobfuscator.Main"]
-selection = ["--input", original, "--include", "Coverage#cov*", "--include", "RawOps#cov*",
-             "--include", "Coverage$SuperDispatch#cov*",
-             "--include", "Coverage#reject*", "--include", "RawOps#reject*", "--unsupported", "retain", "--padding", "off"]
+owners = ("Coverage", "RawOps", "Coverage$SuperDispatch", "ConcurrentCoverage")
+selection = ["--input", original]
+for owner in owners:
+    selection.extend(["--include", f"{owner}#cov*"])
+selection.extend(["--include", "Coverage#reject*", "--include", "RawOps#reject*", "--unsupported", "retain", "--padding", "off"])
 report = run(tool + ["protect", "--output", protected] + selection + flags)
 (work / "report.jsonl").write_text(report.stdout)
 (work / "build.log").write_text(report.stderr)
@@ -51,14 +54,16 @@ raw_methods = {"covRawZ", "covRawB", "covRawC", "covRawS", "covSpecial", "covRef
                "covCastMissing", "covAllocateMissingArray", "covPlainConcat", "covAncestorSuper", "covNullSuper",
                "covMissingSuper", "covMethodTypeLiteral", "covHandleLiteral", "covMissingHandle",
                "covMissingLiteral", "covLambdaBridge"}
-expected = raw_methods | set(re.findall(r"\b(cov\w+)\(", (root / "Coverage.java").read_text()))
+expected = raw_methods | {name for source in java_sources for name in re.findall(r"\b(cov\w+)\(", source.read_text())}
 utilities = {d["method"] for d in decisions if d.get("result") == "analysis-utility"}
 selected = {d["method"].split("#")[1].split("(")[0] for d in decisions
             if d.get("result") == "selected" and d["method"] not in utilities}
 assert selected == expected, {"unexpected": sorted(selected - expected), "missing": sorted(expected - selected)}
-declarations = run([executable("javap"), "-p", "-classpath", protected, "Coverage", "RawOps", "Coverage$SuperDispatch"]).stdout
+declarations = run([executable("javap"), "-p", "-classpath", protected, *owners]).stdout
 native_declarations = set(re.findall(r"\bnative\b[^;]*?\b(cov\w+)\(", declarations))
 assert native_declarations == expected, declarations
+synchronized_declarations = set(re.findall(r"\bsynchronized native int (cov\w+)\(", declarations))
+assert synchronized_declarations == {"covStaticMonitor", "covInstanceMonitor", "covReentrantMonitor"}, declarations
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d.get("result") == "retained"}
 assert set(retained) == {"rejectAllocation", "rejectRawCall", "rejectDirectHierarchy", "rejectUnknownHierarchy",
@@ -123,16 +128,20 @@ run(tool + ["verify", "--staged", split_protected] + split_options + flags, expe
 with ZipFile(split_protected) as archive:
     assert versioned_base not in archive.namelist(), "Hierarchy library was copied into protected JAR"
 split_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED",
-                    "-jar", split_protected])
+                    "-jar", split_protected], timeout=90)
 
-original_result = run([executable("java"), "-Xverify:all", "-jar", original])
+original_result = run([executable("java"), "-Xverify:all", "-jar", original], timeout=90)
 for outcome in ("interned-literal:true", "class-literals:true", "literal-loop:8192", "literal-initializations:0/1",
                 "missing-literals:0/2/2", "method-type:(J[Ljava/lang/String;)I", "method-handle:true",
                 "lambda-marker:true", "lambda-bridge:bridge/null"):
     assert "value:" + outcome + ":effects=" in original_result.stdout, outcome
+for outcome in ("concurrent-publication:512", "concurrent-monitors:1024/1024:throws-per-entry=256",
+                "concurrent-reference-iterations:32772"):
+    assert outcome in original_result.stdout.splitlines(), outcome
 assert original_result.stdout == split_result.stdout, split_result.stdout
 assert "WARNING in native method" not in split_result.stderr, split_result.stderr
-protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED", "-jar", protected])
+protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED", "-jar", protected],
+                       timeout=90)
 (work / "original.txt").write_text(original_result.stdout)
 (work / "protected.txt").write_text(protected_result.stdout)
 (work / "execution.log").write_text(protected_result.stderr)
