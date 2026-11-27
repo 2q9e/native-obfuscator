@@ -198,7 +198,7 @@ jobs:
         if: matrix.java == '25'
         shell: bash
         run: |
-          gradle --no-daemon --console=plain -PreleaseVersion=1.2.3-rc.1 distZip distTar
+          bash scripts/ci-gradle.sh -PreleaseVersion=1.2.3-rc.1 distZip distTar
           python3 src/test/release/verify.py
       - name: Verify deterministic utility generation and archive heuristics
         shell: bash
@@ -248,20 +248,7 @@ jobs:
         with:
           gradle-version: '9.3.1'
       - name: Build the CLI distribution
-        shell: bash
-        run: |
-          gradle_log=$(mktemp)
-          trap 'rm -f "$gradle_log"' EXIT
-          for delay in 15 45 0; do
-            if gradle --no-daemon --console=plain installDist 2>&1 | tee "$gradle_log"; then
-              exit 0
-            fi
-            if [[ "$delay" == 0 ]] || ! grep -Fq 'Received status code 429' "$gradle_log"; then
-              exit 1
-            fi
-            echo "Dependency server rate limited the build. Retrying in ${delay}s."
-            sleep "$delay"
-          done
+        run: bash scripts/ci-gradle.sh installDist
       - run: tar -czf native-obfuscator-cli.tar.gz -C build/install native-obfuscator
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

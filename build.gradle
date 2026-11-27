@@ -3,7 +3,14 @@ plugins {
 }
 
 repositories {
-    mavenCentral()
+    if (providers.gradleProperty('centralMirror').isPresent()) {
+        maven {
+            name = 'GoogleCloudCentralMirror'
+            url = uri('https://maven-central.storage-download.googleapis.com/maven2/')
+        }
+    } else {
+        mavenCentral()
+    }
 }
 
 dependencies {

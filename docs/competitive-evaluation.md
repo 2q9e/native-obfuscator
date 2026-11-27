@@ -75,7 +75,10 @@ Unmeasured configurations have specific prerequisites:
   at `42f732c` requires older build tooling. CMake 4.3 rejected its CMP0051
   setting. CMake 3.31.10 configured it, but GCC 16 rejected the unmodified
   source's undeclared `intptr_t` in `llvm/ADT/STLExtras.h`. No runnable
-  compiler came from those attempts.
+  compiler came from those attempts. A follow-up isolated build with
+  `-include cstdint` and a local ARM64 endianness declaration progressed
+  to the SLP vectorizer. GCC 16 then rejected its non-const scheduling
+  comparator. These portability experiments were excluded from the results.
 - The inspected [O-MVLL v1.11.1 package](https://github.com/open-obfuscator/o-mvll/releases/tag/v1.11.1)
   supplies an x86-64 Linux-host plugin for Android NDK r29 tooling. It
   could not load into the ARM64 host compiler used here. A comparison needs

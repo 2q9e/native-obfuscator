@@ -75,7 +75,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         shell: bash
         run: |
-          gradle --no-daemon --console=plain "-PreleaseVersion=$RELEASE_VERSION" installDist distZip distTar
+          bash scripts/ci-gradle.sh "-PreleaseVersion=$RELEASE_VERSION" installDist distZip distTar
           test "$(build/install/native-obfuscator/bin/native-obfuscator --version)" = "native-obfuscator $RELEASE_VERSION"
           for arch in x86_64 aarch64; do
             for major in 22 23; do

@@ -19,3 +19,7 @@ The root Gradle build verifies resolved Maven dependencies and POMs against
 the SHA-256 digests in [verification-metadata.xml](../gradle/verification-metadata.xml).
 When updating dependencies, review the changed digests against the published
 artifacts before committing regenerated metadata.
+
+GitHub Actions uses Maven Central by default. On an HTTP 429 from Central,
+it retries once through the [Google Cloud Maven Central mirror](https://docs.cloud.google.com/docs/buildpacks/java#google-cloud-hosted-maven-central-mirror)
+with the same verification metadata. Other build failures propagate immediately.
