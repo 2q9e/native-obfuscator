@@ -44,13 +44,20 @@ entry:
   %b = trunc i64 %right to {size}"""
             left, right = "%a", "%b"
             result = "%extended"
+        case = index // 4
         constant = (0, 1, -1, 3, -6, -(1 << (width - 1)), (1 << (width - 1)) - 1,
-                    rng.getrandbits(width))[index // 4]
+                    rng.getrandbits(width))[case]
         # Force constant products in both operand orders and exercise high-bit
         # corrections from the original width down to a one-bit product.
-        factors = (left, constant) if index // 4 % 2 == 0 else (constant, left)
+        factors = (left, constant) if case % 2 == 0 else (constant, left)
         header += f"\n  %scaled = mul {size} {factors[0]}, {factors[1]}"
         left = "%scaled"
+        if case != 6:
+            # Case 6 keeps two uses of the product across the branch.
+            lhs, rhs = (left, right) if case % 2 == 0 else (right, left)
+            opcode = ("add", "sub", "xor")[case % 3]
+            header += f"\n  %combined = {opcode} {size} {lhs}, {rhs}"
+            left = "%combined"
         body = f"""
   %condition = icmp {rng.choice(RELATIONS)} i64 %left, %right
   br i1 %condition, label %first, label %second
@@ -147,6 +154,10 @@ def test_program(args, work, seed):
     if pipeline.read_bytes() == other_seed.read_bytes():
         raise AssertionError(f"seed {seed} produced identical bitcode with different rewrite seeds")
     isolated_passes = [transform(name, (name,), 42) for name in PASSES]
+    mixed = work / "mixed.ll"
+    run(tool / "llvm-dis", work / "native-mix.bc", "-o", mixed, cwd=work)
+    if "native.mix.rebased" not in mixed.read_text(encoding="utf-8"):
+        raise AssertionError("The isolated mixing pass did not move a product correction")
     for variant in (*isolated_passes, pipeline, other_seed):
         observed = probe_library(link(variant), inputs)
         for offset, (left, right) in enumerate(zip(expected, observed, strict=True)):

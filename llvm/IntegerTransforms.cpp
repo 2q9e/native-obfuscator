@@ -1,5 +1,6 @@
 #include "NativeTransforms.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/InstIterator.h"
 
@@ -139,9 +140,8 @@ static llvm::Value *buildConstantProduct(llvm::IRBuilder<> &Builder,
 
 static llvm::Value *buildMixing(llvm::IRBuilder<> &Builder,
                          const llvm::BinaryOperator &Operation,
+                         llvm::Value *Left, llvm::Value *Right,
                          uint64_t &State) {
-  auto *Left = Operation.getOperand(0);
-  auto *Right = Operation.getOperand(1);
   auto *Type = llvm::cast<llvm::IntegerType>(Operation.getType());
   bool Alternate = nextRandom(State) & 1;
 
@@ -219,6 +219,22 @@ static llvm::Value *buildMixing(llvm::IRBuilder<> &Builder,
   default:
     llvm_unreachable("unsupported native-mix operation");
   }
+}
+
+static llvm::Instruction *moveProductCorrection(
+    llvm::IRBuilder<> &Builder, llvm::Value *&Input, llvm::Value *&Other,
+    llvm::SmallPtrSetImpl<llvm::Value *> &ProductCorrections) {
+  auto *Correction = llvm::dyn_cast<llvm::BinaryOperator>(Input);
+  if (!Correction || !ProductCorrections.contains(Correction) ||
+      !Correction->hasOneUse())
+    return nullptr;
+  // Toggling the high bit adds or subtracts the same value modulo 2^N.
+  // For add, sub, and xor either input can supply the correction. Move it
+  // to the independent input so it can execute in parallel with the product.
+  ProductCorrections.erase(Correction);
+  Input = Correction->getOperand(0);
+  Other = Builder.CreateXor(Other, Correction->getOperand(1), "native.mix.rebased");
+  return Correction;
 }
 
 static std::optional<unsigned> findGuard(const llvm::BinaryOperator &Operation,
@@ -309,17 +325,33 @@ bool rewriteIntegerOperations(llvm::Function &Function,
   }
 
   uint64_t State = functionState(Function, Config.Seed);
+  llvm::SmallPtrSet<llvm::Value *, 8> ProductCorrections;
 
   for (const auto &[Operation, GuardOperand] : Sites) {
     llvm::IRBuilder<> Builder(Operation);
     Builder.SetCurrentDebugLocation(Operation->getDebugLoc());
     llvm::Value *Result;
+    llvm::Instruction *Correction = nullptr;
     if (GuardOperand) {
       // Earlier ordered rewrites can replace an operand of this site.
       Result = branchOperation(
           *Operation, *Operation->getOperand(*GuardOperand), State, IsRoute);
     } else if (IsMix) {
-      Result = buildMixing(Builder, *Operation, State);
+      auto *Left = Operation->getOperand(0);
+      auto *Right = Operation->getOperand(1);
+      auto Opcode = Operation->getOpcode();
+      if (Opcode == llvm::Instruction::Add || Opcode == llvm::Instruction::Sub ||
+          Opcode == llvm::Instruction::Xor) {
+        Correction = moveProductCorrection(Builder, Left, Right, ProductCorrections);
+        if (!Correction)
+          Correction = moveProductCorrection(Builder, Right, Left, ProductCorrections);
+      }
+      Result = buildMixing(Builder, *Operation, Left, Right, State);
+      // Constant multiplication is the only product form with an XOR result.
+      auto *Binary = llvm::dyn_cast<llvm::BinaryOperator>(Result);
+      if (Opcode == llvm::Instruction::Mul && Binary &&
+          Binary->getOpcode() == llvm::Instruction::Xor)
+        ProductCorrections.insert(Binary);
     } else {
       auto *Type = llvm::cast<llvm::IntegerType>(Operation->getType());
       Result = buildEncoding(Builder, *Operation,
@@ -329,6 +361,8 @@ bool rewriteIntegerOperations(llvm::Function &Function,
       ResultInstruction->takeName(Operation);
     Operation->replaceAllUsesWith(Result);
     Operation->eraseFromParent();
+    if (Correction)
+      Correction->eraseFromParent();
   }
   Statistics.TransformedSites += static_cast<unsigned>(Sites.size());
   if (!Sites.empty())
