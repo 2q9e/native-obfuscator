@@ -4,11 +4,102 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
+  llvm:
+    needs: cross-build
+    runs-on: ubuntu-24.04
+    container: quay.io/fedora/fedora:${{ matrix.fedora }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - fedora: '44'
+            llvm: '22'
+          - fedora: '45'
+            llvm: '23'
+    steps:
+      - name: Install the matching LLVM and C++ toolchain
+        env:
+          EXPECTED_LLVM: ${{ matrix.llvm }}
+        run: |
+          dnf install -y clang cmake gcc-c++ git gzip java-25-openjdk-devel llvm llvm-devel llvm-static make python3 tar xz
+          printf '/usr/lib64/llvm%s/bin\n' "$EXPECTED_LLVM" >> "$GITHUB_PATH"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-obfuscator-cli
+      - name: Build and execute LLVM plugin tests
+        shell: bash
+        env:
+          EXPECTED_LLVM: ${{ matrix.llvm }}
+        run: |
+          version=$(llvm-config --version)
+          test "${version%%.*}" = "$EXPECTED_LLVM"
+          cmake -S llvm -B build/llvm-ci -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config --cmakedir)"
+          cmake --build build/llvm-ci --parallel 2
+          ctest --test-dir build/llvm-ci --output-on-failure --no-tests=error
+      - name: Verify scoped LLVM builds through the CLI
+        shell: bash
+        run: |
+          export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+          mkdir -p build/install
+          tar -xzf native-obfuscator-cli.tar.gz -C build/install
+          python3 src/test/native-build/verify.py build/install/native-obfuscator/bin/native-obfuscator \
+            --clang "$(command -v clang)" --llvm-opt "$(command -v opt)" \
+            --llvm-plugin build/llvm-ci/NativeEncode.so
+      - name: Package the tested LLVM plugin
+        shell: bash
+        env:
+          FEDORA_VERSION: ${{ matrix.fedora }}
+        run: |
+          mkdir -p build/plugin-package build/plugin-assets
+          cp build/llvm-ci/NativeEncode.so llvm/README.md LICENSE build/plugin-package/
+          llvm_version=$(llvm-config --version)
+          rpm -q llvm llvm-libs clang > build/plugin-package/toolchain.txt
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C build/plugin-package -cf - . |
+            gzip -n > "build/plugin-assets/native-encode-linux-x86_64-llvm-$llvm_version-fedora$FEDORA_VERSION.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: llvm-plugin-linux-x86_64-${{ matrix.llvm }}
+          path: build/plugin-assets/*.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: matrix.llvm == '23'
+        with:
+          name: zig-linux-x86_64
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: matrix.llvm == '23'
+        with:
+          name: cross-built-fixture
+          path: fixture
+      - name: Build the LLVM differential JAR for all four targets
+        if: matrix.llvm == '23'
+        shell: bash
+        run: |
+          export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+          tar -xJf zig-x86_64-linux-0.15.2.tar.xz
+          build/install/native-obfuscator/bin/native-obfuscator protect \
+            --input fixture/original.jar --output fixture/llvm-maximum.jar --include 'Arithmetic#calc*' \
+            --unsupported retain --target all --zig "$PWD/zig-x86_64-linux-0.15.2/zig" \
+            --clang "$(command -v clang)" --llvm-opt "$(command -v opt)" \
+            --llvm-plugin build/llvm-ci/NativeEncode.so --profile maximum --seed 42
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.llvm == '23'
+        with:
+          name: llvm-differential-fixture
+          path: fixture/llvm-maximum.jar
+          if-no-files-found: error
+          retention-days: 3
+
   differential:
     needs: cross-build
     runs-on: ubuntu-24.04
@@ -44,6 +135,11 @@ jobs:
           JAVA_RELEASE: ${{ matrix.java }}
       - name: Verify JNI array, field, and call slices
         run: python3 src/test/native-coverage/verify.py build/install/native-obfuscator
+      - name: Verify native build budgets and failed-output preservation
+        run: python3 src/test/native-build/verify.py build/install/native-obfuscator/bin/native-obfuscator
+      - name: Check benchmark equivalence and budget enforcement
+        if: matrix.java == '25'
+        run: python3 -B benchmarks/test-comparison.py
       - name: Verify deterministic utility generation and archive heuristics
         shell: bash
         run: |
@@ -140,6 +236,13 @@ jobs:
           done
           echo "::error::Could not download the checksum-pinned Zig archive"
           exit 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zig-linux-x86_64
+          path: zig-x86_64-linux-0.15.2.tar.xz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
       - name: Cross-compile the arithmetic fixture
         shell: bash
         run: |
@@ -188,7 +291,7 @@ jobs:
           retention-days: 3
 
   runtime:
-    needs: cross-build
+    needs: [cross-build, llvm]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     strategy:
@@ -214,11 +317,15 @@ jobs:
         with:
           name: cross-built-fixture
           path: fixture
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: llvm-differential-fixture
+          path: fixture
       - name: Run protected code on the target
         shell: bash
         run: |
           java -Xverify:all -jar fixture/original.jar > original.txt
-          for artifact in protected balanced maximum; do
+          for artifact in protected balanced maximum llvm-maximum; do
             java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED -jar "fixture/$artifact.jar" > "$artifact.txt"
             cmp original.txt "$artifact.txt"
           done

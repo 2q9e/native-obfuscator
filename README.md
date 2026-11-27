@@ -133,7 +133,7 @@ Packaged Linux libraries omit the local symbol table. Windows builds suppress PD
 
 ## LLVM obfuscation
 
-Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `clang` and `opt`. The `compatibility` profile builds JNI code with standard optimization. `balanced` adds arithmetic substitutions. `aggressive` adds mixed Boolean-arithmetic substitutions and equivalent conditional paths. `maximum` increases the mixing budget and also flattens eligible functions into a shared dispatcher with seeded state labels. Each LLVM build compares the final executable sections with a matching baseline and warns when they are identical.
+Build the [LLVM pass plugin](llvm/README.md) with the same LLVM version as `clang` and `opt`. The `compatibility` profile builds JNI code with standard optimization. `balanced` adds arithmetic substitutions. `aggressive` adds mixed Boolean-arithmetic substitutions and equivalent conditional paths. `maximum` increases the mixing budget and also flattens eligible functions into a shared dispatcher with seeded state labels. The build verifies IR after each LLVM pass and compares the final executable sections with a matching baseline.
 
 ```sh
 "$tool" protect --input input.jar --output protected.jar \
@@ -142,7 +142,9 @@ Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `c
   --profile balanced --seed 42 --max-growth 25
 ```
 
-`--max-growth` caps executable code growth as a percentage of the matching LLVM build baseline. Use `--llvm-passes` to specify a custom pipeline. The [benchmark results](docs/verification.md) include code size, JNI overhead, and checks that transformations survive compilation.
+Repeat `--llvm-include` and `--llvm-exclude` with `owner#name(descriptor)` globs to limit preset LLVM passes to particular converted methods. With exclusions alone, all other converted methods remain in scope. Methods outside the LLVM scope still compile to JNI. For an explicit `--llvm-passes` pipeline, use the plugin's own function selectors. JSON configs use arrays under `"llvm-include"` and `"llvm-exclude"`.
+
+`--max-growth` caps executable code growth relative to the LLVM baseline. `--max-native-bytes` caps each packaged native library, including its headers and non-executable sections. `--native-timeout-seconds` sets the timeout for each compiler, linker, or LLVM process. The default is 180 seconds. A violated limit fails the build before it replaces the output. For repeatable comparisons of build time, runtime, memory, and conversion coverage, see the [benchmark runner](benchmarks/README.md).
 
 ## Bytecode support
 
@@ -151,3 +153,5 @@ The translator supports numeric instructions, branches, loops, switches, typed a
 GitHub Actions runs Java 21 and 25 differential tests, Kotlin tests, and JNI runtime checks on all four targets. See the [verification report](docs/verification.md) for the results and the scope of the Fabric smoke test. For local differential tests, set `JAVA_HOME` and `JAVA_RELEASE` to the matching JDK and run `bash src/test/integration.sh "$tool"`. Set `GRADLE_HOME` to Gradle 9.3.1 to run `bash src/test/kotlin/verify.sh "$tool"`.
 
 The project is [MIT-licensed](LICENSE). See the [dependency inventory](docs/dependencies.md) for the licenses packaged with the CLI.
+
+The [release workflow](.github/workflows/release.yml) can be dispatched against an existing version tag. It runs verification, builds versioned CLI archives, and prepares a draft with SHA-256 checksums and signed build provenance. See [release verification](docs/releases.md) for the commands.

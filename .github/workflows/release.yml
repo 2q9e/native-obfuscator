@@ -1,0 +1,93 @@
+name: Prepare attested release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  verify:
+    if: github.ref_type == 'tag'
+    uses: ./.github/workflows/verify.yml
+
+  package:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          gradle-version: '9.3.1'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: llvm-plugin-linux-x86_64-*
+          path: release-assets
+          merge-multiple: true
+      - name: Package the tagged CLI
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          gradle --no-daemon --console=plain distZip distTar
+          mkdir -p release-assets
+          cp build/distributions/native-obfuscator.zip "release-assets/native-obfuscator-$RELEASE_TAG.zip"
+          gzip -n -c build/distributions/native-obfuscator.tar > "release-assets/native-obfuscator-$RELEASE_TAG.tar.gz"
+          (cd release-assets && sha256sum native-encode-*.tar.gz "native-obfuscator-$RELEASE_TAG."{zip,tar.gz} > SHA256SUMS)
+          printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: attested-release-assets
+          path: release-assets/
+          if-no-files-found: error
+
+  draft:
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      attestations: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: attested-release-assets
+          path: release-assets
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ needs.package.outputs.commit }}
+        shell: bash
+        run: |
+          (cd release-assets && sha256sum --check SHA256SUMS)
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)" = "$RELEASE_COMMIT"
+          for asset in release-assets/*; do
+            gh attestation verify "$asset" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+          prerelease=()
+          [[ "$RELEASE_TAG" != *-* ]] || prerelease+=(--prerelease)
+          gh release create --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes \
+            "${prerelease[@]}" "$RELEASE_TAG" release-assets/*
