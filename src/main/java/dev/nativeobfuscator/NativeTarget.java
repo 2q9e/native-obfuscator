@@ -136,11 +136,9 @@ enum NativeTarget {
                     }
                     System.err.println("target=" + key + " " + line + (method == null ? "" : " method=" + method));
                 });
-            if (config.maxGrowth() >= 0 || config.analysis().enabled()) {
-                // The DLL basename affects link layout. Keep both link inputs and outputs identically named.
-                lower(config, optimized, output, clangTriple, linux, null);
-                baseline = readLibrary(output);
-            }
+            // The DLL basename affects link layout. Keep both link inputs and outputs identically named.
+            lower(config, optimized, output, clangTriple, linux, null);
+            baseline = readLibrary(output);
             lower(config, transformed, output, clangTriple, linux, sizes);
         } else {
             var compileFlags = new ArrayList<>(flags);
@@ -158,13 +156,11 @@ enum NativeTarget {
                 key, baselineCode, protectedCode, baseline.length, binary.length);
             if (config.maxGrowth() >= 0 && protectedCode * 100 > baselineCode * (100L + config.maxGrowth()))
                 throw new IOException("Native code growth limit exceeded for " + key);
-            if (config.analysis().enabled()) {
-                String before = NativeImage.executableSha256(baseline, this);
-                String after = NativeImage.executableSha256(binary, this);
-                comparison = new LinkedComparison(baselineCode, baseline.length, before, after, !before.equals(after));
-                if (!comparison.executableChanged())
-                    System.err.println(key + " LLVM pipeline left final executable sections unchanged");
-            }
+            String before = NativeImage.executableSha256(baseline, this);
+            String after = NativeImage.executableSha256(binary, this);
+            comparison = new LinkedComparison(baselineCode, baseline.length, before, after, !before.equals(after));
+            if (!comparison.executableChanged())
+                System.err.println(key + " LLVM pipeline left final executable sections unchanged");
         }
         return new Build(binary, protectedCode, comparison, llvmPasses);
     }
