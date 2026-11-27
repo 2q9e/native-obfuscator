@@ -272,7 +272,18 @@ public final class MethodCompiler {
             case DCONST_0, DCONST_1 -> line(code, out + ".d = " + (op - DCONST_0) + ".0;");
             case ACONST_NULL -> line(code, out + ".r = NULL;");
             case BIPUSH, SIPUSH -> line(code, out + ".i = " + ((IntInsnNode) insn).operand + ";");
-            case LDC -> constant(code, out, ((LdcInsnNode) insn).cst);
+            case LDC -> {
+                var constant = (LdcInsnNode) insn;
+                Type type = JvmBridges.linkedConstantType(constant);
+                if (type == null) {
+                    constant(code, out, constant.cst);
+                } else {
+                    if (bridges == null) throw new Unsupported("constant requires JVM linkage");
+                    MethodNode bridge = bridges.linkedConstant(constant, instructionIndex, type);
+                    emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false,
+                        lookups.slot(instructionIndex));
+                }
+            }
             case ILOAD, LLOAD, FLOAD, DLOAD, ALOAD ->
                 line(code, out + " = l[" + ((VarInsnNode) insn).var + "];");
             case ISTORE, LSTORE, FSTORE, DSTORE, ASTORE ->
@@ -447,7 +458,9 @@ public final class MethodCompiler {
             case INVOKEDYNAMIC -> {
                 var dynamic = (InvokeDynamicInsnNode) insn;
                 if (bridges == null || !JvmBridges.supportsDynamic(dynamic))
-                    throw new Unsupported("dynamic call-site linkage is not verified for this bootstrap");
+                    throw new Unsupported("dynamic call-site linkage is not verified for this bootstrap: "
+                        + dynamic.bsm.getOwner() + "." + dynamic.bsm.getName()
+                        + " with " + dynamic.bsmArgs.length + " static arguments");
                 MethodNode bridge = bridges.dynamic(dynamic, instructionIndex);
                 emitCall(code, owner, method, bridge.name, bridge.desc, frame, failure, references, true, false,
                     lookups.slot(instructionIndex));
@@ -670,6 +683,7 @@ public final class MethodCompiler {
         for (AbstractInsnNode instruction : method.instructions) {
             int opcode = instruction.getOpcode();
             if (opcode == AALOAD || opcode == NEW || JvmBridges.arrayAllocation(opcode)) produced++;
+            else if (instruction instanceof LdcInsnNode constant && JvmBridges.linkedConstantType(constant) != null) produced++;
             else if (instruction instanceof InvokeDynamicInsnNode dynamic && JvmBridges.supportsDynamic(dynamic)) produced++;
             else if (instruction instanceof FieldInsnNode member
                 && (member.getOpcode() == GETFIELD || member.getOpcode() == GETSTATIC)) {

@@ -49,7 +49,8 @@ decisions = [json.loads(line) for line in report.stdout.splitlines()]
 raw_methods = {"covRawZ", "covRawB", "covRawC", "covRawS", "covSpecial", "covReferenceCapacity",
                "covLinkageRaw", "covLinkageMissing", "covExternalNull", "covExternalProtected", "covExternalMissingField",
                "covCastMissing", "covAllocateMissingArray", "covPlainConcat", "covAncestorSuper", "covNullSuper",
-               "covMissingSuper"}
+               "covMissingSuper", "covMethodTypeLiteral", "covHandleLiteral", "covMissingHandle",
+               "covMissingLiteral", "covLambdaBridge"}
 expected = raw_methods | set(re.findall(r"\b(cov\w+)\(", (root / "Coverage.java").read_text()))
 utilities = {d["method"] for d in decisions if d.get("result") == "analysis-utility"}
 selected = {d["method"].split("#")[1].split("(")[0] for d in decisions
@@ -61,12 +62,12 @@ assert native_declarations == expected, declarations
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d.get("result") == "retained"}
 assert set(retained) == {"rejectAllocation", "rejectRawCall", "rejectDirectHierarchy", "rejectUnknownHierarchy",
-                         "rejectLambdaMarkers"}, retained
+                         "rejectMalformedLambdaLayout"}, retained
 assert "bytecode verification failed" in retained["rejectDirectHierarchy"]
 assert "bytecode verification failed" in retained["rejectUnknownHierarchy"]
 assert "object allocation" in retained["rejectAllocation"]
 assert "not proven to fit JNI descriptor B" in retained["rejectRawCall"]
-assert "dynamic call-site linkage" in retained["rejectLambdaMarkers"]
+assert "dynamic call-site linkage" in retained["rejectMalformedLambdaLayout"]
 verified = run(tool + ["verify", "--staged", protected] + selection + flags)
 (work / "verify.jsonl").write_text(verified.stdout)
 verification = json.loads(verified.stdout.splitlines()[-1])
@@ -125,6 +126,10 @@ split_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable
                     "-jar", split_protected])
 
 original_result = run([executable("java"), "-Xverify:all", "-jar", original])
+for outcome in ("interned-literal:true", "class-literals:true", "literal-loop:8192", "literal-initializations:0/1",
+                "missing-literals:0/2/2", "method-type:(J[Ljava/lang/String;)I", "method-handle:true",
+                "lambda-marker:true", "lambda-bridge:bridge/null"):
+    assert "value:" + outcome + ":effects=" in original_result.stdout, outcome
 assert original_result.stdout == split_result.stdout, split_result.stdout
 assert "WARNING in native method" not in split_result.stderr, split_result.stderr
 protected_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable-native-access=ALL-UNNAMED", "-jar", protected])

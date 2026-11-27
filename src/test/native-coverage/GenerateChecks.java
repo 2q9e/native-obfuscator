@@ -1,4 +1,5 @@
 import dev.nativeobfuscator.translate.MethodCompiler;
+import java.lang.invoke.LambdaMetafactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.objectweb.asm.ClassWriter;
@@ -27,6 +28,79 @@ public final class GenerateChecks {
             throw new AssertionError("Unexpected super call diagnostic", expected);
         }
         throw new AssertionError("Malformed super call accepted: " + method.name);
+    }
+
+    private static void referenceConstant(ClassWriter writer, String name, String type, Object constant) {
+        var literal = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, name, "()L" + type + ";", null, null);
+        literal.visitCode();
+        literal.visitLdcInsn(constant);
+        literal.visitInsn(ARETURN);
+        literal.visitMaxs(0, 0);
+        literal.visitEnd();
+    }
+
+    private static void literalFixtures(ClassWriter writer) {
+        referenceConstant(writer, "covMethodTypeLiteral", "java/lang/invoke/MethodType",
+            Type.getMethodType("(J[Ljava/lang/String;)I"));
+        referenceConstant(writer, "covHandleLiteral", "java/lang/invoke/MethodHandle",
+            new Handle(H_INVOKESTATIC, "RawOps", "lambdaTarget", "(I)I", false));
+        referenceConstant(writer, "covMissingHandle", "java/lang/invoke/MethodHandle",
+            new Handle(H_INVOKESTATIC, "RawOps", "undefinedMethod", "(I)I", false));
+
+        var missing = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covMissingLiteral", "(Z)I", null, null);
+        var resolve = new Label();
+        var end = new Label();
+        var handler = new Label();
+        missing.visitCode();
+        missing.visitTryCatchBlock(resolve, end, handler, "java/lang/NoClassDefFoundError");
+        missing.visitVarInsn(ILOAD, 0);
+        missing.visitJumpInsn(IFNE, resolve);
+        missing.visitInsn(ICONST_0);
+        missing.visitInsn(IRETURN);
+        missing.visitLabel(resolve);
+        missing.visitLdcInsn(Type.getObjectType("MissingLiteralTarget"));
+        missing.visitLabel(end);
+        missing.visitInsn(POP);
+        missing.visitInsn(ICONST_1);
+        missing.visitInsn(IRETURN);
+        missing.visitLabel(handler);
+        missing.visitInsn(POP);
+        missing.visitInsn(ICONST_2);
+        missing.visitInsn(IRETURN);
+        missing.visitMaxs(0, 0);
+        missing.visitEnd();
+    }
+
+    private static void lambdaLayoutFixtures(ClassWriter writer) {
+        String typed = "(Ljava/lang/String;)Ljava/lang/String;";
+        String erased = "(Ljava/lang/Object;)Ljava/lang/Object;";
+        String factory = "()Ljava/util/function/Function;";
+        var target = writer.visitMethod(ACC_PRIVATE | ACC_STATIC, "lambdaStringTarget", typed, null, null);
+        target.visitCode();
+        target.visitVarInsn(ALOAD, 0);
+        target.visitInsn(ARETURN);
+        target.visitMaxs(0, 0);
+        target.visitEnd();
+        var bootstrap = new Handle(H_INVOKESTATIC, "java/lang/invoke/LambdaMetafactory", "altMetafactory",
+            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;"
+                + "[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;", false);
+        var implementation = new Handle(H_INVOKESTATIC, "RawOps", "lambdaStringTarget", typed, false);
+        var bridge = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covLambdaBridge", factory, null, null);
+        bridge.visitCode();
+        bridge.visitInvokeDynamicInsn("apply", factory, bootstrap, Type.getMethodType(erased), implementation,
+            Type.getMethodType(typed), LambdaMetafactory.FLAG_MARKERS | LambdaMetafactory.FLAG_BRIDGES,
+            1, Type.getObjectType("Coverage$StringFunction"), 1, Type.getMethodType(typed));
+        bridge.visitInsn(ARETURN);
+        bridge.visitMaxs(0, 0);
+        bridge.visitEnd();
+
+        var malformed = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "rejectMalformedLambdaLayout", factory, null, null);
+        malformed.visitCode();
+        malformed.visitInvokeDynamicInsn("apply", factory, bootstrap, Type.getMethodType(erased), implementation,
+            Type.getMethodType(typed), LambdaMetafactory.FLAG_MARKERS, 1);
+        malformed.visitInsn(ARETURN);
+        malformed.visitMaxs(0, 0);
+        malformed.visitEnd();
     }
 
     private static void superFixtures(ClassWriter raw, Path classes) throws Exception {
@@ -432,6 +506,8 @@ public final class GenerateChecks {
         boxedBoundary.visitInsn(IRETURN);
         boxedBoundary.visitMaxs(0, 0);
         boxedBoundary.visitEnd();
+        literalFixtures(writer);
+        lambdaLayoutFixtures(writer);
         exceptionFixtures(writer);
         writer.visitEnd();
         Files.write(Path.of(args[0]).resolve("RawOps.class"), writer.toByteArray());

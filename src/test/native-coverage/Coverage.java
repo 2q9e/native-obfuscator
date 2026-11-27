@@ -101,6 +101,19 @@ public class Coverage {
         for (int i = 0; i < count; i++) if ((String) value != null) nonNull++;
         return nonNull;
     }
+    private static int literalInitializations;
+    private static final class LazyLiteral {
+        static { literalInitializations++; }
+        static int initialize() { return literalInitializations; }
+    }
+    public static String covStringLiteral() { return "jni\0\uD83D\uDE00"; }
+    public static Class<?> covClassLiteral() { return LazyLiteral.class; }
+    public static Class<?> covArrayLiteral() { return LazyLiteral[][].class; }
+    public static int covLiteralLoop(int steps) {
+        int matches = 0;
+        for (int i = 0; i < steps; i++) if (LazyLiteral.class == covClassLiteral()) matches++;
+        return matches;
+    }
     private static int linkState;
     private static class StaticBase {
         static { linkState += 1; }
@@ -325,8 +338,11 @@ public class Coverage {
         return (IntUnaryOperator & Serializable) value -> lambdaTarget(value) + offset;
     }
     private interface LambdaMarker {}
-    public static IntUnaryOperator rejectLambdaMarkers() {
+    public static IntUnaryOperator covLambdaMarkers() {
         return (IntUnaryOperator & Serializable & LambdaMarker) value -> lambdaTarget(value);
+    }
+    interface StringFunction {
+        String apply(String input);
     }
     public static int covThrow(Throwable failure, boolean fail) throws Throwable {
         if (fail) throw failure;
@@ -448,6 +464,8 @@ public class Coverage {
         try (var input = new ObjectInputStream(new ByteArrayInputStream(serialized))) {
             var restored = (IntUnaryOperator) input.readObject();
             if (restored.applyAsInt(127) != expected) throw new AssertionError("Restored lambda has incorrect behavior");
+            if ((restored instanceof LambdaMarker) != (function instanceof LambdaMarker))
+                throw new AssertionError("Restored lambda has different marker interface");
         }
         return expected + ":" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(serialized));
     }
@@ -529,6 +547,19 @@ public class Coverage {
         show(RawOps::covExternalNull);
         show(() -> RawOps.covExternalProtected(new RawOps()));
         show(() -> RawOps.covExternalProtected(null));
+        show(() -> "interned-literal:" + (covStringLiteral() == "jni\0\uD83D\uDE00"));
+        show(() -> "class-literals:" + (covClassLiteral() == LazyLiteral.class && covArrayLiteral() == LazyLiteral[][].class));
+        show(() -> "literal-loop:" + covLiteralLoop(8192));
+        show(() -> "literal-initializations:" + literalInitializations + "/" + LazyLiteral.initialize());
+        show(() -> "missing-literals:" + RawOps.covMissingLiteral(false) + "/" + RawOps.covMissingLiteral(true)
+            + "/" + RawOps.covMissingLiteral(true));
+        show(() -> "method-type:" + RawOps.covMethodTypeLiteral().toMethodDescriptorString());
+        show(() -> {
+            var handle = RawOps.covHandleLiteral();
+            int result = (int) handle.invokeExact(0x12345678);
+            return "method-handle:" + (result == 0x12345678 && handle == RawOps.covHandleLiteral());
+        });
+        show(RawOps::covMissingHandle);
         show(() -> covExternalVirtual("native"));
         show(() -> covExternalVirtual(null));
         show(() -> covExternalOverride(new VirtualPeer(), 7));
@@ -654,7 +685,13 @@ public class Coverage {
         show(() -> RawOps.covFailedLambda());
         System.out.println("serializable-reference:" + serializableRoundTrip(covSerializableReference(), 74));
         System.out.println("serializable-capture:" + serializableRoundTrip(covSerializableCapture(19), 93));
-        show(() -> rejectLambdaMarkers() instanceof LambdaMarker);
+        show(() -> "lambda-marker:" + (covLambdaMarkers() instanceof LambdaMarker));
+        System.out.println("serializable-marker:" + serializableRoundTrip(covLambdaMarkers(), 74));
+        show(() -> {
+            var function = RawOps.covLambdaBridge();
+            return "lambda-bridge:" + ((StringFunction) function).apply("bridge") + "/" + ((Function<?, ?>) function).apply(null);
+        });
+        show(RawOps::rejectMalformedLambdaLayout);
         Throwable failure = new IllegalStateException("identity");
         show(() -> covThrow(failure, false));
         show(() -> covThrow(failure, true));

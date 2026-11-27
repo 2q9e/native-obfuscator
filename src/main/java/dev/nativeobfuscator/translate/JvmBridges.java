@@ -1,6 +1,8 @@
 package dev.nativeobfuscator.translate;
 
 import java.lang.invoke.LambdaMetafactory;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -45,6 +47,7 @@ final class JvmBridges {
                 || isVolatile(declaredField(owner, field))))
             || instruction.getOpcode() == CHECKCAST || instruction.getOpcode() == INSTANCEOF
             || instruction.getOpcode() == NEW || instruction.getOpcode() == ATHROW || arrayAllocation(instruction.getOpcode())
+            || (instruction instanceof LdcInsnNode constant && linkedConstantType(constant) != null)
             || (instruction instanceof InvokeDynamicInsnNode dynamic && supportsDynamic(dynamic));
     }
 
@@ -139,6 +142,24 @@ final class JvmBridges {
         return create(instructionIndex, null, Type.VOID_TYPE, arguments, new InsnNode(ATHROW));
     }
 
+    static Type linkedConstantType(LdcInsnNode constant) {
+        if (constant.cst instanceof String) return Type.getType(String.class);
+        if (constant.cst instanceof Handle) return Type.getType(MethodHandle.class);
+        if (constant.cst instanceof Type type) {
+            return switch (type.getSort()) {
+                case Type.ARRAY, Type.OBJECT -> Type.getType(Class.class);
+                case Type.METHOD -> Type.getType(MethodType.class);
+                default -> null;
+            };
+        }
+        return null;
+    }
+
+    MethodNode linkedConstant(LdcInsnNode constant, int instructionIndex, Type type) {
+        // The JVM keeps responsibility for interning, access checks, and lazy resolution.
+        return create(instructionIndex, null, type, new Type[0], constant.clone(null));
+    }
+
     static boolean supportsDynamic(InvokeDynamicInsnNode dynamic) {
         Handle bootstrap = dynamic.bsm;
         if (bootstrap.getTag() != H_INVOKESTATIC || bootstrap.isInterface()) return false;
@@ -174,11 +195,27 @@ final class JvmBridges {
             return bootstrap.getDesc().equals(LAMBDA_BOOTSTRAP) && args.length == 3;
         if (!bootstrap.getName().equals("altMetafactory") || !bootstrap.getDesc().equals(ALT_LAMBDA_BOOTSTRAP)
             || args.length < 4 || !(args[3] instanceof Integer flags)) return false;
-        int serializable = LambdaMetafactory.FLAG_SERIALIZABLE;
-        int withBridges = serializable | LambdaMetafactory.FLAG_BRIDGES;
-        // javac also emits the bridges flag followed by a zero bridge count for this form.
-        return (flags == serializable && args.length == 4)
-            || (flags == withBridges && args.length == 5 && args[4] instanceof Integer bridges && bridges == 0);
+        int supportedFlags = LambdaMetafactory.FLAG_SERIALIZABLE | LambdaMetafactory.FLAG_MARKERS
+            | LambdaMetafactory.FLAG_BRIDGES;
+        if ((flags & ~supportedFlags) != 0) return false;
+        int offset = 4;
+        if ((flags & LambdaMetafactory.FLAG_MARKERS) != 0) {
+            offset = lambdaTypesEnd(args, offset, Type.OBJECT);
+            if (offset < 0) return false;
+        }
+        if ((flags & LambdaMetafactory.FLAG_BRIDGES) != 0)
+            offset = lambdaTypesEnd(args, offset, Type.METHOD);
+        return offset == args.length;
+    }
+
+    private static int lambdaTypesEnd(Object[] args, int offset, int sort) {
+        if (offset >= args.length || !(args[offset++] instanceof Integer count)
+            || count < 0 || count > args.length - offset) return -1;
+        int end = offset + count;
+        while (offset < end) {
+            if (!(args[offset++] instanceof Type type) || type.getSort() != sort) return -1;
+        }
+        return end;
     }
 
     MethodNode dynamic(InvokeDynamicInsnNode dynamic, int instructionIndex) {
