@@ -12,40 +12,42 @@ The CLI packages native libraries for Linux x64, Linux ARM64, Windows x64, and W
 
 ## Benchmarks
 
-These measurements are from the same Linux ARM64 host. **Bold marks a lower observed value for Native Obfuscator in a direct comparison with a competitor.** Conversion coverage and binary sizes are exact for the tested artifacts. Timings and memory are medians for the fixture and run settings.
+These measurements are from the same Linux ARM64 host. **Bold marks a clear measured advantage for Native Obfuscator over the competitor.** Conversion coverage and binary sizes are exact for the tested artifacts. Timings and memory are medians for the fixture and run settings.
 
 ### Java-to-native comparison with Radioegor146
 
-Both tools converted **7/7 requested methods** in the unchanged Java fixture, including the synchronized-block method. Both matched the original Java workload's checksums and reproduced their JARs byte-for-byte across five builds. Startup uses 11 fresh JVM samples. Steady-state timings use five JVM forks.
+Both project revisions and Radioegor146 converted all seven requested methods, matched the original Java checksums, and reproduced their JARs byte for byte across five builds. Startup uses 31 fresh JVMs per case. Steady-state timings use seven JVM forks.
 
-| Metric | Native Obfuscator | Radioegor146 3.5.4r |
-| --- | ---: | ---: |
-| Requested methods converted | 7/7 | 7/7 |
-| Full build time | **280.3 ms** | 1,348.5 ms |
-| Startup through first protected call | 64.7 ms | 58.5 ms |
-| Per-call arithmetic | **3.31 ns/update** | 82.94 ns/update |
-| Batch-32 arithmetic | **1.39 ns/update** | 36.04 ns/update |
-| Peak build RSS | **65,760 KiB** | 122,128 KiB |
-| Peak runtime RSS | 45,312 KiB | 44,448 KiB |
-| Protected JAR size | **12,698 B** | 20,455 B |
-| Uncompressed native payload | **67,952 B** | 68,848 B |
+| Metric | Native Obfuscator before | Native Obfuscator after | Radioegor146 3.5.4r |
+| --- | ---: | ---: | ---: |
+| Requested methods converted | 7/7 | 7/7 | 7/7 |
+| Full build time | 241.4 ms | **241.1 ms** | 1,091.5 ms |
+| Startup through first protected call | 47.88 ms | 42.70 ms | 36.86 ms |
+| Per-call arithmetic | 3.31 ns/update | **3.31 ns/update** | 82.43 ns/update |
+| Batch-32 arithmetic | 1.39 ns/update | **1.39 ns/update** | 35.96 ns/update |
+| Peak build RSS | 66,928 KiB | **66,416 KiB** | 121,760 KiB |
+| Peak runtime RSS | 51,120 KiB | 45,936 KiB | 45,520 KiB |
+| Protected JAR size | 12,698 B | **12,739 B** | 20,455 B |
+| Uncompressed native payload | 67,952 B | **67,952 B** | 68,848 B |
 
-The original Java fixture measured 1.34 ns/update per call and 1.35 ns/update in batches. Both variants used Temurin 25.0.5. The comparison used Native Obfuscator `5fa68d2` and Radioegor146 `b3b3a40`. [Run samples and hashes](benchmarks/results/radioegor-full-coverage-linux-arm64-2026-11-27.json)
+The new loader cut process startup time by 10.8% and peak runtime RSS by 10.1%. Radioegor146 still started 5.84 ms sooner. The protected JAR grew by 41 B. The original Java fixture measured 1.34 ns/update per call and 1.35 ns/update in batches. [Run samples and hashes](benchmarks/results/performance-followup-linux-arm64-2026-11-27.json)
 
 ### LLVM pass comparison with Hikari
 
-The baseline and both passes used the same Clang 22.1.8 toolchain and C workload. The Hikari case used its substitution pass. The Native Obfuscator case used `native-mix`.
+All four cases used the same Clang 22.1.8 toolchain and C workload. The Hikari case used its substitution pass. Both project revisions used `native-mix` with identical settings.
 
-| Metric | Clang 22 baseline | Native Obfuscator | Hikari |
-| --- | ---: | ---: | ---: |
-| Build time | 101.12 ms | **104.05 ms** | 123.07 ms |
-| Startup | 1.097 ms | 1.134 ms | 0.942 ms |
-| Per-call arithmetic | 3.007 ns/update | 5.071 ns/update | 3.388 ns/update |
-| Batch-32 arithmetic | 3.016 ns/update | 2.971 ns/update | 2.972 ns/update |
-| Peak runtime RSS | 1,040 KiB | **1,040 KiB** | 1,072 KiB |
-| Executable size | 72,136 B | 72,136 B | 72,136 B |
+| Metric | Clang 22 baseline | Native Obfuscator before | Native Obfuscator after | Hikari |
+| --- | ---: | ---: | ---: | ---: |
+| Build time | 74.01 ms | 80.96 ms | 80.42 ms | 77.56 ms |
+| Startup | 0.450 ms | 0.445 ms | 0.445 ms | 0.450 ms |
+| Single-step arithmetic | 1.778 ns/update | 2.499 ns/update | 2.473 ns/update | 1.295 ns/update |
+| Per-call arithmetic | 2.950 ns/update | 5.069 ns/update | 4.687 ns/update | 3.396 ns/update |
+| Batch-32 arithmetic | 2.973 ns/update | 2.972 ns/update | 2.972 ns/update | 2.973 ns/update |
+| Peak build RSS | 84,848 KiB | 84,864 KiB | 84,864 KiB | 84,864 KiB |
+| Peak runtime RSS | 1,040 KiB | 1,040 KiB | 1,040 KiB | 1,072 KiB |
+| Executable size | 72,136 B | 72,136 B | 72,136 B | 72,136 B |
 
-The two passes were effectively tied on batched arithmetic in this run. [Run samples and hashes](benchmarks/results/c-competitors-linux-arm64-2026-11-27.json)
+Both project revisions rewrote the same five sites across two C kernels. The linked per-call kernel shrank from 23 to 19 instructions, and its median time per update fell 7.5%. Hikari remained faster on the single-step and per-call workloads. [Run samples and hashes](benchmarks/results/performance-followup-linux-arm64-2026-11-27.json)
 
 ### O-MVLL against its Android NDK baseline
 

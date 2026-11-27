@@ -40,6 +40,36 @@ runtime than this project's mixing case in this run. The build intervals also
 include compiler process startup and filesystem effects. JNI overhead and JVM
 JIT behavior make cross-lane runtime comparisons unsuitable.
 
+## Before-and-after performance run
+
+The [performance run samples](../benchmarks/results/performance-followup-linux-arm64-2026-11-27.json)
+compare `d2ce2f3` with `83f95bd` on the same Linux ARM64 host. Every case used
+five builds, 31 fresh startup processes, and seven steady-state forks. Each
+fork ran five warmups and nine measured trials of 524,288 updates. The runner
+shuffled the case order for each runtime sample. `taskset -c 4-7` kept all
+processes on this host's four performance cores. JVM startup includes the
+first native call. RSS is the median of the recorded command peaks.
+
+The JVM cases used the same Temurin 25.0.5 runtime and the unchanged seven-method
+fixture. The standalone Radioegor146 adapter used upstream's Java 8 target for
+its build. Clang 22.1.8 compiled the unchanged C fixture to optimized IR with
+`-O2` and compiled the resulting bitcode to machine code with `-O0` in every
+matched C case. Both project plugin builds used `native-mix` with seed 42,
+an eight-site cap, and the `workload_` function prefix. The Hikari and project
+passes changed different sets of linked kernels. In particular, the project
+pass found zero eligible sites in `workload_batch` under LLVM's defined-value
+checks. The C results describe the costs of those configurations. Independent
+protection effectiveness remains unmeasured.
+
+To repeat the run, install the project distribution at each revision and build
+its LLVM plugin against the same LLVM 22 SDK. Use the competitor adapters and
+settings below. Add a Java case with the earlier distribution's `lib/*` on the
+classpath and invoke `dev.nativeobfuscator.Main protect --input {input} --output
+{output} --unsupported retain --padding off`, followed by an `--include` for
+each entry in the runner's `selected-methods.txt`. Add a second `native-mix`
+case with the earlier plugin and identical pass settings. Run with `--build-runs
+5 --startup-runs 31 --forks 7 --warmups 5 --trials 9 --iterations 524288`.
+
 ## Reproduce the measured configurations
 
 ### O-MVLL on Android ARM64
@@ -89,7 +119,7 @@ Use the [comparison runner](../benchmarks/README.md) and an adapter manifest.
 For the Java lane, use [Radioegor146 revision b3b3a40](https://github.com/Radioegor146/native-obfuscator/commit/b3b3a40ac27c78e343631b078fa62f932edd09ff).
 Build its `obfuscator` and `annotations` Java sources with the dependencies
 declared in that revision. The measured run compiled those sources directly
-with `javac` and Maven Central dependencies after the Gradle plugin download
+with `javac --release 8` and Maven Central dependencies after the Gradle plugin download
 failed. Put compiled classes, `obfuscator/src/main/resources`, and dependency
 JARs on the classpath used by `radioegor-adapter.py`. Use `{input}`,
 `{output}`, and `{selection}` as the final build arguments. The adapter
@@ -98,10 +128,10 @@ receives valid JVM code, then uses CMake/Ninja and repackages the host library.
 
 The C lane used the [Hikari LLVM 22 port at edb82a2](https://github.com/ioctl-codex/Hikari/commit/edb82a24f15be27ec7573b12bef931e7d0ba7f4a).
 The measured out-of-tree build compiled the unmodified `obfuscation/*.cpp`
-sources as a shared C++17 library, with the source directory and LLVM 22 headers
-on the include path, `GIT_COMMIT_HASH` set to that revision, and linked against
-`libLLVM.so.22.1`. The measured plugin's SHA-256 is recorded in the adapter's
-`--version` output.
+sources with C++17, `-O2 -DNDEBUG -fPIC`, the source directory and LLVM 22
+headers on the include path, and `GIT_COMMIT_HASH` set to that revision. It
+linked a shared library against `libLLVM.so.22.1`. The measured plugin's
+SHA-256 is recorded in the adapter's `--version` output.
 
 Register three `llvm-adapter.py` configurations with the same LLVM 22 Clang.
 Pass `--clang-arg=-DBENCHMARK_KERNEL=__attribute__((annotate("sub")))`
