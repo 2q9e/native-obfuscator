@@ -12,6 +12,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--clang", required=True)
     parser.add_argument("--opt")
+    parser.add_argument("--clang-arg", action="append", default=[])
+    parser.add_argument("--opt-arg", action="append", default=[])
     parser.add_argument("--plugin", type=Path)
     parser.add_argument("--passes")
     parser.add_argument("--version", action="store_true")
@@ -21,6 +23,8 @@ def main():
     llvm = (args.opt, args.plugin, args.passes)
     if any(llvm) and not all(llvm):
         parser.error("opt, plugin, and passes must be supplied together")
+    if args.opt_arg and not args.opt:
+        parser.error("opt-arg requires a plugin and passes")
     if args.version:
         subprocess.run([args.clang, "--version"], check=True)
         if args.opt:
@@ -32,11 +36,12 @@ def main():
         parser.error("input and output are required for a build")
     with tempfile.TemporaryDirectory(prefix="llvm-benchmark-", dir=Path.cwd()) as work:
         baseline = Path(work) / "baseline.bc"
-        subprocess.run([args.clang, "-std=c11", "-O2", "-emit-llvm", "-c", args.input, "-o", baseline], check=True)
+        subprocess.run([args.clang, "-std=c11", "-O2", *args.clang_arg,
+                        "-emit-llvm", "-c", args.input, "-o", baseline], check=True)
         backend = baseline
         if args.opt:
             backend = Path(work) / "protected.bc"
-            subprocess.run([args.opt, "-verify-each", f"-load-pass-plugin={args.plugin}",
+            subprocess.run([args.opt, "-verify-each", f"-load-pass-plugin={args.plugin}", *args.opt_arg,
                             f"-passes={args.passes},verify", baseline, "-o", backend], check=True)
         subprocess.run([args.clang, "-O0", backend, "-o", args.output], check=True)
 

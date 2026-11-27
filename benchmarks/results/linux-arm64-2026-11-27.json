@@ -1,0 +1,2042 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "host": {
+    "platform": "Linux-7.2.12-402.asahi.fc45.aarch64+16k-aarch64-with-glibc2.44",
+    "architecture": "aarch64",
+    "pythonVersion": "3.15.0",
+    "javaVersion": "openjdk version \"25.0.5\" 2026-10-20 LTS\nOpenJDK Runtime Environment Temurin-25.0.5+8 (build 25.0.5+8-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.5+8 (build 25.0.5+8-LTS, mixed mode, sharing)",
+    "nativeCompiler": "cc (GCC) 16.2.1 20261029 (Red Hat 16.2.1-3)\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "sourcesSha256": {
+    "analysis-workload.java": "62fb8ebfa797f946ad772092aa2c1b2815e4de45a16ce5a9ba4d547f523514dd",
+    "comparison-workload.c": "f7aed130c8d012bfe9d2e8deb47699d5d3139835632a698861a52e82e20fe67a",
+    "compare.py": "39554ec7556bd9da10667fdd6ec8432175c7fe6cc7348e32c9f00b03ad6fc775"
+  },
+  "distributionJarSha256": "1c2f009778f693b1c64b20ac65c8823cccb39e0fe9540fd17d556fd8788b0791",
+  "settings": {
+    "seeds": [
+      637,
+      2309737967
+    ],
+    "buildRuns": 3,
+    "startupRuns": 5,
+    "steadyForks": 3,
+    "warmups": 5,
+    "trials": 9,
+    "updatesPerTrial": 524288,
+    "gnuTime": "/usr/bin/time",
+    "llvmObjdump": "LLVM version 22.1.8"
+  },
+  "errors": [],
+  "budgetViolations": [],
+  "commonLaneChecksums": {
+    "startup-637-1": {
+      "startup": "13271b2e"
+    },
+    "startup-637-2": {
+      "startup": "13271b2e"
+    },
+    "startup-637-3": {
+      "startup": "13271b2e"
+    },
+    "startup-637-4": {
+      "startup": "13271b2e"
+    },
+    "startup-637-5": {
+      "startup": "13271b2e"
+    },
+    "steady-637-1": {
+      "step": "156c027d",
+      "per_call": "c15c027d",
+      "batched_32": "c15c027d"
+    },
+    "steady-637-2": {
+      "step": "156c027d",
+      "per_call": "c15c027d",
+      "batched_32": "c15c027d"
+    },
+    "steady-637-3": {
+      "step": "156c027d",
+      "per_call": "c15c027d",
+      "batched_32": "c15c027d"
+    }
+  },
+  "cases": {
+    "java-original": {
+      "name": "java-original",
+      "lane": "java",
+      "fixtureBuildMs": 954.086793,
+      "artifact": {
+        "bytes": 3592,
+        "sha256": "6c76cd5cfad4f5407142a6a9a94094ca44a18101a517f0f171576e38b784f0db",
+        "nativePayload": [],
+        "nativePayloadBytes": 0,
+        "coverage": {
+          "status": "measured",
+          "requestedMethods": 7,
+          "nativeMethods": [],
+          "percent": 0.0
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "02f14e22"
+        },
+        "probe-2309737967-1": {
+          "probe": "93acf487"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 123.592878,
+        "medianFirstCallMs": 0.476702,
+        "samples": [
+          {
+            "processMs": 178.768867,
+            "peakRssKiB": 40752,
+            "samplesNs": {
+              "startup": [
+                372787
+              ]
+            }
+          },
+          {
+            "processMs": 123.592878,
+            "peakRssKiB": 39840,
+            "samplesNs": {
+              "startup": [
+                476702
+              ]
+            }
+          },
+          {
+            "processMs": 109.454698,
+            "peakRssKiB": 39120,
+            "samplesNs": {
+              "startup": [
+                2435592
+              ]
+            }
+          },
+          {
+            "processMs": 100.615195,
+            "peakRssKiB": 41760,
+            "samplesNs": {
+              "startup": [
+                166373
+              ]
+            }
+          },
+          {
+            "processMs": 141.3603,
+            "peakRssKiB": 40800,
+            "samplesNs": {
+              "startup": [
+                1013778
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 0.9237804412841797,
+          "per_call": 1.3433895111083984,
+          "batched_32": 1.3468875885009766
+        },
+        "medianPeakRssKiB": 40784,
+        "forks": [
+          {
+            "processMs": 92.744762,
+            "peakRssKiB": 40352,
+            "samplesNs": {
+              "step": [
+                528868,
+                484327,
+                485618,
+                482785,
+                482951,
+                486743,
+                483160,
+                487702,
+                483118
+              ],
+              "per_call": [
+                702157,
+                705824,
+                705324,
+                705032,
+                702116,
+                704865,
+                705240,
+                719115,
+                702324
+              ],
+              "batched_32": [
+                708448,
+                716532,
+                714532,
+                727948,
+                714281,
+                713323,
+                705823,
+                706823,
+                704741
+              ]
+            }
+          },
+          {
+            "processMs": 63.02613,
+            "peakRssKiB": 40848,
+            "samplesNs": {
+              "step": [
+                485660,
+                487077,
+                482826,
+                485660,
+                482827,
+                482826,
+                486035,
+                482827,
+                484910
+              ],
+              "per_call": [
+                704740,
+                704865,
+                702240,
+                704157,
+                704115,
+                704866,
+                701990,
+                704157,
+                704407
+              ],
+              "batched_32": [
+                706157,
+                706698,
+                719865,
+                715449,
+                704573,
+                702324,
+                704115,
+                709115,
+                704490
+              ]
+            }
+          },
+          {
+            "processMs": 69.242253,
+            "peakRssKiB": 40784,
+            "samplesNs": {
+              "step": [
+                482827,
+                483243,
+                485702,
+                482994,
+                485243,
+                482827,
+                485035,
+                482910,
+                484660
+              ],
+              "per_call": [
+                703949,
+                701991,
+                704323,
+                704490,
+                704365,
+                702199,
+                702032,
+                704782,
+                704491
+              ],
+              "batched_32": [
+                707532,
+                710407,
+                719532,
+                712032,
+                705365,
+                704491,
+                704448,
+                702365,
+                704574
+              ]
+            }
+          }
+        ]
+      },
+      "toolVersionSummary": []
+    },
+    "native-obfuscator": {
+      "name": "native-obfuscator",
+      "lane": "java",
+      "limits": {},
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 383.803496,
+            "peakRssKiB": 64512,
+            "success": true,
+            "sha256": "734d1ac299e63670bf61b3a3167b3ce01f97eb266e8591d9104987e8fa9a76f7"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 310.109388,
+            "peakRssKiB": 61296,
+            "success": true,
+            "sha256": "734d1ac299e63670bf61b3a3167b3ce01f97eb266e8591d9104987e8fa9a76f7"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 271.333672,
+            "peakRssKiB": 63792,
+            "success": true,
+            "sha256": "734d1ac299e63670bf61b3a3167b3ce01f97eb266e8591d9104987e8fa9a76f7"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 310.109388,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 11435,
+        "sha256": "734d1ac299e63670bf61b3a3167b3ce01f97eb266e8591d9104987e8fa9a76f7",
+        "nativePayload": [
+          {
+            "entry": "META-INF/native-obfuscator/Runtimeee3b522f8ce7458623cacd90388a400a/aarch64-linux/libprotected.so",
+            "bytes": 67952,
+            "compressedBytes": 3534
+          }
+        ],
+        "nativePayloadBytes": 67952,
+        "coverage": {
+          "status": "measured",
+          "requestedMethods": 7,
+          "nativeMethods": [
+            "step(I)I",
+            "mix(II)I",
+            "batch(III)I",
+            "conditional(I)I",
+            "accumulate(I)I",
+            "arrayUpdate([III)I"
+          ],
+          "percent": 85.71428571428571
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "02f14e22"
+        },
+        "probe-2309737967-1": {
+          "probe": "93acf487"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 297.872723,
+        "medianFirstCallMs": 140.455146,
+        "samples": [
+          {
+            "processMs": 183.567759,
+            "peakRssKiB": 51024,
+            "samplesNs": {
+              "startup": [
+                83755178
+              ]
+            }
+          },
+          {
+            "processMs": 297.872723,
+            "peakRssKiB": 46048,
+            "samplesNs": {
+              "startup": [
+                142739489
+              ]
+            }
+          },
+          {
+            "processMs": 298.988416,
+            "peakRssKiB": 52048,
+            "samplesNs": {
+              "startup": [
+                197867270
+              ]
+            }
+          },
+          {
+            "processMs": 270.145981,
+            "peakRssKiB": 49920,
+            "samplesNs": {
+              "startup": [
+                140455146
+              ]
+            }
+          },
+          {
+            "processMs": 311.495327,
+            "peakRssKiB": 50480,
+            "samplesNs": {
+              "startup": [
+                134187357
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 3.02374267578125,
+          "per_call": 3.3141326904296875,
+          "batched_32": 1.3856697082519531
+        },
+        "medianPeakRssKiB": 49952,
+        "forks": [
+          {
+            "processMs": 172.623785,
+            "peakRssKiB": 45424,
+            "samplesNs": {
+              "step": [
+                2289969,
+                3175373,
+                2289052,
+                2291468,
+                3217164,
+                2294093,
+                2294885,
+                3185456,
+                2815169
+              ],
+              "per_call": [
+                2623505,
+                3331245,
+                2647797,
+                1735518,
+                2628881,
+                2624797,
+                1741601,
+                1737351,
+                1738226
+              ],
+              "batched_32": [
+                723907,
+                725157,
+                749239,
+                730157,
+                724448,
+                727073,
+                726948,
+                726282,
+                724407
+              ]
+            }
+          },
+          {
+            "processMs": 110.397185,
+            "peakRssKiB": 51024,
+            "samplesNs": {
+              "step": [
+                1584353,
+                1586269,
+                1583104,
+                1588437,
+                1585062,
+                1582436,
+                1585228,
+                1581645,
+                1581562
+              ],
+              "per_call": [
+                1737101,
+                1737559,
+                1735102,
+                1737393,
+                1736768,
+                1737267,
+                1734935,
+                1735352,
+                1738392
+              ],
+              "batched_32": [
+                723656,
+                728782,
+                721907,
+                745448,
+                733906,
+                734740,
+                729781,
+                726448,
+                724406
+              ]
+            }
+          },
+          {
+            "processMs": 118.042455,
+            "peakRssKiB": 49952,
+            "samplesNs": {
+              "step": [
+                1582395,
+                1587020,
+                1583103,
+                1586103,
+                1583270,
+                1597895,
+                1583269,
+                1585312,
+                1587937
+              ],
+              "per_call": [
+                1739351,
+                1737268,
+                1735268,
+                1738101,
+                1738476,
+                1737560,
+                1737767,
+                1736393,
+                1737226
+              ],
+              "batched_32": [
+                723906,
+                726781,
+                747073,
+                726449,
+                724407,
+                727323,
+                726490,
+                726989,
+                724324
+              ]
+            }
+          }
+        ]
+      },
+      "relativeTo": "java-original",
+      "comparison": {
+        "artifactGrowthPercent": 218.34632516703783,
+        "startupIncreaseMs": 174.27984500000002,
+        "runtimeOverheadPercent": {
+          "step": 227.3226559741662,
+          "per_call": 146.69931267330472,
+          "batched_32": 2.87938801144787
+        },
+        "peakRssOverheadPercent": 22.479403687720676
+      },
+      "toolVersionSummary": []
+    },
+    "c-original": {
+      "name": "c-original",
+      "lane": "c",
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 79.75815,
+            "peakRssKiB": 33968,
+            "success": true,
+            "sha256": "70ee6d9c4b27bc2680a005cb508b1bfc810ce7547a3675258fa2b63cb5599be0"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 52.307278,
+            "peakRssKiB": 35520,
+            "success": true,
+            "sha256": "70ee6d9c4b27bc2680a005cb508b1bfc810ce7547a3675258fa2b63cb5599be0"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 62.298058,
+            "peakRssKiB": 35472,
+            "success": true,
+            "sha256": "70ee6d9c4b27bc2680a005cb508b1bfc810ce7547a3675258fa2b63cb5599be0"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 62.298058,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 72120,
+        "sha256": "70ee6d9c4b27bc2680a005cb508b1bfc810ce7547a3675258fa2b63cb5599be0",
+        "linkedKernel": {
+          "status": "measured",
+          "symbols": {
+            "workload_step": {
+              "instructions": 4,
+              "encodedBytes": 16,
+              "encodingSha256": "4fea989c88e7b6dd008257f446a0cecd187c1ccebb40b728d871274051100182"
+            },
+            "workload_mix": {
+              "instructions": 10,
+              "encodedBytes": 40,
+              "encodingSha256": "fbd334f850dbd46a163102ddc6ba70f1cf4148a96c6e0ce051dace4f96345f2e"
+            },
+            "workload_batch": {
+              "instructions": 16,
+              "encodedBytes": 64,
+              "encodingSha256": "8dcc1d1e510fe21b4ba4cd02ff622bf14eb7596ac89b505b61a9d28bd15099eb"
+            }
+          },
+          "missingSymbols": []
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "f49da468"
+        },
+        "probe-2309737967-1": {
+          "probe": "52977d9b"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 0.976195,
+        "medianFirstCallMs": 8.3e-05,
+        "samples": [
+          {
+            "processMs": 0.949987,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "startup": [
+                84
+              ]
+            }
+          },
+          {
+            "processMs": 2.115721,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 0.71099,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 0.976195,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 1.056944,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "startup": [
+                41
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 1.0805778503417969,
+          "per_call": 1.4637908935546875,
+          "batched_32": 1.4780960083007812
+        },
+        "medianPeakRssKiB": 1040,
+        "forks": [
+          {
+            "processMs": 33.870866,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "step": [
+                526410,
+                593117,
+                566534,
+                555451,
+                599950,
+                526368,
+                605991,
+                526368,
+                609325
+              ],
+              "per_call": [
+                791781,
+                745948,
+                762114,
+                802905,
+                805989,
+                743407,
+                736281,
+                767448,
+                774947
+              ],
+              "batched_32": [
+                747114,
+                765697,
+                747157,
+                729615,
+                723490,
+                715116,
+                758947,
+                731615,
+                731490
+              ]
+            }
+          },
+          {
+            "processMs": 31.720312,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "step": [
+                656450,
+                546951,
+                639908,
+                646491,
+                545992,
+                671366,
+                588617,
+                623492,
+                682824
+              ],
+              "per_call": [
+                821364,
+                788781,
+                788781,
+                805197,
+                823780,
+                827197,
+                749115,
+                751948,
+                800780
+              ],
+              "batched_32": [
+                805364,
+                745281,
+                740823,
+                778406,
+                776823,
+                746406,
+                747490,
+                774948,
+                784572
+              ]
+            }
+          },
+          {
+            "processMs": 31.951351,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "step": [
+                541117,
+                555742,
+                534326,
+                562784,
+                530868,
+                667116,
+                601200,
+                598533,
+                675449
+              ],
+              "per_call": [
+                750490,
+                744157,
+                761073,
+                713699,
+                897113,
+                869279,
+                810739,
+                747989,
+                755948
+              ],
+              "batched_32": [
+                788823,
+                856822,
+                807988,
+                809531,
+                838739,
+                852571,
+                772198,
+                773697,
+                773864
+              ]
+            }
+          }
+        ]
+      },
+      "relativeTo": "c-original",
+      "toolVersionSummary": [
+        "cc (GCC) 16.2.1 20261029 (Red Hat 16.2.1-3)"
+      ]
+    },
+    "radioegor-3_5_4r": {
+      "name": "radioegor-3_5_4r",
+      "lane": "java",
+      "relativeTo": "native-obfuscator",
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 1511.977388,
+            "peakRssKiB": 123312,
+            "success": true,
+            "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 2502.443805,
+            "peakRssKiB": 123376,
+            "success": true,
+            "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 4306.599162,
+            "peakRssKiB": 121040,
+            "success": true,
+            "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 2502.443805,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 20455,
+        "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310",
+        "nativePayload": [
+          {
+            "entry": "comparison-native/arm64-linux.so",
+            "bytes": 68848,
+            "compressedBytes": 14913
+          }
+        ],
+        "nativePayloadBytes": 68848,
+        "coverage": {
+          "status": "measured",
+          "requestedMethods": 7,
+          "nativeMethods": [
+            "step(I)I",
+            "mix(II)I",
+            "batch(III)I",
+            "conditional(I)I",
+            "accumulate(I)I",
+            "arrayUpdate([III)I",
+            "retainedWithMonitor([II)I"
+          ],
+          "percent": 100.0
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "02f14e22"
+        },
+        "probe-2309737967-1": {
+          "probe": "93acf487"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 202.226418,
+        "medianFirstCallMs": 78.569333,
+        "samples": [
+          {
+            "processMs": 91.302323,
+            "peakRssKiB": 44416,
+            "samplesNs": {
+              "startup": [
+                35651758
+              ]
+            }
+          },
+          {
+            "processMs": 202.226418,
+            "peakRssKiB": 43824,
+            "samplesNs": {
+              "startup": [
+                82420988
+              ]
+            }
+          },
+          {
+            "processMs": 218.569859,
+            "peakRssKiB": 43920,
+            "samplesNs": {
+              "startup": [
+                65810175
+              ]
+            }
+          },
+          {
+            "processMs": 241.48571,
+            "peakRssKiB": 44512,
+            "samplesNs": {
+              "startup": [
+                105355297
+              ]
+            }
+          },
+          {
+            "processMs": 155.905057,
+            "peakRssKiB": 45968,
+            "samplesNs": {
+              "startup": [
+                78569333
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 95.4326343536377,
+          "per_call": 92.57324028015137,
+          "batched_32": 36.026376724243164
+        },
+        "medianPeakRssKiB": 44352,
+        "forks": [
+          {
+            "processMs": 2522.158242,
+            "peakRssKiB": 44400,
+            "samplesNs": {
+              "step": [
+                53998922,
+                95788262,
+                60613872,
+                51138961,
+                54596247,
+                49209862,
+                49209613,
+                51511789,
+                50809424
+              ],
+              "per_call": [
+                83724845,
+                63046714,
+                57506082,
+                66770870,
+                61978353,
+                62971340,
+                62563971,
+                70671733,
+                71732344
+              ],
+              "batched_32": [
+                20932295,
+                21999863,
+                22425524,
+                22421649,
+                22420524,
+                22420899,
+                22432566,
+                24238124,
+                24467079
+              ]
+            }
+          },
+          {
+            "processMs": 1551.950753,
+            "peakRssKiB": 44352,
+            "samplesNs": {
+              "step": [
+                43883436,
+                43868478,
+                43869520,
+                43861687,
+                44749257,
+                44761883,
+                43853895,
+                43849686,
+                42985865
+              ],
+              "per_call": [
+                44156016,
+                44125683,
+                44133891,
+                43248529,
+                44137391,
+                43239111,
+                43329902,
+                45129169,
+                43228612
+              ],
+              "batched_32": [
+                13530855,
+                14909503,
+                18904364,
+                18895823,
+                18890614,
+                18882948,
+                18885781,
+                18899281,
+                18888197
+              ]
+            }
+          },
+          {
+            "processMs": 1652.772946,
+            "peakRssKiB": 44000,
+            "samplesNs": {
+              "step": [
+                46533650,
+                50034185,
+                50027934,
+                50934547,
+                50046518,
+                50052101,
+                50046101,
+                49149613,
+                49601733
+              ],
+              "per_call": [
+                48526206,
+                49401527,
+                47791674,
+                48630996,
+                48535039,
+                49450984,
+                46742022,
+                49414360,
+                48520372
+              ],
+              "batched_32": [
+                13460314,
+                14872962,
+                18846240,
+                18838115,
+                18841365,
+                18839657,
+                18840740,
+                18854239,
+                18845573
+              ]
+            }
+          }
+        ]
+      },
+      "comparison": {
+        "artifactGrowthPercent": 78.88062964582423,
+        "startupIncreaseMs": -95.64630500000001,
+        "runtimeOverheadPercent": {
+          "step": 3056.1096490785408,
+          "per_call": 2693.2870807339027,
+          "batched_32": 2499.9252570579083
+        },
+        "peakRssOverheadPercent": -11.210762331838565
+      },
+      "toolVersionSummary": [
+        "Radioegor146 source revision b3b3a40ac27c78e343631b078fa62f932edd09ff",
+        "native-obfuscator 3.5.4r",
+        "cmake version 4.3.0",
+        "c++ (GCC) 16.2.1 20261029 (Red Hat 16.2.1-3)"
+      ]
+    },
+    "clang-22-matched": {
+      "name": "clang-22-matched",
+      "lane": "c",
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 213.995631,
+            "peakRssKiB": 83968,
+            "success": true,
+            "sha256": "b5994f6ed247c2a92a5696e5c125b727117c9ace4d6e422a1417fcb08d00b76b"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 293.549783,
+            "peakRssKiB": 84992,
+            "success": true,
+            "sha256": "b5994f6ed247c2a92a5696e5c125b727117c9ace4d6e422a1417fcb08d00b76b"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 335.34779,
+            "peakRssKiB": 85424,
+            "success": true,
+            "sha256": "b5994f6ed247c2a92a5696e5c125b727117c9ace4d6e422a1417fcb08d00b76b"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 293.549783,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 72136,
+        "sha256": "b5994f6ed247c2a92a5696e5c125b727117c9ace4d6e422a1417fcb08d00b76b",
+        "linkedKernel": {
+          "status": "measured",
+          "symbols": {
+            "workload_step": {
+              "instructions": 4,
+              "encodedBytes": 16,
+              "encodingSha256": "6a475f74c81b39095e0150d54c16d0116beafbaf8565082a11a7e978c305aaad"
+            },
+            "workload_mix": {
+              "instructions": 11,
+              "encodedBytes": 44,
+              "encodingSha256": "6e15f203fcb91368e59c74797e9ca346af4a46caf17654b3117d721f8e44727a"
+            },
+            "workload_batch": {
+              "instructions": 36,
+              "encodedBytes": 144,
+              "encodingSha256": "c5cbb3d5158cd0586592dd0af457798873a58c5940a2c894d717a9bf581ab102"
+            }
+          },
+          "missingSymbols": []
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "f49da468"
+        },
+        "probe-2309737967-1": {
+          "probe": "52977d9b"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 0.862072,
+        "medianFirstCallMs": 8.3e-05,
+        "samples": [
+          {
+            "processMs": 1.50927,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 1.183442,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 0.842572,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 0.71399,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "startup": [
+                41
+              ]
+            }
+          },
+          {
+            "processMs": 0.862072,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "startup": [
+                42
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 1.8206977844238281,
+          "per_call": 2.950786590576172,
+          "batched_32": 2.9683494567871094
+        },
+        "medianPeakRssKiB": 1040,
+        "forks": [
+          {
+            "processMs": 56.070935,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "step": [
+                768114,
+                542951,
+                570575,
+                648741,
+                720157,
+                1006236,
+                997778,
+                992153,
+                979945
+              ],
+              "per_call": [
+                1517687,
+                1540395,
+                1522229,
+                1527520,
+                1513021,
+                1534229,
+                1572603,
+                1559187,
+                1501229
+              ],
+              "batched_32": [
+                1556270,
+                1557646,
+                1558770,
+                1553687,
+                1556728,
+                1555646,
+                1554729,
+                1556312,
+                1553562
+              ]
+            }
+          },
+          {
+            "processMs": 57.812536,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "step": [
+                954570,
+                720657,
+                635199,
+                1157442,
+                720115,
+                1001486,
+                1014319,
+                962320,
+                932529
+              ],
+              "per_call": [
+                1629561,
+                1577228,
+                1556895,
+                1536354,
+                1547062,
+                1536063,
+                1556020,
+                1533687,
+                1500230
+              ],
+              "batched_32": [
+                1555187,
+                1554312,
+                1551979,
+                1554895,
+                1553145,
+                1557103,
+                1559520,
+                1556770,
+                1557271
+              ]
+            }
+          },
+          {
+            "processMs": 63.842911,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "step": [
+                980153,
+                929404,
+                843613,
+                962528,
+                526409,
+                1363398,
+                1429272,
+                1418813,
+                1030778
+              ],
+              "per_call": [
+                1789517,
+                1827558,
+                1949306,
+                1686435,
+                1734393,
+                1583353,
+                1527479,
+                1562896,
+                1531354
+              ],
+              "batched_32": [
+                1604103,
+                1665810,
+                1569062,
+                1577812,
+                1566520,
+                1576811,
+                1579936,
+                1563520,
+                1653477
+              ]
+            }
+          }
+        ]
+      },
+      "relativeTo": "c-original",
+      "comparison": {
+        "artifactGrowthPercent": 0.022185246810879633,
+        "linkedKernelEncodingChanged": {
+          "workload_step": true,
+          "workload_mix": true,
+          "workload_batch": true
+        },
+        "startupIncreaseMs": -0.11412300000000009,
+        "runtimeOverheadPercent": {
+          "step": 68.49297659099011,
+          "per_call": 101.58525398463479,
+          "batched_32": 100.82250680045628
+        },
+        "peakRssOverheadPercent": 0.0
+      },
+      "toolVersionSummary": [
+        "clang version 22.1.8 (Fedora 22.1.8-2.fc45)"
+      ]
+    },
+    "hikari-edb82a2": {
+      "name": "hikari-edb82a2",
+      "lane": "c",
+      "relativeTo": "clang-22-matched",
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 194.317111,
+            "peakRssKiB": 83488,
+            "success": true,
+            "sha256": "8942ebd7caba19fe66dc02588635bb1c99b28cef49e206cbfdd6a69dac10176a"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 248.749276,
+            "peakRssKiB": 85024,
+            "success": true,
+            "sha256": "8942ebd7caba19fe66dc02588635bb1c99b28cef49e206cbfdd6a69dac10176a"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 140.76535,
+            "peakRssKiB": 85504,
+            "success": true,
+            "sha256": "8942ebd7caba19fe66dc02588635bb1c99b28cef49e206cbfdd6a69dac10176a"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 194.317111,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 72136,
+        "sha256": "8942ebd7caba19fe66dc02588635bb1c99b28cef49e206cbfdd6a69dac10176a",
+        "linkedKernel": {
+          "status": "measured",
+          "symbols": {
+            "workload_step": {
+              "instructions": 4,
+              "encodedBytes": 16,
+              "encodingSha256": "6a475f74c81b39095e0150d54c16d0116beafbaf8565082a11a7e978c305aaad"
+            },
+            "workload_mix": {
+              "instructions": 22,
+              "encodedBytes": 88,
+              "encodingSha256": "b663ae2c950450a5172110da13750e1355d3fdc71527babd1e474cec5e01a6f5"
+            },
+            "workload_batch": {
+              "instructions": 38,
+              "encodedBytes": 152,
+              "encodingSha256": "55f266e2f443eac179108575bf20284ce30a73b3230c84d25d5e4008f6c105ed"
+            }
+          },
+          "missingSymbols": []
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "f49da468"
+        },
+        "probe-2309737967-1": {
+          "probe": "52977d9b"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 0.920862,
+        "medianFirstCallMs": 4.2e-05,
+        "samples": [
+          {
+            "processMs": 0.959737,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "startup": [
+                84
+              ]
+            }
+          },
+          {
+            "processMs": 0.920862,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "startup": [
+                41
+              ]
+            }
+          },
+          {
+            "processMs": 0.628116,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "startup": [
+                42
+              ]
+            }
+          },
+          {
+            "processMs": 0.969903,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "startup": [
+                42
+              ]
+            }
+          },
+          {
+            "processMs": 0.690532,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "startup": [
+                42
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 1.7081661224365234,
+          "per_call": 3.3067398071289062,
+          "batched_32": 2.9731178283691406
+        },
+        "medianPeakRssKiB": 1040,
+        "forks": [
+          {
+            "processMs": 61.707107,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "step": [
+                860989,
+                914237,
+                911737,
+                764906,
+                658532,
+                1121859,
+                864572,
+                1057652,
+                945654
+              ],
+              "per_call": [
+                1782183,
+                1786725,
+                1770976,
+                1791183,
+                1742892,
+                1714602,
+                1713269,
+                1715185,
+                1708809
+              ],
+              "batched_32": [
+                1567937,
+                1581270,
+                1569395,
+                1578686,
+                1578354,
+                1582312,
+                1570978,
+                1578978,
+                1680435
+              ]
+            }
+          },
+          {
+            "processMs": 60.880618,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "step": [
+                713198,
+                939279,
+                1055819,
+                955778,
+                855071,
+                690491,
+                526368,
+                907279,
+                895571
+              ],
+              "per_call": [
+                1744726,
+                1738893,
+                1733684,
+                1717726,
+                1739101,
+                1742392,
+                1708435,
+                1705560,
+                1709184
+              ],
+              "batched_32": [
+                1557229,
+                1559312,
+                1557353,
+                1559770,
+                1559353,
+                1557396,
+                1558687,
+                1556853,
+                1558603
+              ]
+            }
+          },
+          {
+            "processMs": 59.192058,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "step": [
+                998236,
+                1001694,
+                1007277,
+                1023986,
+                590450,
+                708199,
+                526409,
+                884071,
+                784489
+              ],
+              "per_call": [
+                1829016,
+                1732726,
+                1726809,
+                1706893,
+                1723184,
+                1708852,
+                1771142,
+                1728559,
+                1695144
+              ],
+              "batched_32": [
+                1556353,
+                1558770,
+                1556645,
+                1560770,
+                1559312,
+                1557270,
+                1559812,
+                1557603,
+                1559770
+              ]
+            }
+          }
+        ]
+      },
+      "comparison": {
+        "artifactGrowthPercent": 0.0,
+        "linkedKernelEncodingChanged": {
+          "workload_step": false,
+          "workload_mix": true,
+          "workload_batch": true
+        },
+        "startupIncreaseMs": 0.05879000000000001,
+        "runtimeOverheadPercent": {
+          "step": -6.180688687052804,
+          "per_call": 12.06299424328179,
+          "batched_32": 0.16064050582482725
+        },
+        "peakRssOverheadPercent": 0.0
+      },
+      "toolVersionSummary": [
+        "clang version 22.1.8 (Fedora 22.1.8-2.fc45)",
+        "  LLVM version 22.1.8",
+        "Pass plugin SHA-256 dd7122e8b3600155a2fa7965ef7ae3c0c6a872d19095c2193a5d36d137584fde"
+      ]
+    },
+    "native-mix": {
+      "name": "native-mix",
+      "lane": "c",
+      "relativeTo": "clang-22-matched",
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 238.335587,
+            "peakRssKiB": 85488,
+            "success": true,
+            "sha256": "7c65c32b1d498c4a62cb609610d3ebad89a20e10337620f99c7c351ed3449f07"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 180.93992,
+            "peakRssKiB": 85504,
+            "success": true,
+            "sha256": "7c65c32b1d498c4a62cb609610d3ebad89a20e10337620f99c7c351ed3449f07"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 213.749467,
+            "peakRssKiB": 84336,
+            "success": true,
+            "sha256": "7c65c32b1d498c4a62cb609610d3ebad89a20e10337620f99c7c351ed3449f07"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 213.749467,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 72136,
+        "sha256": "7c65c32b1d498c4a62cb609610d3ebad89a20e10337620f99c7c351ed3449f07",
+        "linkedKernel": {
+          "status": "measured",
+          "symbols": {
+            "workload_step": {
+              "instructions": 6,
+              "encodedBytes": 24,
+              "encodingSha256": "833dfecc4e876bf28f95bfb56f1005e905d3ceacabb055c9727d024a84712e00"
+            },
+            "workload_mix": {
+              "instructions": 23,
+              "encodedBytes": 92,
+              "encodingSha256": "f6edc6fc97ca7ea544b330637fcd6dbe1912d71dbe5b5cc967d8748fff4e0cea"
+            },
+            "workload_batch": {
+              "instructions": 36,
+              "encodedBytes": 144,
+              "encodingSha256": "c5cbb3d5158cd0586592dd0af457798873a58c5940a2c894d717a9bf581ab102"
+            }
+          },
+          "missingSymbols": []
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "f49da468"
+        },
+        "probe-2309737967-1": {
+          "probe": "52977d9b"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 1.01982,
+        "medianFirstCallMs": 8.3e-05,
+        "samples": [
+          {
+            "processMs": 1.206858,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 2.158428,
+            "peakRssKiB": 1040,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 0.764156,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 1.01982,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "startup": [
+                84
+              ]
+            }
+          },
+          {
+            "processMs": 0.953862,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 2.663179397583008,
+          "per_call": 5.070695877075195,
+          "batched_32": 2.970733642578125
+        },
+        "medianPeakRssKiB": 1072,
+        "forks": [
+          {
+            "processMs": 77.276017,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "step": [
+                1244149,
+                1141192,
+                1284149,
+                1266524,
+                1223525,
+                1229441,
+                1259108,
+                1254316,
+                684365
+              ],
+              "per_call": [
+                2659921,
+                2656963,
+                2658796,
+                2657214,
+                2656130,
+                2657546,
+                2658547,
+                2656755,
+                2657922
+              ],
+              "batched_32": [
+                1557521,
+                1556854,
+                1557520,
+                1559395,
+                1558145,
+                1556937,
+                1555603,
+                1555854,
+                1559145
+              ]
+            }
+          },
+          {
+            "processMs": 80.45189,
+            "peakRssKiB": 1024,
+            "samplesNs": {
+              "step": [
+                1454855,
+                1510812,
+                1397898,
+                1364815,
+                1443939,
+                1414564,
+                1404189,
+                1343523,
+                1343898
+              ],
+              "per_call": [
+                2659755,
+                2657797,
+                2659922,
+                2660713,
+                2656714,
+                2658505,
+                2657046,
+                2657089,
+                2661546
+              ],
+              "batched_32": [
+                1557520,
+                1560561,
+                1557562,
+                1559978,
+                1557687,
+                1559228,
+                1560228,
+                1554895,
+                1558895
+              ]
+            }
+          },
+          {
+            "processMs": 96.440294,
+            "peakRssKiB": 1072,
+            "samplesNs": {
+              "step": [
+                2803128,
+                2803211,
+                2826044,
+                1199441,
+                1179692,
+                1396273,
+                1523270,
+                1221316,
+                1233150
+              ],
+              "per_call": [
+                3157040,
+                3002750,
+                3006876,
+                3021584,
+                2792962,
+                2770003,
+                2775337,
+                2711463,
+                2660755
+              ],
+              "batched_32": [
+                1554895,
+                1552646,
+                1561021,
+                1556186,
+                1560895,
+                1554812,
+                1558020,
+                1554020,
+                1558895
+              ]
+            }
+          }
+        ]
+      },
+      "comparison": {
+        "artifactGrowthPercent": 0.0,
+        "linkedKernelEncodingChanged": {
+          "workload_step": true,
+          "workload_mix": true,
+          "workload_batch": false
+        },
+        "startupIncreaseMs": 0.157748,
+        "runtimeOverheadPercent": {
+          "step": 46.27245775584819,
+          "per_call": 71.84217568526665,
+          "batched_32": 0.08032025291240252
+        },
+        "peakRssOverheadPercent": 3.076923076923066
+      },
+      "toolVersionSummary": [
+        "clang version 22.1.8 (Fedora 22.1.8-2.fc45)",
+        "  LLVM version 22.1.8",
+        "Pass plugin SHA-256 f26c751acba4a1a102f4d58175cc623c6646306631e7f8cc67014b6ee7622028"
+      ]
+    }
+  }
+}

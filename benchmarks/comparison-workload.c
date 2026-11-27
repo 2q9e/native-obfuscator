@@ -19,10 +19,13 @@
 #else
 #define NOINLINE
 #endif
+#ifndef BENCHMARK_KERNEL
+#define BENCHMARK_KERNEL
+#endif
 
 enum { BATCH = 32 };
 
-NOINLINE uint32_t workload_step(uint32_t value) {
+BENCHMARK_KERNEL NOINLINE uint32_t workload_step(uint32_t value) {
     return value ^ UINT32_C(0x13271953);
 }
 
@@ -31,11 +34,11 @@ static uint32_t recurrence(uint32_t value, uint32_t index) {
            + (index ^ UINT32_C(0x72a57b21));
 }
 
-NOINLINE uint32_t workload_mix(uint32_t value, uint32_t index) {
+BENCHMARK_KERNEL NOINLINE uint32_t workload_mix(uint32_t value, uint32_t index) {
     return recurrence(value, index);
 }
 
-NOINLINE uint32_t workload_batch(uint32_t value, uint32_t start, uint32_t count) {
+BENCHMARK_KERNEL NOINLINE uint32_t workload_batch(uint32_t value, uint32_t start, uint32_t count) {
     for (uint32_t offset = 0; offset < count; ++offset) {
         value = recurrence(value, start + offset);
     }

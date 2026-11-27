@@ -24,6 +24,7 @@ METHODS = (
     "arrayUpdate([III)I", "retainedWithMonitor([II)I",
 )
 WORKLOADS = ("step", "per_call", "batched_32")
+KERNEL_SYMBOLS = ("workload_step", "workload_mix", "workload_batch")
 BATCH = 32
 LIMITS = {
     "maxBuildMs", "minBuildSuccessPercent", "minNativeCoveragePercent", "maxArtifactGrowthPercent",
@@ -161,7 +162,28 @@ def coverage(runner, artifact, directory):
             "percent": 100 * len(native) / len(METHODS)}
 
 
-def artifact_metrics(runner, artifact, lane, directory):
+def kernel_encodings(disassembly):
+    words = {}
+    active = None
+    for line in disassembly.splitlines():
+        if label := re.fullmatch(r"\s*[0-9a-fA-F]+ <([^>]+)>:\s*", line):
+            active = label[1]
+        if active not in KERNEL_SYMBOLS:
+            continue
+        # LLVM objdump prints one 32-bit word on AArch64 and individual bytes on x86-64.
+        raw = line.split("\t", 1)[0]
+        if match := re.fullmatch(r"\s*[0-9a-fA-F]+:\s+([0-9a-fA-F]+(?: +[0-9a-fA-F]{2})*)\s*", raw):
+            items = match[1].split()
+            if all(len(item) in (2, 8) for item in items):
+                words.setdefault(active, []).append(bytes.fromhex("".join(items)))
+    return {
+        name: {"instructions": len(encoded), "encodedBytes": sum(map(len, encoded)),
+               "encodingSha256": hashlib.sha256(b"".join(encoded)).hexdigest()}
+        for name, encoded in words.items()
+    }
+
+
+def artifact_metrics(runner, artifact, lane, directory, objdump=None):
     report = {"bytes": artifact.stat().st_size, "sha256": digest(artifact)}
     if lane == "java":
         with zipfile.ZipFile(artifact) as archive:
@@ -171,6 +193,14 @@ def artifact_metrics(runner, artifact, lane, directory):
             ]
         report.update(nativePayload=payload, nativePayloadBytes=sum(item["bytes"] for item in payload),
                       coverage=coverage(runner, artifact, directory))
+    elif objdump:
+        execution, disassembly, _ = runner.run(
+            [objdump, "--disassemble", "--disassemble-zeroes",
+             "--disassemble-symbols=" + ",".join(KERNEL_SYMBOLS), artifact], directory / "objdump")
+        symbols = kernel_encodings(disassembly) if execution["returnCode"] == 0 else {}
+        missing = sorted(set(KERNEL_SYMBOLS) - symbols.keys())
+        report["linkedKernel"] = {"status": "measured" if not missing else "incomplete",
+                                  "symbols": symbols, "missingSymbols": missing, "log": execution["log"]}
     return report
 
 
@@ -296,6 +326,14 @@ def compare(case, reference):
         return (value / denominator - 1) * 100 if value is not None and denominator else None
 
     result["artifactGrowthPercent"] = overhead(stats.get("bytes"), base.get("bytes"))
+    before_symbols = base.get("linkedKernel", {}).get("symbols", {})
+    after_symbols = stats.get("linkedKernel", {}).get("symbols", {})
+    if before_symbols or after_symbols:
+        result["linkedKernelEncodingChanged"] = {
+            symbol: (before_symbols[symbol]["encodingSha256"] != after_symbols[symbol]["encodingSha256"]
+                     if symbol in before_symbols and symbol in after_symbols else None)
+            for symbol in KERNEL_SYMBOLS
+        }
     if case.get("semanticMatch") and reference.get("semanticMatch"):
         result["startupIncreaseMs"] = case["startup"]["medianProcessMs"] - reference["startup"]["medianProcessMs"]
         measured, standard = case["steady"], reference["steady"]
@@ -342,6 +380,7 @@ def arguments():
     parser.add_argument("--include-c", action="store_true", help="also compile and run the C baseline")
     parser.add_argument("--cc", default=os.environ.get("CC", "cc"))
     parser.add_argument("--gnu-time", help="GNU time executable for peak RSS (autodetected on Linux)")
+    parser.add_argument("--llvm-objdump", help="LLVM disassembler for optional linked C kernel measurements")
     parser.add_argument("--seed", type=int, action="append", help="repeatable; defaults to 637 and 2309737967")
     parser.add_argument("--build-runs", type=int, default=3)
     parser.add_argument("--startup-runs", type=int, default=7)
@@ -386,6 +425,12 @@ def main(args):
     if time_executable:
         _, version, _ = checked(runner.run([time_executable, "--version"], root / "gnu-time"))
         require("gnu time" in version.lower(), f"{time_executable} is not GNU time")
+    objdump_info = None
+    if args.llvm_objdump:
+        resolved = shutil.which(args.llvm_objdump) or args.llvm_objdump
+        args.llvm_objdump = str(Path(resolved).resolve())
+        _, out, err = checked(runner.run([args.llvm_objdump, "--version"], root / "llvm-objdump"))
+        objdump_info = (out + err).strip()
     java_root = root / "java-original"
     java_root.mkdir()
     classes = java_root / "classes"
@@ -438,7 +483,7 @@ def main(args):
             errors.append(f"{name}: no runnable artifact")
             continue
         try:
-            case["artifact"] = artifact_metrics(runner, package, lane, root / name)
+            case["artifact"] = artifact_metrics(runner, package, lane, root / name, args.llvm_objdump)
             runtimes[lane][name] = package
         except (OSError, zipfile.BadZipFile) as error:
             errors.append(f"{name}: invalid build artifact: {error}")
@@ -471,7 +516,7 @@ def main(args):
         "distributionJarSha256": digest(libs / "native-obfuscator.jar") if (libs / "native-obfuscator.jar").is_file() else None,
         "settings": {"seeds": args.seed, "buildRuns": args.build_runs, "startupRuns": args.startup_runs,
                      "steadyForks": args.forks, "warmups": args.warmups, "trials": args.trials,
-                     "updatesPerTrial": args.iterations, "gnuTime": time_executable},
+                     "updatesPerTrial": args.iterations, "gnuTime": time_executable, "llvmObjdump": objdump_info},
         "errors": errors, "budgetViolations": violations, "commonLaneChecksums": common_checksums,
         "cases": report_cases,
     }

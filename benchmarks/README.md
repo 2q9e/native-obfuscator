@@ -106,3 +106,9 @@ This runner does not assign reconstruction-difficulty scores. Use the existing
 `analysis-resistance.py` linked-code metrics and `ghidra/` helper-recovery fixtures for
 this project's analysis profiles. A comparative reconstruction study needs a common
 ground truth, controlled analyst access, and a reproducible scoring procedure.
+
+The [comparative evaluation](../docs/competitive-evaluation.md) gives measured
+results and build settings for Radioegor146 and Hikari. Pass `--llvm-objdump`
+to collect instruction counts and encoding hashes for the three named C
+kernels. The hashes measure changes in linked encodings and can also reflect
+layout and relocation differences.

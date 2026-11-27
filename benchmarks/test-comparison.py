@@ -9,8 +9,27 @@ import subprocess
 import sys
 import tempfile
 
+from compare import kernel_encodings
+
 
 HERE = Path(__file__).resolve().parent
+
+
+def check_disassembly():
+    measurements = kernel_encodings(
+        "00000000400818 <workload_step>:\n"
+        "  400818: d65f03c0     \tret\n"
+        "0000000040081c <workload_mix>:\n"
+        "  40081c: 89 f8        \tmovl %edi, %eax\n"
+        "  40081e: c3           \tretq\n"
+        "0000000040081f <other>:\n"
+        "  40081f: c3           \tretq\n"
+    )
+    assert set(measurements) == {"workload_step", "workload_mix"}
+    assert measurements["workload_step"]["encodedBytes"] == 4
+    assert measurements["workload_mix"]["encodedBytes"] == 3
+    assert measurements["workload_mix"]["instructions"] == 2
+    assert measurements["workload_step"]["encodingSha256"] != measurements["workload_mix"]["encodingSha256"]
 
 
 def run(args, root, name, entries, *options):
@@ -36,6 +55,7 @@ def main():
     parser.add_argument("--cc", default="cc")
     parser.add_argument("--zig", type=Path)
     args = parser.parse_args()
+    check_disassembly()
     cc = shutil.which(args.cc) or args.cc
     clone = {
         "name": "jar-control", "lane": "java", "relativeTo": "native-obfuscator",
