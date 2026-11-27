@@ -119,6 +119,24 @@ static llvm::Value *buildSplitProduct(llvm::IRBuilder<> &Builder, llvm::Value *L
   return Builder.CreateAdd(First, Other);
 }
 
+static llvm::Value *buildConstantProduct(llvm::IRBuilder<> &Builder,
+                                          llvm::Value *Input,
+                                          llvm::ConstantInt *Multiplier,
+                                          uint64_t &State) {
+  auto *Type = Multiplier->getType();
+  unsigned Width = Multiplier->getValue().getBitWidth();
+  unsigned Pivot = Width - 1 - Multiplier->getValue().countr_zero();
+  unsigned MaskEnd = Pivot + 1 + nextRandom(State) % (Width - Pivot);
+  auto *InputMask = llvm::ConstantInt::get(Type, llvm::APInt::getBitsSet(Width, Pivot, MaskEnd));
+  auto *SignBit = llvm::ConstantInt::get(Type, llvm::APInt::getSignMask(Width));
+  // The pivot flips the product's high bit. Higher input bits in the mask
+  // are discarded by multiplication modulo 2^N. Contiguous XOR masks
+  // are encodable as logical immediates on AArch64.
+  auto *Adjusted = Builder.CreateXor(Input, InputMask, "native.mix.shifted");
+  auto *Product = Builder.CreateMul(Adjusted, Multiplier, "native.mix.product");
+  return Builder.CreateXor(Product, SignBit);
+}
+
 static llvm::Value *buildMixing(llvm::IRBuilder<> &Builder,
                          const llvm::BinaryOperator &Operation,
                          uint64_t &State) {
@@ -152,6 +170,12 @@ static llvm::Value *buildMixing(llvm::IRBuilder<> &Builder,
     return Builder.CreateSub(Different, Carry);
   }
   case llvm::Instruction::Mul: {
+    if (auto *Multiplier = llvm::dyn_cast<llvm::ConstantInt>(Right);
+        Multiplier && !Multiplier->isZero())
+      return buildConstantProduct(Builder, Left, Multiplier, State);
+    if (auto *Multiplier = llvm::dyn_cast<llvm::ConstantInt>(Left);
+        Multiplier && !Multiplier->isZero())
+      return buildConstantProduct(Builder, Right, Multiplier, State);
     if (Alternate) {
       unsigned Width = Type->getBitWidth();
       auto Mask = llvm::APInt(64, nextRandom(State)).zextOrTrunc(Width);

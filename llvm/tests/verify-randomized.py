@@ -44,6 +44,13 @@ entry:
   %b = trunc i64 %right to {size}"""
             left, right = "%a", "%b"
             result = "%extended"
+        constant = (0, 1, -1, 3, -6, -(1 << (width - 1)), (1 << (width - 1)) - 1,
+                    rng.getrandbits(width))[index // 4]
+        # Force constant products in both operand orders and exercise high-bit
+        # corrections from the original width down to a one-bit product.
+        factors = (left, constant) if index // 4 % 2 == 0 else (constant, left)
+        header += f"\n  %scaled = mul {size} {factors[0]}, {factors[1]}"
+        left = "%scaled"
         body = f"""
   %condition = icmp {rng.choice(RELATIONS)} i64 %left, %right
   br i1 %condition, label %first, label %second
