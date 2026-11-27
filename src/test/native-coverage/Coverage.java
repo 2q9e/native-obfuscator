@@ -282,7 +282,17 @@ public class Coverage {
     private static ExpressionAllocation covConstructExpression(boolean take, @ConstructorLabel("argument") int value,
                                                                long offset, RuntimeException failure) {
         if (!take) return null;
-        return new ExpressionAllocation(constructionArgument(value, failure) + constructionAdjustment, "jni-construction", constructionOffset(offset + offset));
+        return new ExpressionAllocation(
+            constructionArgument(value, failure) + constructionAdjustment,
+            "jni-construction",
+            constructionOffset(offset + offset));
+    }
+
+    private static String covConstructFromArray(double[] values, int index, CharSequence text) {
+        return new StringBuilder(
+            ((int) (values[index] * 2.5) & 127) + text.length())
+            .append(text)
+            .toString();
     }
 
     private long covConstructField(int divisor) {
@@ -688,6 +698,9 @@ public class Coverage {
         });
         show(() -> "constructor-literal-skipped:" + (RawOps.covMissingConstructorLiteral(false) == null)
             + "/" + constructorLiteralInitializations);
+        show(() -> "constructor-array:" + covConstructFromArray(new double[]{3.5}, 0, "array"));
+        show(() -> covConstructFromArray(new double[0], 1, "unused"));
+        show(() -> covConstructFromArray(new double[]{3.5}, 0, null));
         show(() -> {
             var method = Coverage.class.getDeclaredMethod("covConstructExpression",
                 boolean.class, int.class, long.class, RuntimeException.class);

@@ -1,14 +1,21 @@
 package dev.nativeobfuscator.translate;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.LineNumberNode;
+import org.objectweb.asm.tree.LookupSwitchInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TableSwitchInsnNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 import org.objectweb.asm.tree.analysis.BasicInterpreter;
@@ -26,18 +33,34 @@ record ConstructorExpression(MethodInsnNode constructor, List<AbstractInsnNode> 
 
     static ConstructorExpression plan(TypeInsnNode allocation, MethodNode method, Frame<BasicValue>[] frames)
             throws MethodCompiler.Unsupported {
-        AbstractInsnNode duplicate = allocation.getNext();
+        var boundaries = new HashSet<LabelNode>();
+        for (var range : method.tryCatchBlocks) {
+            boundaries.add(range.start);
+            boundaries.add(range.end);
+            boundaries.add(range.handler);
+        }
+        for (var instruction : method.instructions) {
+            if (instruction instanceof JumpInsnNode jump) boundaries.add(jump.label);
+            if (instruction instanceof TableSwitchInsnNode table) {
+                boundaries.add(table.dflt);
+                boundaries.addAll(table.labels);
+            }
+            if (instruction instanceof LookupSwitchInsnNode lookup) {
+                boundaries.add(lookup.dflt);
+                boundaries.addAll(lookup.labels);
+            }
+        }
+        AbstractInsnNode duplicate = nextExecutable(allocation, boundaries);
         if (duplicate == null || duplicate.getOpcode() != DUP) throw unsupported("expected DUP after NEW");
         int base = frames[method.instructions.indexOf(allocation)].getStackSize() + 2;
         var captures = new LinkedHashMap<Integer, Capture>();
         var arguments = new ArrayList<AbstractInsnNode>();
         int slots = 0;
-        for (AbstractInsnNode instruction = duplicate.getNext(); instruction != null; instruction = instruction.getNext()) {
+        for (AbstractInsnNode instruction = nextExecutable(duplicate, boundaries); instruction != null;
+             instruction = nextExecutable(instruction, boundaries)) {
             int index = method.instructions.indexOf(instruction);
             Frame<BasicValue> frame = frames[index];
             if (frame == null) throw unsupported("unreachable instruction in argument region");
-            if (instruction.getOpcode() < 0)
-                throw unsupported("argument region crosses a control-flow or exception boundary or a debug marker");
             int argumentDepth = frame.getStackSize() - base;
             if (matchingConstructor(allocation, instruction)) {
                 var constructor = (MethodInsnNode) instruction;
@@ -83,6 +106,17 @@ record ConstructorExpression(MethodInsnNode constructor, List<AbstractInsnNode> 
         throw unsupported("missing matching constructor");
     }
 
+    private static AbstractInsnNode nextExecutable(AbstractInsnNode current, Set<LabelNode> boundaries)
+            throws MethodCompiler.Unsupported {
+        var next = current.getNext();
+        while (next != null && next.getOpcode() < 0) {
+            if (!(next instanceof LineNumberNode || next instanceof LabelNode label && !boundaries.contains(label)))
+                throw unsupported("argument region crosses a control-flow or exception boundary");
+            next = next.getNext();
+        }
+        return next;
+    }
+
     static boolean matchingConstructor(TypeInsnNode allocation, AbstractInsnNode instruction) {
         return instruction instanceof MethodInsnNode call && call.getOpcode() == INVOKESPECIAL && !call.itf
             && call.name.equals("<init>") && call.owner.equals(allocation.desc)
@@ -98,11 +132,16 @@ record ConstructorExpression(MethodInsnNode constructor, List<AbstractInsnNode> 
                 var constant = (LdcInsnNode) instruction;
                 yield constant.cst instanceof Number || JvmBridges.linkedConstantType(constant) != null ? 0 : -1;
             }
-            case GETFIELD, INEG, LNEG, CHECKCAST, INSTANCEOF -> 1;
-            case IADD, ISUB, IMUL, IDIV, IREM, LADD, LSUB, LMUL, LDIV, LREM -> 2;
-            case INVOKESTATIC -> {
+            case GETFIELD, INEG, LNEG, FNEG, DNEG, CHECKCAST, INSTANCEOF, ARRAYLENGTH,
+                 I2L, I2F, I2D, L2I, L2F, L2D, F2I, F2L, F2D, D2I, D2L, D2F, I2B, I2C, I2S -> 1;
+            case IADD, ISUB, IMUL, IDIV, IREM, LADD, LSUB, LMUL, LDIV, LREM,
+                 FADD, FSUB, FMUL, FDIV, FREM, DADD, DSUB, DMUL, DDIV, DREM,
+                 IAND, IOR, IXOR, LAND, LOR, LXOR, ISHL, ISHR, IUSHR, LSHL, LSHR, LUSHR,
+                 IALOAD, LALOAD, FALOAD, DALOAD, AALOAD, BALOAD, CALOAD, SALOAD -> 2;
+            case INVOKESTATIC, INVOKEVIRTUAL, INVOKEINTERFACE -> {
                 var call = (MethodInsnNode) instruction;
-                yield call.name.startsWith("<") ? -1 : Type.getArgumentCount(call.desc);
+                yield call.name.startsWith("<") ? -1 : Type.getArgumentCount(call.desc)
+                    + (call.getOpcode() == INVOKESTATIC ? 0 : 1);
             }
             default -> -1;
         };

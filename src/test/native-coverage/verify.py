@@ -138,7 +138,8 @@ for outcome in ("interned-literal:true", "class-literals:true", "literal-loop:81
                 "lambda-marker:true", "lambda-bridge:bridge/null", "constructor-skipped:true/0",
                 "constructor-argument-failure:true/12", "constructor-expression:38/true/33/12234",
                 "constructor-field-handler:-1/44/122344", "constructor-literal-skipped:true/0",
-                "constructor-literal-resolution:2/1", "constructor-reflection:method/argument"):
+                "constructor-literal-resolution:2/1", "constructor-reflection:method/argument",
+                "constructor-array:array"):
     assert "value:" + outcome + ":effects=" in original_result.stdout, outcome
 for outcome in ("concurrent-publication:512", "concurrent-monitors:1024/1024:throws-per-entry=256",
                 "concurrent-reference-iterations:32772"):
