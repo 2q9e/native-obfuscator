@@ -1,5 +1,35 @@
 # Local verification
 
+## November 27, 2026 verification
+
+These runs used Linux ARM64, JDK 25.0.5, and Gradle 9.3.1.
+
+| Check | Observed result |
+| --- | --- |
+| LLVM 22.1.8 and 23.1.4 | Each plugin passed all six individual passes and composed pipelines. Each LLVM version matched 246,272 generated native evaluations across two program seeds. Fixed inputs reproduced identical bitcode. The LLVM 22 CMake build passed all five CTests. |
+| LLVM object targets | Both SDKs generated and inspected Linux x64, Linux ARM64, Windows x64, and Windows ARM64 objects. Local native execution used Linux ARM64. |
+| Cross-target staged analysis | All three analysis profiles, each with and without LLVM 23, built and structurally verified all four targets. Each package matched original JVM output on Linux ARM64. |
+| Scoped JVM builds | On both LLVM versions, a build applied a preset to one converted method, left other converted methods outside the pass scope, and reproduced the JAR byte for byte. An empty scope produced the baseline executable fingerprint. |
+| Native build limits | The exact packaged-library size passed. A one-byte cap and a timed-out subprocess failed while preserving the existing destination. Diagnostic native sizing produced the same released library bytes. |
+| JNI differential | 128 methods converted and 305 output lines matched. The fixture also checked 20,000 randomized calls, 13 malformed operands, and concurrent publication, locking, and reference lifetimes. |
+| Fabric 1.21.11 | The offline smoke test loaded the protected mod through Fabric Loader 0.18.4 and invoked its initializer. Mixin and access widening worked. |
+| Large application archive | The Loom intermediary Minecraft JAR contained 10,291 classes and was 31,494,095 bytes. Two selected methods passed staging and structural verification. A fixed-seed probe compared both methods across 10,000 input pairs, including division-by-zero exceptions, and matched digest `6170255369c9b884`. |
+| Java 25 classfiles | The modern-classfile suite passed. Two generated programs each matched 60,000 native calls and rebuilt their JARs byte for byte. |
+| JDK 21 runtime | On Temurin 21.0.13.1, the Java 21 arithmetic differential, Kotlin 2.2.21 differential, and full JNI coverage suite passed on Linux ARM64. |
+| Dependency and archive integrity | All 15 SHA-256 pins matched Maven Central. Gradle rejected a deliberately altered dependency pin. Two clean distribution task runs produced identical ZIP and TAR archives. |
+
+The [comparison runner](../benchmarks/README.md) converted six of seven requested
+JVM methods in its fixture. Both requested native builds produced the same
+11,437-byte JAR, compared with the 3,592-byte original. Median steady-state
+time per update on the per-call workload was 1.38 ns for the original and 3.31 ns
+for the protected JAR. Batching 32 updates gave 1.35 ns and 1.38 ns respectively.
+The matching Clang 23 C-lane baseline and its mixed-arithmetic variant both
+produced 72,136-byte executables with matching checksums. Their per-call medians
+were 3.19 ns and 5.27 ns. This run used two build attempts, three startup
+samples, and two steady-state forks. No external-tool ranking was run.
+
+## Earlier verification
+
 These checks ran on Fedora Asahi ARM64 with Temurin 25.0.5, Zulu 21.0.13.1,
 Zig 0.15.2, and Fedora LLVM 23.1.4. Java classfile and JNI verification
 were enabled in the differential runs.
