@@ -1,0 +1,672 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "host": {
+    "platform": "Linux-7.2.12-402.asahi.fc45.aarch64+16k-aarch64-with-glibc2.44",
+    "architecture": "aarch64",
+    "pythonVersion": "3.15.0",
+    "javaVersion": "openjdk version \"25.0.5\" 2026-10-20 LTS\nOpenJDK Runtime Environment Temurin-25.0.5+8 (build 25.0.5+8-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.5+8 (build 25.0.5+8-LTS, mixed mode, sharing)",
+    "nativeCompiler": "cc (GCC) 16.2.1 20261029 (Red Hat 16.2.1-3)\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "sourcesSha256": {
+    "analysis-workload.java": "62fb8ebfa797f946ad772092aa2c1b2815e4de45a16ce5a9ba4d547f523514dd",
+    "comparison-workload.c": "f7aed130c8d012bfe9d2e8deb47699d5d3139835632a698861a52e82e20fe67a",
+    "compare.py": "30633899eb65521fdd7421964cea709387936b4da80dddd4be3f3e43b2f6b2af",
+    "omvll-adapter.py": "7634b1428f2717b444c1c8a52b4f19e3a0ca42019beba2b755190564bf199159",
+    "omvll-arithmetic.py": "d18c29fc0995a3c99f72877f7363cb4e3ea93a893e6b2689f0352319810973dc"
+  },
+  "distributionJarSha256": "e1040b70701690110519a276094a984118c832580ca2688cb955d4b3db916340",
+  "settings": {
+    "seeds": [
+      637,
+      2309737967
+    ],
+    "buildRuns": 3,
+    "startupRuns": 5,
+    "steadyForks": 3,
+    "warmups": 5,
+    "trials": 9,
+    "updatesPerTrial": 524288,
+    "gnuTime": "/usr/bin/time",
+    "llvmObjdump": "LLVM version 23.1.4"
+  },
+  "errors": [],
+  "budgetViolations": [],
+  "commonLaneChecksums": {
+    "startup-637-1": {
+      "startup": "13271b2e"
+    },
+    "startup-637-2": {
+      "startup": "13271b2e"
+    },
+    "startup-637-3": {
+      "startup": "13271b2e"
+    },
+    "startup-637-4": {
+      "startup": "13271b2e"
+    },
+    "startup-637-5": {
+      "startup": "13271b2e"
+    },
+    "steady-637-1": {
+      "step": "156c027d",
+      "per_call": "c15c027d",
+      "batched_32": "c15c027d"
+    },
+    "steady-637-2": {
+      "step": "156c027d",
+      "per_call": "c15c027d",
+      "batched_32": "c15c027d"
+    },
+    "steady-637-3": {
+      "step": "156c027d",
+      "per_call": "c15c027d",
+      "batched_32": "c15c027d"
+    }
+  },
+  "cases": {
+    "android-ndk-r29-baseline": {
+      "name": "android-ndk-r29-baseline",
+      "lane": "c",
+      "toolVersion": {
+        "completed": true,
+        "output": "Android (13989888, +pgo, +bolt, +lto, +mlgo, based on r563880c) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 5e96669f06077099aa41290cdb4c5e6fa0f59349)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix\nqemu-x86_64 version 11.1.3 (qemu-11.1.3-1.fc45)\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers"
+      },
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 1905.935784,
+            "peakRssKiB": 208880,
+            "success": true,
+            "sha256": "317e93bad8786d6d884fc98c381ab093e66db5fe528e37788faf549e0e20f167"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 1918.708818,
+            "peakRssKiB": 210480,
+            "success": true,
+            "sha256": "317e93bad8786d6d884fc98c381ab093e66db5fe528e37788faf549e0e20f167"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 1851.46693,
+            "peakRssKiB": 202928,
+            "success": true,
+            "sha256": "317e93bad8786d6d884fc98c381ab093e66db5fe528e37788faf549e0e20f167"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 1905.935784,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 2140392,
+        "sha256": "317e93bad8786d6d884fc98c381ab093e66db5fe528e37788faf549e0e20f167",
+        "linkedKernel": {
+          "status": "measured",
+          "symbols": {
+            "workload_step": {
+              "instructions": 4,
+              "encodedBytes": 16,
+              "encodingSha256": "6a475f74c81b39095e0150d54c16d0116beafbaf8565082a11a7e978c305aaad"
+            },
+            "workload_mix": {
+              "instructions": 10,
+              "encodedBytes": 40,
+              "encodingSha256": "b7c712015e885a3e610cdd15b503fd28f86a28e981e06001a416093fae30098d"
+            },
+            "workload_batch": {
+              "instructions": 14,
+              "encodedBytes": 56,
+              "encodingSha256": "65cadd86adc6199fef67c914d9199850aa9f409e206bcb3e7223209503214b0e"
+            }
+          },
+          "missingSymbols": []
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "f49da468"
+        },
+        "probe-2309737967-1": {
+          "probe": "52977d9b"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 1.002107,
+        "medianFirstCallMs": 8.3e-05,
+        "samples": [
+          {
+            "processMs": 1.097696,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 1.002107,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                84
+              ]
+            }
+          },
+          {
+            "processMs": 0.82297,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                41
+              ]
+            }
+          },
+          {
+            "processMs": 1.194035,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 0.981689,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 1.4586601257324219,
+          "per_call": 2.4282913208007812,
+          "batched_32": 1.560708999633789
+        },
+        "medianPeakRssKiB": 528,
+        "forks": [
+          {
+            "processMs": 47.29464,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "step": [
+                926185,
+                926893,
+                936185,
+                935019,
+                926685,
+                923143,
+                931685,
+                1210620,
+                762174
+              ],
+              "per_call": [
+                1272791,
+                1416091,
+                1293709,
+                1273165,
+                1272624,
+                1279124,
+                1277708,
+                1276999,
+                1272791
+              ],
+              "batched_32": [
+                704796,
+                984063,
+                810094,
+                856931,
+                953728,
+                957311,
+                702254,
+                970854,
+                742423
+              ]
+            }
+          },
+          {
+            "processMs": 31.164931,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "step": [
+                649500,
+                552453,
+                627791,
+                527534,
+                642833,
+                696879,
+                572579,
+                622124,
+                642125
+              ],
+              "per_call": [
+                749131,
+                866222,
+                701920,
+                820428,
+                798094,
+                862139,
+                810094,
+                701920,
+                774967
+              ],
+              "batched_32": [
+                702254,
+                725755,
+                716547,
+                717921,
+                749673,
+                716755,
+                759091,
+                728339,
+                738631
+              ]
+            }
+          },
+          {
+            "processMs": 41.142993,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "step": [
+                762175,
+                765508,
+                764175,
+                771509,
+                762174,
+                764758,
+                765050,
+                764216,
+                766258
+              ],
+              "per_call": [
+                1273166,
+                1275457,
+                1275833,
+                1273041,
+                1272332,
+                1275249,
+                1272874,
+                1273124,
+                1243455
+              ],
+              "batched_32": [
+                818261,
+                828346,
+                830304,
+                784176,
+                755674,
+                844930,
+                818053,
+                821969,
+                769217
+              ]
+            }
+          }
+        ]
+      },
+      "relativeTo": "c-original",
+      "comparison": {
+        "artifactGrowthPercent": 2867.820299500832,
+        "linkedKernelEncodingChanged": {
+          "workload_step": true,
+          "workload_mix": true,
+          "workload_batch": true
+        },
+        "startupIncreaseMs": -0.38114899999999996,
+        "runtimeOverheadPercent": {
+          "step": 19.649355566472558,
+          "per_call": 64.83044703152837,
+          "batched_32": 9.888119081800252
+        },
+        "runtimeIncreaseNsPerUpdate": {
+          "step": 0.2395477294921875,
+          "per_call": 0.9550857543945312,
+          "batched_32": 0.14043807983398438
+        },
+        "peakRssOverheadPercent": -50.74626865671642
+      }
+    },
+    "o-mvll-1_11_1": {
+      "name": "o-mvll-1_11_1",
+      "lane": "c",
+      "relativeTo": "android-ndk-r29-baseline",
+      "toolVersion": {
+        "completed": true,
+        "output": "Android (13989888, +pgo, +bolt, +lto, +mlgo, based on r563880c) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 5e96669f06077099aa41290cdb4c5e6fa0f59349)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix\nqemu-x86_64 version 11.1.3 (qemu-11.1.3-1.fc45)\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers\nO-MVLL plugin SHA-256 b1bbc9e921bf1cfcedda561fe8ba366a43f9b9d541505c4e827b9c837c928d81"
+      },
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 2309.694966,
+            "peakRssKiB": 268384,
+            "success": true,
+            "sha256": "b829937589d3eec88f868fe720a15503f9f94b7130b369c90e73197d2a4373a5"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 2236.806131,
+            "peakRssKiB": 268992,
+            "success": true,
+            "sha256": "b829937589d3eec88f868fe720a15503f9f94b7130b369c90e73197d2a4373a5"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 2249.975731,
+            "peakRssKiB": 269520,
+            "success": true,
+            "sha256": "b829937589d3eec88f868fe720a15503f9f94b7130b369c90e73197d2a4373a5"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 2249.975731,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 2140456,
+        "sha256": "b829937589d3eec88f868fe720a15503f9f94b7130b369c90e73197d2a4373a5",
+        "linkedKernel": {
+          "status": "measured",
+          "symbols": {
+            "workload_step": {
+              "instructions": 9,
+              "encodedBytes": 36,
+              "encodingSha256": "3dd7592e825c59b97e29e499818645e22b3f7d1386fc16fed99ca8c5f9fee065"
+            },
+            "workload_mix": {
+              "instructions": 10,
+              "encodedBytes": 40,
+              "encodingSha256": "b7c712015e885a3e610cdd15b503fd28f86a28e981e06001a416093fae30098d"
+            },
+            "workload_batch": {
+              "instructions": 25,
+              "encodedBytes": 100,
+              "encodingSha256": "6c30c79efbe559b9806c763bc1c960826adff5241bed5978b6c959569d2462ef"
+            }
+          },
+          "missingSymbols": []
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "f49da468"
+        },
+        "probe-2309737967-1": {
+          "probe": "52977d9b"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 1.14524,
+        "medianFirstCallMs": 8.3e-05,
+        "samples": [
+          {
+            "processMs": 1.678942,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                125
+              ]
+            }
+          },
+          {
+            "processMs": 1.14524,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 1.060527,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                42
+              ]
+            }
+          },
+          {
+            "processMs": 1.148908,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          },
+          {
+            "processMs": 1.104239,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "startup": [
+                83
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 3.0541000366210938,
+          "per_call": 1.4494400024414062,
+          "batched_32": 2.0622940063476562
+        },
+        "medianPeakRssKiB": 528,
+        "forks": [
+          {
+            "processMs": 53.432287,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "step": [
+                1932417,
+                1877163,
+                1601729,
+                1597270,
+                1618938,
+                1608020,
+                1593603,
+                1598687,
+                1593811
+              ],
+              "per_call": [
+                758383,
+                759924,
+                701920,
+                762466,
+                765383,
+                727089,
+                724714,
+                918268,
+                829762
+              ],
+              "batched_32": [
+                1096279,
+                1079029,
+                1080528,
+                1081236,
+                1083070,
+                1080528,
+                1102780,
+                1054777,
+                1173826
+              ]
+            }
+          },
+          {
+            "processMs": 55.767397,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "step": [
+                1596061,
+                1610563,
+                1601228,
+                1623480,
+                1605562,
+                1633106,
+                1595603,
+                1596186,
+                1593728
+              ],
+              "per_call": [
+                800176,
+                757674,
+                867139,
+                920893,
+                998523,
+                939102,
+                917684,
+                881765,
+                884974
+              ],
+              "batched_32": [
+                1323127,
+                1301293,
+                1257581,
+                1224412,
+                1265249,
+                1091862,
+                1095029,
+                1077153,
+                1079236
+              ]
+            }
+          },
+          {
+            "processMs": 44.029888,
+            "peakRssKiB": 528,
+            "samplesNs": {
+              "step": [
+                1270333,
+                1222537,
+                1194827,
+                1237705,
+                1249414,
+                1181701,
+                1277833,
+                1229080,
+                1194494
+              ],
+              "per_call": [
+                796635,
+                810719,
+                745173,
+                753215,
+                789092,
+                701879,
+                746132,
+                735589,
+                701879
+              ],
+              "batched_32": [
+                1041692,
+                1042276,
+                1042359,
+                1042526,
+                1042525,
+                1042276,
+                1042442,
+                1045901,
+                1042985
+              ]
+            }
+          }
+        ]
+      },
+      "comparison": {
+        "artifactGrowthPercent": 0.0029901064851678427,
+        "linkedKernelEncodingChanged": {
+          "workload_step": true,
+          "workload_mix": false,
+          "workload_batch": true
+        },
+        "startupIncreaseMs": 0.14313299999999995,
+        "runtimeOverheadPercent": {
+          "step": 109.37708399258325,
+          "per_call": -40.31029184902649,
+          "batched_32": 32.13827861770267
+        },
+        "runtimeIncreaseNsPerUpdate": {
+          "step": 1.5954399108886719,
+          "per_call": -0.978851318359375,
+          "batched_32": 0.5015850067138672
+        },
+        "peakRssOverheadPercent": 0.0
+      }
+    }
+  },
+  "toolchainArchiveHashes": {
+    "NDK r29 SHA-1": "87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b",
+    "O-MVLL 1.11.1 SHA-256": "841e6fb4a1b114da0f72db66b269657c66adf73838e091534cec65e359812886",
+    "Ubuntu 24.04 x86-64 OCI manifest": "sha256:9a04f13b3f80ef056361e30868593b1cfd2279fe19e4081cb93a90bf56819d6a"
+  }
+}

@@ -38,6 +38,49 @@ JIT behavior make cross-lane runtime comparisons unsuitable.
 
 ## Reproduce the measured configurations
 
+### O-MVLL on Android ARM64
+
+O-MVLL 1.11.1 and the matched NDK r29 baseline both passed all fixture
+checksums and reproduced their own executables across three builds.
+The official x86-64 compiler and plugin ran under QEMU 11.1.3 with an Ubuntu
+24.04 x86-64 userspace. Both produced static Android API 24 ARM64 executables,
+which ran directly on the same Fedora Asahi Linux ARM64 kernel. Build timing
+and build RSS include emulation. Runtime measurements describe the Linux
+host and static Android binaries. An Android device was outside this run.
+
+| Case | Build ms | Build peak RSS KiB | Startup ms | Runtime peak RSS KiB | Executable bytes | Step ns/update | Per-call ns/update | Batch-32 ns/update |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| NDK r29 baseline | 1,905.94 | 208,880 | 1.002 | 528 | 2,140,392 | 1.459 | 2.428 | 1.561 |
+| O-MVLL arithmetic, two rounds | 2,249.98 | 268,992 | 1.145 | 528 | 2,140,456 | 3.054 | 1.449 | 2.062 |
+
+The plugin logged arithmetic changes. The linked step and batch kernels
+grew from 16 to 36 and from 56 to 100 instruction bytes respectively.
+The per-call kernel retained the same 40-byte encoding, so its timing
+difference does not establish a speedup from the pass. Compare this result
+within the NDK pair because the earlier C runs used other compilers and
+a different libc and link mode. JVM conversion coverage is inapplicable.
+[Samples and artifact hashes](../benchmarks/results/omvll-android-arm64-2026-11-27.json)
+
+Use the [official O-MVLL Linux release](https://github.com/open-obfuscator/o-mvll/releases/tag/1.11.1)
+with SHA-256 `841e6fb4a1b114da0f72db66b269657c66adf73838e091534cec65e359812886`
+and [Android NDK r29](https://github.com/android/ndk/releases/tag/r29).
+Create two C-lane adapter entries with the following argument prefixes.
+Append `{input}` and `{output}` to each build command and use the same
+prefix with `--version` as the version command.
+
+```text
+python3 /repo/benchmarks/omvll-adapter.py --clang /ndk/bin/clang
+python3 /repo/benchmarks/omvll-adapter.py --clang /ndk/bin/clang --plugin /release/omvll-ndk.so --python-lib /release/Python-3.10.7/Lib
+```
+
+For an ARM64 build host, add `--qemu /path/to/qemu-x86_64-static --qemu-root /path/to/x86_64-rootfs`
+to both prefixes. Set the O-MVLL entry's `relativeTo` to the NDK baseline.
+Run the comparison command below from a host that can execute the resulting
+static ARM64 binaries directly. The recorded settings use the same seeds
+and sample counts as the earlier comparisons.
+
+### Radioegor146 and Hikari
+
 Use the [comparison runner](../benchmarks/README.md) and an adapter manifest.
 For the Java lane, use [Radioegor146 revision b3b3a40](https://github.com/Radioegor146/native-obfuscator/commit/b3b3a40ac27c78e343631b078fa62f932edd09ff).
 Build its `obfuscator` and `annotations` Java sources with the dependencies
@@ -79,12 +122,10 @@ Unmeasured configurations have specific prerequisites:
   `-include cstdint` and a local ARM64 endianness declaration progressed
   to the SLP vectorizer. GCC 16 then rejected its non-const scheduling
   comparator. These portability experiments were excluded from the results.
-- The inspected [O-MVLL v1.11.1 package](https://github.com/open-obfuscator/o-mvll/releases/tag/v1.11.1)
-  supplies an x86-64 Linux-host plugin for Android NDK r29 tooling. It
-  could not load into the ARM64 host compiler used here. A comparison needs
-  a matched Android toolchain, same-target baselines, and a runtime device.
-- No authorized local Tigress installation was available. A run needs a
-  licensed installation that supports the selected host and target.
+- Obfuscator-LLVM was paused at the user's direction after the compatibility
+  build progressed into Clang's C++ frontend. There is no completed benchmark.
+- [Tigress 4.2 supports Linux ARM64](https://tigress.wtf/tigress-download.html).
+  No authorized local installation was available.
 
 ## Independently check the claims
 
