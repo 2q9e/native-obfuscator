@@ -60,6 +60,12 @@ import sys
 
 work = pathlib.Path(sys.argv[1])
 condy = "modern/CondyFixture#calcCondy()I"
+primitive_null = "modern/CondyFixture#calcPrimitiveNull()I"
+dynamic_null = {
+    "modern/CondyFixture#calcNull()Ljava/lang/String;",
+    "modern/CondyFixture#calcNullArray()[I",
+    "modern/CondyFixture#calcMissingNull(Z)Ljava/lang/Object;",
+}
 unicode = "modern/CondyFixture#calc\u03bb\U00010400(IJLmodern/Marker_\U00010400;)J"
 record = "modern/VerifyModern$BridgeFixture#calcRecord(I)I"
 bridges = {
@@ -72,11 +78,12 @@ for report, supported, unsupported in (
     ("protection", "selected", "retained"),
 ):
     decisions = [json.loads(line) for line in (work / f"{report}.jsonl").read_text(encoding="utf-8").splitlines()]
-    expected = {unicode: supported, record: supported, condy: unsupported}
-    expected.update(dict.fromkeys(bridges, supported))
+    expected = {unicode: supported, record: supported, condy: unsupported, primitive_null: unsupported}
+    expected.update(dict.fromkeys(bridges | dynamic_null, supported))
     assert len(decisions) == len(expected), decisions
     assert {decision["method"]: decision["result"] for decision in decisions} == expected, decisions
     reasons = {decision["method"]: decision["reason"] for decision in decisions}
     assert "constant requires JVM linkage" in reasons[condy], decisions
+    assert "constant requires JVM linkage" in reasons[primitive_null], decisions
 PY
 printf 'Java %s modern bytecode test passed (%s)\n' "$release" "$(cat "$work/protected.txt")"

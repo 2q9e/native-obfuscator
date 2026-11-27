@@ -50,6 +50,36 @@ public final class GenerateCondy {
         condy.visitInsn(IRETURN);
         finish(condy);
 
+        var nullBootstrap = new Handle(H_INVOKESTATIC, "java/lang/invoke/ConstantBootstraps", "nullConstant",
+            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;", false);
+        for (String descriptor : new String[]{"Ljava/lang/String;", "[I"}) {
+            String name = descriptor.startsWith("[") ? "calcNullArray" : "calcNull";
+            MethodVisitor loadNull = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, name, "()" + descriptor, null, null);
+            loadNull.visitCode();
+            loadNull.visitLdcInsn(new ConstantDynamic("nullValue", descriptor, nullBootstrap));
+            loadNull.visitInsn(ARETURN);
+            finish(loadNull);
+        }
+
+        MethodVisitor missing = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "calcMissingNull",
+            "(Z)Ljava/lang/Object;", null, null);
+        missing.visitCode();
+        var skip = new Label();
+        missing.visitVarInsn(ILOAD, 0);
+        missing.visitJumpInsn(IFEQ, skip);
+        missing.visitLdcInsn(new ConstantDynamic("missing", "Lmodern/MissingNullType;", nullBootstrap));
+        missing.visitInsn(ARETURN);
+        missing.visitLabel(skip);
+        missing.visitInsn(ACONST_NULL);
+        missing.visitInsn(ARETURN);
+        finish(missing);
+
+        MethodVisitor badNull = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "calcPrimitiveNull", "()I", null, null);
+        badNull.visitCode();
+        badNull.visitLdcInsn(new ConstantDynamic("invalidNull", "I", nullBootstrap));
+        badNull.visitInsn(IRETURN);
+        finish(badNull);
+
         MethodVisitor nativeCandidate = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "calc\u03bb\uD801\uDC00",
                 "(IJL" + MARKER + ";)J", null, null);
         nativeCandidate.visitCode();

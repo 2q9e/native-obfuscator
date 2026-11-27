@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.objectweb.asm.ConstantDynamic;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.*;
@@ -22,6 +23,9 @@ final class JvmBridges {
     private static final String LAMBDA_BOOTSTRAP = CALL_SITE_BOOTSTRAP_PARAMETERS
         + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;" + CALL_SITE;
     private static final String ALT_LAMBDA_BOOTSTRAP = CALL_SITE_BOOTSTRAP_PARAMETERS + "[Ljava/lang/Object;" + CALL_SITE;
+    private static final Handle NULL_CONSTANT_BOOTSTRAP = new Handle(H_INVOKESTATIC,
+        "java/lang/invoke/ConstantBootstraps", "nullConstant",
+        "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;", false);
 
     private final ClassNode owner;
     private final MethodNode caller;
@@ -151,6 +155,14 @@ final class JvmBridges {
                 case Type.METHOD -> Type.getType(MethodType.class);
                 default -> null;
             };
+        }
+        if (constant.cst instanceof ConstantDynamic dynamic
+            && NULL_CONSTANT_BOOTSTRAP.equals(dynamic.getBootstrapMethod())
+            && dynamic.getBootstrapMethodArgumentCount() == 0) {
+            int sort = Type.getType(dynamic.getDescriptor()).getSort();
+            // This bootstrap has no observable execution side effects. A generic bridge
+            // result keeps resolution of the constant's actual type at the original LDC.
+            if (sort == Type.OBJECT || sort == Type.ARRAY) return Type.getType(Object.class);
         }
         return null;
     }

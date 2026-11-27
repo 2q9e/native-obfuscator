@@ -1,6 +1,7 @@
 package modern;
 
 import java.lang.reflect.Modifier;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.function.Supplier;
 
@@ -21,6 +22,31 @@ public final class VerifyModern {
         check((int) condy.invoke(null) == 42 && (int) condy.invoke(null) == 42, "dynamic constant value");
         check(counter.getInt(null) == 1, "same-class bootstrap resolved once");
 
+        for (String name : new String[]{"calcNull", "calcNullArray"}) {
+            var method = fixture.getDeclaredMethod(name);
+            check(Modifier.isNative(method.getModifiers()) == protectedJar, "dynamic null JNI flag");
+            check(method.invoke(null) == null && method.invoke(null) == null, "dynamic null value");
+        }
+        var missingNull = fixture.getDeclaredMethod("calcMissingNull", boolean.class);
+        check(Modifier.isNative(missingNull.getModifiers()) == protectedJar, "missing dynamic type JNI flag");
+        check(missingNull.invoke(null, false) == null, "missing dynamic type resolved only when used");
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                missingNull.invoke(null, true);
+                throw new AssertionError("Missing type unexpectedly resolved");
+            } catch (InvocationTargetException failure) {
+                check(failure.getCause() instanceof NoClassDefFoundError, "missing dynamic type failure");
+            }
+        }
+        var badNull = fixture.getDeclaredMethod("calcPrimitiveNull");
+        check(!Modifier.isNative(badNull.getModifiers()), "primitive dynamic null retained in Java");
+        try {
+            badNull.invoke(null);
+            throw new AssertionError("Primitive dynamic null unexpectedly resolved");
+        } catch (InvocationTargetException failure) {
+            check(failure.getCause() instanceof BootstrapMethodError, "primitive dynamic null failure");
+        }
+
         check(BridgeFixture.class.isRecord(), "record metadata");
         check(BridgeFixture.class.getRecordComponents().length == 1
                 && BridgeFixture.class.getRecordComponents()[0].getName().equals("value"), "record component");
@@ -38,7 +64,7 @@ public final class VerifyModern {
         Supplier<?> supplier = record;
         check(supplier.get().equals(12) && bridge.invoke(record).equals(12), "bridge dispatch");
         check(record.calcRecord(41) == 48, "record native result");
-        System.out.println("condy=42, bootstrapCalls=1, unicode=75/76, record=48, bridge=12");
+        System.out.println("condy=42, bootstrapCalls=1, dynamicNull=2, missingType=2, unicode=75/76, record=48, bridge=12");
     }
 
     public record BridgeFixture(int value) implements Supplier<Integer> {
