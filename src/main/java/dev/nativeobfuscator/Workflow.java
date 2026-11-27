@@ -28,6 +28,8 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
@@ -38,6 +40,7 @@ import org.objectweb.asm.tree.ClassNode;
 import static org.objectweb.asm.Opcodes.ACC_NATIVE;
 import static org.objectweb.asm.Opcodes.ACC_PUBLIC;
 import static org.objectweb.asm.Opcodes.ACC_STATIC;
+import static org.objectweb.asm.Opcodes.ASM9;
 import static org.objectweb.asm.Opcodes.INVOKESTATIC;
 
 final class Workflow {
@@ -768,19 +771,27 @@ final class Workflow {
             String name = entry.getKey();
             if (!name.endsWith(".class") || name.startsWith("META-INF/")
                 || name.equals("module-info.class") || RUNTIME_CLASS.matcher(name).matches()) continue;
-            ClassNode node = new ClassNode();
             try {
-                new ClassReader(entry.getValue()).accept(node, 0);
+                var reader = new ClassReader(entry.getValue());
+                String owner = reader.getClassName();
+                if (!owner.equals(name.substring(0, name.length() - 6))) {
+                    errors.add(label + " class name disagrees with JAR path: " + name);
+                    continue;
+                }
+                var declared = new ArrayList<String>();
+                // Selected code is checked against the trusted rewrite. This scan only inventories native declarations.
+                reader.accept(new ClassVisitor(ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
+                                                     String[] exceptions) {
+                        if ((access & ACC_NATIVE) != 0) declared.add(owner + "#" + name + descriptor);
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                methods.addAll(declared);
             } catch (RuntimeException failure) {
                 errors.add(label + " JAR has an invalid class " + name);
-                continue;
             }
-            if (!node.name.equals(name.substring(0, name.length() - 6))) {
-                errors.add(label + " class name disagrees with JAR path: " + name);
-                continue;
-            }
-            node.methods.stream().filter(method -> (method.access & ACC_NATIVE) != 0)
-                .forEach(method -> methods.add(node.name + "#" + method.name + method.desc));
         }
         return methods;
     }

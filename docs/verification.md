@@ -1,5 +1,27 @@
 # Local verification
 
+## Follow-up verification
+
+JDK Flight Recorder profiling of `harden` on the 10,291-class Minecraft
+archive found ASM's `readCode` accounted for 61 of 226 sampled Java execution
+stacks. Staged verification now uses a declaration-only visitor to inventory
+native methods. It still reconstructs and compares the selected classes and
+checks packaged metadata. In three interleaved runs per version on the same
+Linux ARM64 host and archive, median wall time moved from **7.03 s to 6.81 s**.
+Median GNU time peak RSS moved from **533,568 KiB to 503,808 KiB**. All six
+runs produced the same staged JAR digest
+`3d8b3b3242c53de13ae5b4c1d1bc954d4143ca7640f47c70cf2a16e629053949`.
+The small sample showed run-to-run variance. This optimization affects build
+verification. It leaves JNI execution unchanged.
+
+For replication, use the same JDK and GCC and alternate the two CLI
+distributions with `harden --padding off` on the Loom Minecraft 1.21.11
+intermediary JAR, selecting
+`net/minecraft/class_3532#method_76800(II)I` and
+`net/minecraft/class_3532#method_48117(II)Z`. Record wall time, GNU time's
+`%M`, and SHA-256 of each staging output. Use an equal number of runs and
+keep the host and archive fixed.
+
 ## November 27, 2026 verification
 
 These runs used Linux ARM64, JDK 25.0.5, and Gradle 9.3.1.
