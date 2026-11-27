@@ -235,6 +235,9 @@ bool rewriteIntegerOperations(llvm::Function &Function,
     llvm::BinaryOperator *Operation;
     std::optional<unsigned> GuardOperand;
   };
+  // Splitting the entry block must leave static allocas and entry-only
+  // intrinsics in that block. Sites among the entry setup stay unchanged.
+  auto *LastSetup = UseBranches ? lastEntrySetup(Function) : nullptr;
   llvm::SmallVector<Site, 8> Sites;
   for (llvm::Instruction &Instruction : llvm::instructions(Function)) {
     auto *Operation = llvm::dyn_cast<llvm::BinaryOperator>(&Instruction);
@@ -259,8 +262,11 @@ bool rewriteIntegerOperations(llvm::Function &Function,
       ++Statistics.UndefinedOperandSites;
       continue;
     }
-    if (UseBranches && (Operation->getParent()->isEHPad() ||
-                        Operation->getParent()->hasAddressTaken())) {
+    if (UseBranches &&
+        (Operation->getParent()->isEHPad() ||
+         Operation->getParent()->hasAddressTaken() ||
+         (LastSetup && Operation->getParent() == LastSetup->getParent() &&
+          Operation->comesBefore(LastSetup)))) {
       ++Statistics.UnsafeBlockSites;
       continue;
     }

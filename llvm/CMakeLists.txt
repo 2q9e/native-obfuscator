@@ -19,6 +19,7 @@ target_compile_features(NativeEncode PRIVATE cxx_std_17)
 
 include(CTest)
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME llvm-function-reports
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify-reports.sh"
       "$<TARGET_FILE:NativeEncode>" "${LLVM_TOOLS_BINARY_DIR}")
@@ -28,18 +29,21 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
       COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify.sh"
         "$<TARGET_FILE:NativeEncode>" "${LLVM_TOOLS_BINARY_DIR}"
         "${CMAKE_C_COMPILER}" "${pass}")
+    if("X86" IN_LIST LLVM_TARGETS_TO_BUILD AND "AArch64" IN_LIST LLVM_TARGETS_TO_BUILD)
+      add_test(
+        NAME "llvm-${pass}-cross-objects"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify-cross.sh"
+          "$<TARGET_FILE:NativeEncode>" "${LLVM_TOOLS_BINARY_DIR}" "${pass}")
+    endif()
   endforeach()
-  find_package(Python3 QUIET COMPONENTS Interpreter)
-  if(Python3_Interpreter_FOUND)
-    add_test(NAME llvm-native-extended
-      COMMAND "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify-extended.py"
-        --llvm-bin "${LLVM_TOOLS_BINARY_DIR}" --plugin "$<TARGET_FILE:NativeEncode>"
-        --cc "${CMAKE_C_COMPILER}")
-    add_test(NAME llvm-native-randomized
-      COMMAND "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify-randomized.py"
-        --llvm-bin "${LLVM_TOOLS_BINARY_DIR}" --plugin "$<TARGET_FILE:NativeEncode>"
-        --cc "${CMAKE_C_COMPILER}")
-  endif()
+  add_test(NAME llvm-native-extended
+    COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify-extended.py"
+      --llvm-bin "${LLVM_TOOLS_BINARY_DIR}" --plugin "$<TARGET_FILE:NativeEncode>"
+      --cc "${CMAKE_C_COMPILER}")
+  add_test(NAME llvm-native-randomized
+    COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify-randomized.py"
+      --llvm-bin "${LLVM_TOOLS_BINARY_DIR}" --plugin "$<TARGET_FILE:NativeEncode>"
+      --cc "${CMAKE_C_COMPILER}")
 endif()

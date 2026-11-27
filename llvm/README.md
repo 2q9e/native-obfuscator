@@ -70,6 +70,8 @@ Both paths preserve the operation's behavior, including a poison result
 arising from its other operand. The pass requires an explicit `noundef`
 argument as one operand and skips functions with exceptional, convergent,
 coroutine or indirect control flow. It also skips address-taken blocks.
+The pass keeps static allocas and entry-only intrinsics such as
+`llvm.localescape` and `llvm.gcroot` in the entry block.
 An eligible site adds at most three blocks and ten IR instructions. The
 branch can introduce input-dependent timing.
 
@@ -185,10 +187,12 @@ python3 llvm/tests/verify-randomized.py --llvm-bin "$llvm_sdk/bin" \
 ```
 
 The randomized suite generates 32 functions per program seed across four
-integer widths. It links and executes each individual pass and two combined
-pipelines against the same boundary and random inputs. It also checks
-bitcode reproducibility and dispatcher handling of AMX values and the full
-32-bit range of state labels.
+integer widths, with cyclic loop PHIs and overflow poison masked by a
+select. It links and executes each individual pass and two combined
+pipelines against the same boundary and random inputs. It checks bitcode
+reproducibility, dispatcher handling of AMX values and the full 32-bit
+range of state labels, and Windows x64 object generation for functions with
+entry-only frame setup.
 
 With the Windows LLVM 23.1.6 static `opt` wrapper and Zig 0.15.2, the baseline,
 four mix seeds, and two route seeds each passed the differential test. In the

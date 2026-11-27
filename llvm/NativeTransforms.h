@@ -45,6 +45,7 @@ llvm::Value *buildOffsetProduct(llvm::IRBuilder<> &Builder, llvm::Value *Left,
                                 llvm::StringRef Prefix);
 
 bool canDiversify(const llvm::Function &Function, bool IsRoute);
+const llvm::Instruction *lastEntrySetup(const llvm::Function &Function);
 llvm::PHINode *branchOperation(llvm::BinaryOperator &Operation,
                                llvm::Value &Guard, uint64_t &State,
                                bool IsRoute);

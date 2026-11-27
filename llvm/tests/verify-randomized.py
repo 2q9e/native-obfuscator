@@ -59,15 +59,29 @@ join:
   br label %loop
 loop:
   %previous = phi {size} [ %initial, %join ], [ %value, %loop ]
+  %first_value = phi {size} [ %initial, %join ], [ %second_value, %loop ]
+  %second_value = phi {size} [ {right}, %join ], [ %first_value, %loop ]
   %index = phi i64 [ 0, %join ], [ %next, %loop ]
-  %value = {rng.choice(OPERATIONS)} {size} %previous, {right}
+  %shifted = add {size} %previous, %first_value
+  %value = {rng.choice(OPERATIONS)} {size} %shifted, %second_value
   %next = add i64 %index, 1
   %continue = icmp ult i64 %next, %limit
   br i1 %continue, label %loop, label %exit
 exit:"""
         if width != 64:
             body += f"\n  %extended = zext {size} %value to i64"
-        functions.append(header + body + f"\n  ret i64 {result}\n}}\n")
+        functions.append(header + body + f"""
+  %narrow = trunc i64 %left to i8
+  %incremented = add nsw i8 %narrow, 1
+  %use_increment = icmp ne i8 %narrow, 127
+  br label %return
+return:
+  %safe = select i1 %use_increment, i8 %incremented, i8 0
+  %offset = zext i8 %safe to i64
+  %output = add i64 {result}, %offset
+  ret i64 %output
+}}
+""")
     return "".join(functions)
 
 
@@ -189,6 +203,33 @@ block32:
     print("Dispatcher accepts all 32 bits of a state label and reports its graph size limit")
 
 
+def test_entry_setup(args, work):
+    opt = args.llvm_bin / "opt"
+    llc = args.llvm_bin / "llc"
+    fixture = FIXTURES / "entry-setup.ll"
+    for name in ("native-diversify", "native-route", "native-dispatch"):
+        bitcode = work / f"entry-{name}.bc"
+        log = run(opt, f"-load-pass-plugin={args.plugin}", "-verify-each",
+                  f"-passes={name}<seed=42;max=8>,verify", fixture, "-o", bitcode,
+                  cwd=work)
+        if name == "native-dispatch":
+            expected = (r"function=method_frame_escape candidates=1 eligible=0 transformed=0 "
+                        r".*skipped_unsafe_control_flow=1")
+            if not re.search(expected, log):
+                raise AssertionError(f"Dispatcher accepted an entry-only frame escape\n{log}")
+        else:
+            methods = ["method_frame_escape", "method_late_alloca"]
+            if name == "native-diversify":
+                methods.append("method_gcroot")
+            for method in methods:
+                expected = (rf"function={method} candidates=2 eligible=1 transformed=1 "
+                            r".*skipped_unsafe_blocks=1")
+                if not re.search(expected, log):
+                    raise AssertionError(f"{name} did not preserve entry setup in {method}\n{log}")
+        run(llc, "-filetype=obj", bitcode, "-o", bitcode.with_suffix(".obj"), cwd=work)
+    print("Windows x64 COFF codegen preserves frame escapes, GC roots, and static entry allocations")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--llvm-bin", required=True, type=lambda value: Path(value).resolve())
@@ -201,6 +242,7 @@ def main():
             test_program(args, work / str(seed), seed)
         test_dispatch_amx(args, work)
         test_dispatch_edges(args, work)
+        test_entry_setup(args, work)
 
 
 if __name__ == "__main__":

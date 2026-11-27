@@ -1,6 +1,7 @@
 #include "NativeTransforms.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/InstIterator.h"
@@ -47,6 +48,23 @@ bool canDiversify(const llvm::Function &Function, bool IsRoute) {
       return false;
   }
   return true;
+}
+
+static bool isEntrySetupIntrinsic(const llvm::Instruction &Instruction) {
+  auto *Call = llvm::dyn_cast<llvm::IntrinsicInst>(&Instruction);
+  return Call && (Call->getIntrinsicID() == llvm::Intrinsic::localescape ||
+                  Call->getIntrinsicID() == llvm::Intrinsic::gcroot);
+}
+
+const llvm::Instruction *lastEntrySetup(const llvm::Function &Function) {
+  const llvm::Instruction *LastSetup = nullptr;
+  for (const auto &Instruction : Function.getEntryBlock()) {
+    auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(&Instruction);
+    if ((Alloca && Alloca->isStaticAlloca()) ||
+        isEntrySetupIntrinsic(Instruction))
+      LastSetup = &Instruction;
+  }
+  return LastSetup;
 }
 
 llvm::PHINode *branchOperation(llvm::BinaryOperator &Operation,
@@ -140,7 +158,8 @@ static DispatchSafety assessDispatch(const llvm::Function &Function) {
       }
       if (auto *Call = llvm::dyn_cast<llvm::CallInst>(&Instruction)) {
         auto *Callee = Call->getCalledFunction();
-        if (Call->isMustTailCall() || Call->isInlineAsm() || Call->hasOperandBundles() ||
+        if (Call->isMustTailCall() || Call->isInlineAsm() ||
+            Call->hasOperandBundles() || isEntrySetupIntrinsic(*Call) ||
             (Callee && Callee->isIntrinsic() && !Call->doesNotAccessMemory() &&
              !llvm::isa<llvm::AssumeInst, llvm::MemIntrinsic>(Call)))
           return DispatchSafety::UnsupportedControlFlow;
