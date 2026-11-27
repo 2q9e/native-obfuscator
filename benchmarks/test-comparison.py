@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 
-from compare import kernel_encodings
+from compare import budget_errors, compare, kernel_encodings
 
 
 HERE = Path(__file__).resolve().parent
@@ -32,6 +32,23 @@ def check_disassembly():
     assert measurements["workload_step"]["encodingSha256"] != measurements["workload_mix"]["encodingSha256"]
 
 
+def check_workload_budgets():
+    def semantic_case(step, call, batch):
+        return {
+            "semanticMatch": True, "startup": {"medianProcessMs": 0},
+            "steady": {"medianNsPerUpdate": {"step": step, "per_call": call, "batched_32": batch},
+                       "medianPeakRssKiB": None},
+        }
+    measurement = compare(semantic_case(7.5, 7.5, 1.3), semantic_case(0.5, 1.5, 1.3))
+    limits = {"maxStepOverheadNs": 12, "maxPerCallOverheadPercent": 700, "maxBatchOverheadPercent": 100}
+    assert not budget_errors({"name": "fixture", "limits": limits}, measurement)
+    for metric, too_low in (("maxStepOverheadNs", 6), ("maxPerCallOverheadPercent", 399)):
+        errors = budget_errors({"name": "fixture", "limits": {metric: too_low}}, measurement)
+        assert len(errors) == 1 and f"violates {metric}" in errors[0], errors
+    errors = budget_errors({"name": "fixture", "limits": limits}, {})
+    assert len(errors) == 3 and all("required measurement unavailable" in error for error in errors), errors
+
+
 def run(args, root, name, entries, *options):
     manifest = root / (name + ".json")
     manifest.write_text(json.dumps(entries), encoding="utf-8")
@@ -50,6 +67,7 @@ def run(args, root, name, entries, *options):
 
 
 def main():
+    check_workload_budgets()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--distribution", type=Path, default=HERE.parent / "build/install/native-obfuscator")
     parser.add_argument("--cc", default="cc")

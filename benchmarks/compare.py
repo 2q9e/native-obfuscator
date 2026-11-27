@@ -29,6 +29,7 @@ BATCH = 32
 LIMITS = {
     "maxBuildMs", "minBuildSuccessPercent", "minNativeCoveragePercent", "maxArtifactGrowthPercent",
     "maxStartupIncreaseMs", "maxRuntimeOverheadPercent", "maxPeakRssOverheadPercent",
+    "maxStepOverheadNs", "maxPerCallOverheadPercent", "maxBatchOverheadPercent",
 }
 WINDOWS = os.name == "nt"
 SUFFIX = ".exe" if WINDOWS else ""
@@ -341,6 +342,10 @@ def compare(case, reference):
             workload: overhead(measured["medianNsPerUpdate"][workload], standard["medianNsPerUpdate"][workload])
             for workload in WORKLOADS
         }
+        result["runtimeIncreaseNsPerUpdate"] = {
+            workload: measured["medianNsPerUpdate"][workload] - standard["medianNsPerUpdate"][workload]
+            for workload in WORKLOADS
+        }
         result["peakRssOverheadPercent"] = overhead(measured["medianPeakRssKiB"], standard["medianPeakRssKiB"])
     return result
 
@@ -348,12 +353,17 @@ def compare(case, reference):
 def budget_errors(case, comparison):
     build = case.get("buildMetrics", {})
     artifact = case.get("artifact", {})
+    runtime_percent = comparison.get("runtimeOverheadPercent", {})
+    runtime_ns = comparison.get("runtimeIncreaseNsPerUpdate", {})
     measured = {
         "maxBuildMs": build.get("medianMs"), "minBuildSuccessPercent": build.get("successPercent"),
         "minNativeCoveragePercent": artifact.get("coverage", {}).get("percent"),
         "maxArtifactGrowthPercent": comparison.get("artifactGrowthPercent"),
         "maxStartupIncreaseMs": comparison.get("startupIncreaseMs"),
         "maxRuntimeOverheadPercent": comparison.get("runtimeOverheadPercent"),
+        "maxStepOverheadNs": runtime_ns.get("step"),
+        "maxPerCallOverheadPercent": runtime_percent.get("per_call"),
+        "maxBatchOverheadPercent": runtime_percent.get("batched_32"),
         "maxPeakRssOverheadPercent": comparison.get("peakRssOverheadPercent"),
     }
     violations = []

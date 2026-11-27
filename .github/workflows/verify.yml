@@ -181,7 +181,8 @@ jobs:
           python3 -B benchmarks/compare.py --output build/performance-results \
             --build-runs 3 --startup-runs 5 --forks 3 --warmups 6 --trials 7 --iterations 2097152 \
             --native-limit minNativeCoveragePercent=85 --native-limit maxBuildMs=6000 \
-            --native-limit maxStartupIncreaseMs=750 --native-limit maxRuntimeOverheadPercent=800 \
+            --native-limit maxStartupIncreaseMs=750 --native-limit maxStepOverheadNs=12 \
+            --native-limit maxPerCallOverheadPercent=700 --native-limit maxBatchOverheadPercent=100 \
             --native-limit maxArtifactGrowthPercent=400
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && matrix.java == '25'

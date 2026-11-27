@@ -91,6 +91,10 @@ Available metrics include `maxBuildMs`, `minBuildSuccessPercent`, `minNativeCove
 `maxArtifactGrowthPercent`, `maxStartupIncreaseMs`, `maxRuntimeOverheadPercent`, and
 `maxPeakRssOverheadPercent`. The build time cap applies to the median of successful builds.
 Startup uses the median elapsed process time. The runtime cap applies to each workload.
+Use `maxStepOverheadNs` to limit the absolute cost of the small JNI boundary
+probe. Use `maxPerCallOverheadPercent` and `maxBatchOverheadPercent` for the
+arithmetic workloads. The CI limits use an absolute boundary cost because the
+original Java step can take less than a nanosecond on x64.
 The RSS cap uses the median across steady-state forks. An unavailable required metric is a
 budget violation. A nonzero exit indicates a build, semantic, or budget failure. The report
 keeps failed build attempts and withholds timing comparisons for artifacts that fail execution
