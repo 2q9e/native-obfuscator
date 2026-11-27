@@ -7,7 +7,7 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 mkdir "$work/classes"
-"$jdk/javac" --release 21 -g -d "$work/classes" "$here/Launcher.java" "$here/HiddenLogic.java"
+"$jdk/javac" --release 21 -g -parameters -d "$work/classes" "$here/Launcher.java" "$here/HiddenLogic.java"
 "$jdk/jar" --create --file "$work/input.jar" --main-class fixture.Launcher -C "$work/classes" .
 "$jdk/java" -Xverify:all -jar "$work/input.jar" > "$work/expected"
 
@@ -47,6 +47,40 @@ with zipfile.ZipFile(work / 'staged.jar') as jar:
             assert b'HiddenLogic.java' not in data, path
 PY
 done
+
+printf 'Gradle compiler cache fixture' > "$work/classes/previous-compilation-data.bin"
+printf 'runtime resource' > "$work/classes/resource.txt"
+"$jdk/jar" --update --file "$work/input.jar" -C "$work/classes" previous-compilation-data.bin -C "$work/classes" resource.txt
+cat > "$work/cleanup.map" <<'MAP'
+sensitive/engine/HiddenLogic=q7/A8
+sensitive/engine/HiddenLogic$Member=q7/A8$C6
+sensitive/engine/HiddenLogic$1Local=q7/A8$1D4
+sensitive/engine/HiddenLogic$1=q7/A8$1
+MAP
+"$tool" strip-metadata --input "$work/input.jar" --output "$work/cleaned.jar" --class-map "$work/cleanup.map"
+"$jdk/java" -Xverify:all -jar "$work/cleaned.jar" C6 D4 > "$work/cleaned-output"
+cmp "$work/expected" "$work/cleaned-output"
+python3 - "$work/cleaned.jar" <<'PYTHON'
+import sys
+from zipfile import ZipFile
+
+with ZipFile(sys.argv[1]) as jar:
+    names = jar.namelist()
+    assert 'previous-compilation-data.bin' not in names
+    assert jar.read('resource.txt') == b'runtime resource'
+    assert 'fixture/Launcher.class' in names
+    assert 'q7/A8.class' in names
+    for name in names:
+        if name.endswith('.class'):
+            data = jar.read(name)
+            for label in (b'LineNumberTable', b'LocalVariableTable', b'SourceFile', b'Launcher.java', b'HiddenLogic.java'):
+                assert label not in data, (name, label)
+PYTHON
+if "$tool" strip-metadata --input "$work/input.jar" --output "$work/input.jar" > "$work/rejected.log" 2>&1; then
+    echo 'In-place cleanup unexpectedly succeeded' >&2
+    exit 1
+fi
+grep -q 'Input and output must be different files' "$work/rejected.log"
 
 printf 'sensitive/engine/HiddenLogic=sensitive/engine/A8\n' > "$work/incomplete.map"
 if "$tool" analyze --input "$work/input.jar" --class-map "$work/incomplete.map" --include '*' > "$work/rejected.log" 2>&1; then

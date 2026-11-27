@@ -8,6 +8,8 @@ public final class Launcher {
     private record Container(HiddenLogic value) {}
 
     public static void main(String[] expectedNames) throws Exception {
+        if (!Launcher.class.getMethod("main", String[].class).getParameters()[0].getName().equals("expectedNames"))
+            throw new AssertionError("method parameter metadata");
         Container container = new Container(new HiddenLogic(19));
         HiddenLogic logic = container.value();
         if (logic.runNested() != 19) throw new AssertionError("private nestmate access");

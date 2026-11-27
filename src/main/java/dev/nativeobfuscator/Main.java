@@ -43,6 +43,7 @@ public final class Main {
                   native-obfuscator verify --input IN.jar --staged STAGED.jar --include 'pkg/Class#method*'
                   native-obfuscator apply --input IN.jar --staged STAGED.jar --output RELEASE.jar --include 'pkg/Class#method*' --confirm-overwrite
                   native-obfuscator restore --output RELEASE.jar
+                  native-obfuscator strip-metadata --input IN.jar --output OUT.jar [--class-map PATH]
 
                 --include GLOB        Select an owner#name(descriptor) signature. Repeatable.
                 --hierarchy-jar PATH  Read dependency class headers for JVM call bridges. Repeatable.
@@ -82,6 +83,7 @@ public final class Main {
             return arguments.length == 0 ? 2 : 0;
         }
         try {
+            if (arguments[0].equals("strip-metadata")) return runStripMetadata(arguments);
             var gson = new Gson();
             if (arguments[0].equals("harden")) return runHarden(arguments, gson);
             if (arguments[0].equals("verify")) return runVerify(arguments, gson);
@@ -102,6 +104,28 @@ public final class Main {
             System.err.println("Native compilation interrupted");
             return 1;
         }
+    }
+
+    private static int runStripMetadata(String[] arguments) throws IOException {
+        var options = new HashMap<String, String>();
+        for (int index = 1; index < arguments.length; index += 2) {
+            String key = arguments[index];
+            if (!Set.of("--input", "--output", "--class-map").contains(key))
+                throw new IllegalArgumentException("Unknown option " + key);
+            if (index + 1 == arguments.length || options.putIfAbsent(key, arguments[index + 1]) != null)
+                throw new IllegalArgumentException("Expected one value for " + key);
+        }
+        Path input = path(options, "--input");
+        Path output = path(options, "--output");
+        if (input.equals(output) || Files.exists(output) && Files.isSameFile(input, output))
+            throw new IOException("Input and output must be different files");
+        var files = Archive.read(input);
+        if (files.containsKey("META-INF/wocky-build.json") || files.containsKey("META-INF/wocky/runtime.jar"))
+            throw new IOException("Strip metadata on the loader template and runtime before signing and wrapping");
+        if (options.containsKey("--class-map"))
+            files = ClassPaths.remap(files, ClassPaths.read(path(options, "--class-map")));
+        Archive.write(DebugMetadata.strip(files), output);
+        return 0;
     }
 
     private record Coverage(Protector.Config config, Set<String> methods) {}

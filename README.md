@@ -94,6 +94,24 @@ Select methods by their new names, for example `--include 'q7/A8#mix(II)I'`. Use
 
 The tool rewrites JAR entries, bytecode references, descriptors, generic signatures, and class metadata together. Nested classes must map under their new enclosing class name. Member, local, and anonymous class metadata stays intact. To relocate a package, map all its classes into one unused package. Select internal classes whose callers ship in the same JAR, and keep names used by reflection, serialization, other mods, or custom resources. Fabric metadata targets, manifest entrypoints, and service providers keep their names. The class map supports ordinary Java JARs. Use a metadata-aware external remapper for Kotlin, modular, or multi-release JARs.
 
+## Strip build metadata
+
+Use `strip-metadata` on an unsigned loader or runtime before signing or adding a release integrity seal.
+
+```sh
+native-obfuscator strip-metadata --input build.jar --output clean.jar
+```
+
+The command strips source filenames, source maps, and line tables from Java classes and removes
+the Gradle compiler cache at the archive root. It preserves method parameter names for reflection
+and local variable tables on declared Mixin classes for name-based injection. Classes with opaque
+attributes keep their original constant pool and instruction offsets, so unused strings can remain
+in those classes. Nested JARs and ordinary resources retain their original bytes and paths.
+
+Add `--class-map path/to/classes.map` when you have verified aliases for internal classes and packages.
+The same remapping checks apply as in `protect`. Apply the map before native translation if it changes
+any owners or descriptors used by JNI.
+
 ## Native targets
 
 | Platform | x64 | ARM64 |
