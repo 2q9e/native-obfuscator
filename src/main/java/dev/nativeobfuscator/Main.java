@@ -457,8 +457,12 @@ public final class Main {
             case "maximum" -> 3;
             default -> 0;
         };
-        String preset = branches == 0 ? arithmetic
-            : "native-diversify<seed=" + seed + ";max=" + branches + ";prefix=method_>," + arithmetic;
+        String preset = arithmetic;
+        if (branches > 0) {
+            int mixSites = profile.equals("maximum") ? 8 : 4;
+            preset = "native-diversify<seed=" + seed + ";max=" + branches + ";prefix=method_>,"
+                + "native-mix<seed=" + seed + ";max=" + mixSites + ";prefix=method_>," + arithmetic;
+        }
         boolean customPasses = options.containsKey("--llvm-passes");
         if (!analyze && options.containsKey("--analysis-llvm-sites") && analysis.llvmSites() > 0
             && (!llvm || sites == 0 || customPasses))
