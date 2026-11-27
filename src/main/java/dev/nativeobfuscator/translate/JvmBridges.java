@@ -231,10 +231,9 @@ final class JvmBridges {
         return create(instructionIndex, null, type, arguments, allocation.clone(null));
     }
 
-    static MethodInsnNode constructor(TypeInsnNode allocation) throws MethodCompiler.Unsupported {
-        String reason = "object allocation requires NEW, DUP, plain argument loads, and its matching constructor";
+    static MethodInsnNode plainConstructor(TypeInsnNode allocation) {
         AbstractInsnNode duplicate = allocation.getNext();
-        if (duplicate == null || duplicate.getOpcode() != DUP) throw new MethodCompiler.Unsupported(reason);
+        if (duplicate == null || duplicate.getOpcode() != DUP) return null;
         AbstractInsnNode current = duplicate.getNext();
         int arguments = 0;
         // Moving NEW across these pushes cannot reorder a call, heap read, or constant resolution.
@@ -242,11 +241,9 @@ final class JvmBridges {
             arguments++;
             current = current.getNext();
         }
-        if (!(current instanceof MethodInsnNode call) || call.getOpcode() != INVOKESPECIAL || call.itf
-            || !call.name.equals("<init>") || !call.owner.equals(allocation.desc)
-            || arguments != Type.getArgumentCount(call.desc) || Type.getReturnType(call.desc) != Type.VOID_TYPE)
-            throw new MethodCompiler.Unsupported(reason);
-        return call;
+        if (!ConstructorExpression.matchingConstructor(allocation, current)) return null;
+        var constructor = (MethodInsnNode) current;
+        return arguments == Type.getArgumentCount(constructor.desc) ? constructor : null;
     }
 
     private static boolean plainArgument(AbstractInsnNode instruction) {
@@ -266,6 +263,20 @@ final class JvmBridges {
         prefix.add(new InsnNode(DUP));
         bridge.instructions.insert(prefix);
         bridge.maxStack = bridge.maxLocals + 2;
+        return bridge;
+    }
+
+    MethodNode construct(TypeInsnNode allocation, ConstructorExpression expression, int instructionIndex) {
+        Type type = Type.getObjectType(allocation.desc);
+        MethodNode bridge = newMethod(Integer.toString(instructionIndex),
+            Type.getMethodDescriptor(type, expression.parameterTypes()));
+        bridge.instructions.add(allocation.clone(null));
+        bridge.instructions.add(new InsnNode(DUP));
+        expression.arguments().forEach(bridge.instructions::add);
+        bridge.instructions.add(expression.constructor().clone(null));
+        bridge.instructions.add(new InsnNode(ARETURN));
+        bridge.maxLocals = expression.localSlots();
+        bridge.maxStack = caller.maxStack;
         return bridge;
     }
 

@@ -106,16 +106,17 @@ foreach ($release in $Releases) {
     $protected = Join-Path $work "arithmetic-$release-native.jar"
     Jar $original $classes 'Arithmetic' "arithmetic-$release-jar"
     $baseline = ExecuteJar $original @() "arithmetic-$release-java"
-    $rows = Tool @('protect','--input',$original,'--output',$protected,'--include','Arithmetic#calc*','--unsupported','retain','--zig',$Zig) "arithmetic-$release-protect"
+    $rows = Tool @('protect','--input',$original,'--output',$protected,'--include','Arithmetic#calc*','--include','Arithmetic#<init>*','--unsupported','retain','--zig',$Zig) "arithmetic-$release-protect"
     $native = ExecuteJar $protected @() "arithmetic-$release-native"
     Assert ($baseline -ceq $native) "Arithmetic $release output differs"
     $decisions = @($rows -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
-    Assert (@($decisions | Where-Object result -eq selected).Count -eq 20) 'Expected 20 native arithmetic methods'
+    $selected = @($decisions | Where-Object result -eq selected)
+    Assert ($selected.Count -eq 21 -and 'Arithmetic#calcThrow()I' -in $selected.method) 'Expected 21 native arithmetic methods including the throw fixture'
     $retained = @($decisions | Where-Object result -eq retained)
-    Assert ($retained.Count -eq 1 -and $retained[0].method -eq 'Arithmetic#calcThrow()I') 'Expected the throw fixture to stay in Java'
+    Assert ($retained.Count -eq 1 -and $retained[0].method -eq 'Arithmetic#<init>()V') 'Expected the initializer to stay in Java'
     $rejected = Join-Path $work "arithmetic-$release-rejected.jar"
     [IO.File]::WriteAllText($rejected,'existing output')
-    Tool @('protect','--input',$original,'--output',$rejected,'--include','Arithmetic#calc*','--zig',$Zig) "arithmetic-$release-strict" $true | Out-Null
+    Tool @('protect','--input',$original,'--output',$rejected,'--include','Arithmetic#calc*','--include','Arithmetic#<init>*','--zig',$Zig) "arithmetic-$release-strict" $true | Out-Null
     Assert ([IO.File]::ReadAllText($rejected) -eq 'existing output') 'Strict failure overwrote existing output'
     foreach ($mode in @('native','registration')) {
         $tampered = Join-Path $work "arithmetic-$release-tampered-$mode.jar"
@@ -124,7 +125,7 @@ foreach ($release in $Releases) {
         $expected = if ($mode -eq 'native') { 'Native library checksum mismatch' } else { 'Native method registration failed' }
         Assert ([IO.File]::ReadAllText((Join-Path $work "arithmetic-$release-reject-$mode.stderr.txt")).Contains($expected)) "Wrong rejection for tampered $mode"
     }
-    $summary.Add(@{test='arithmetic'; release=$release; nativeMethods=20; digest=$native.Trim(); target='x86_64-windows'; executed=$true})
+    $summary.Add(@{test='arithmetic'; release=$release; nativeMethods=21; digest=$native.Trim(); target='x86_64-windows'; executed=$true})
 
     $generator = Join-Path $work "generator-$release"
     $kernelClasses = Join-Path $work "kernels-$release"

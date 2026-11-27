@@ -5,6 +5,7 @@ import java.util.BitSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.IntFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.objectweb.asm.Type;
@@ -181,17 +182,28 @@ public final class MethodCompiler {
                         i = method.instructions.indexOf(callback.unbox());
                     } else if (insn.getOpcode() == NEW && bridges != null) {
                         var allocation = (TypeInsnNode) insn;
-                        MethodInsnNode constructor = JvmBridges.constructor(allocation);
+                        MethodInsnNode constructor = JvmBridges.plainConstructor(allocation);
+                        ConstructorExpression expression = null;
+                        if (constructor == null) {
+                            expression = ConstructorExpression.plan(allocation, method, frames);
+                            constructor = expression.constructor();
+                        }
                         int end = method.instructions.indexOf(constructor);
-                        MethodNode bridge = bridges.construct(allocation, constructor, i);
-                        // NEW and DUP reserve two verifier slots. Plain pushes can fill the
-                        // argument slots while the combined JVM operation remains pending.
-                        for (int argument = i + 2; argument < end; argument++)
-                            emit(code, owner, method, insns[argument], frames[argument], type.getReturnType(), argument,
-                                wrappingOperation, bridges, uncaught, ReferenceResult.UNTRACKED, lookups);
-                        // The contiguous constructor sequence contains no boundary labels.
-                        emitCall(code, owner, method, bridge.name, bridge.desc, frames[end], failure, references, true, false,
-                            lookups.slot(i), -2);
+                        if (expression == null) {
+                            MethodNode bridge = bridges.construct(allocation, constructor, i);
+                            // Plain pushes cannot throw or move observable work before NEW.
+                            for (int argument = i + 2; argument < end; argument++)
+                                emit(code, owner, method, insns[argument], frames[argument], type.getReturnType(), argument,
+                                    wrappingOperation, bridges, uncaught, ReferenceResult.UNTRACKED, lookups);
+                            emitCall(code, owner, method, bridge.name, bridge.desc, frames[end], failure, references, true,
+                                false, lookups.slot(i), -2);
+                        } else {
+                            MethodNode bridge = bridges.construct(allocation, expression, i);
+                            List<Integer> sourceLocals = expression.sourceLocals();
+                            emitInvocation(code, owner, method, bridge.name, bridge.desc, failure, references, true,
+                                false, lookups.slot(i), "declaring", frames[i].getStackSize(),
+                                argument -> "l[" + sourceLocals.get(argument) + "]");
+                        }
                         i = end;
                     } else {
                         emit(code, owner, method, insn, frames[i], type.getReturnType(), i, wrappingOperation, bridges,
@@ -910,7 +922,6 @@ public final class MethodCompiler {
     private static void emitCall(StringBuilder code, ClassNode owner, MethodNode method, String name, String descriptor,
                                  Frame<BasicValue> frame, Supplier<String> failure, ReferenceResult references,
                                  boolean statik, boolean nonvirtual, String cache, int resultOffset) throws Unsupported {
-        Type returned = Type.getReturnType(descriptor);
         Type[] parameters = Type.getArgumentTypes(descriptor);
         int base = frame.getStackSize() - parameters.length - (statik ? 0 : 1);
         // JVM int-stack arguments can contain values the corresponding JNI type would truncate.
@@ -921,7 +932,16 @@ public final class MethodCompiler {
                 && !(Type.SHORT_TYPE.equals(parameter) && Type.BYTE_TYPE.equals(actual)))
                 throw new Unsupported("argument " + (i + 1) + " is not proven to fit JNI descriptor " + parameter);
         }
-        String receiver = statik ? "declaring" : stack(base) + ".r";
+        emitInvocation(code, owner, method, name, descriptor, failure, references, statik, nonvirtual, cache,
+            statik ? "declaring" : stack(base) + ".r", base + resultOffset,
+            argument -> stack(base + (statik ? 0 : 1) + argument));
+    }
+
+    private static void emitInvocation(StringBuilder code, ClassNode owner, MethodNode method, String name, String descriptor,
+                                       Supplier<String> failure, ReferenceResult references, boolean statik, boolean nonvirtual,
+                                       String cache, String receiver, int resultSlot, IntFunction<String> argumentSlot) {
+        Type returned = Type.getReturnType(descriptor);
+        Type[] parameters = Type.getArgumentTypes(descriptor);
         if (!statik) nullCheck(code, receiver, failure);
         line(code, "{");
         ensureDeclaringClass(code, owner, method, failure);
@@ -947,11 +967,11 @@ public final class MethodCompiler {
                 case Type.BOOLEAN -> 'z'; case Type.BYTE -> 'b'; case Type.CHAR -> 'c'; case Type.SHORT -> 's';
                 case Type.INT -> 'i'; case Type.LONG -> 'j'; case Type.FLOAT -> 'f'; case Type.DOUBLE -> 'd'; default -> 'l';
             };
-            line(code, "arguments[" + i + "]." + member + " = " + narrowed(parameter, stack(base + (statik ? 0 : 1) + i) + "." + field(parameter)) + ";");
+            line(code, "arguments[" + i + "]." + member + " = " + narrowed(parameter, argumentSlot.apply(i) + "." + field(parameter)) + ";");
         }
         String api = "Call" + (statik ? "Static" : nonvirtual ? "Nonvirtual" : "") + suffix(returned) + "MethodA";
         String call = "(*env)->" + api + "(env, " + receiver + (nonvirtual ? ", declaring" : "") + ", member, arguments)";
-        String destination = stack(base + resultOffset) + "." + field(returned);
+        String destination = stack(resultSlot) + "." + field(returned);
         if (isReferenceType(returned)) {
             emitReferenceResult(code, destination, call, failure, references);
         } else {

@@ -67,10 +67,12 @@ assert synchronized_declarations == {"covStaticMonitor", "covInstanceMonitor", "
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d.get("result") == "retained"}
 assert set(retained) == {"rejectAllocation", "rejectRawCall", "rejectDirectHierarchy", "rejectUnknownHierarchy",
-                         "rejectMalformedLambdaLayout"}, retained
+                         "rejectLongAllocation", "rejectMalformedLambdaLayout", "rejectSplitAllocation"}, retained
 assert "bytecode verification failed" in retained["rejectDirectHierarchy"]
 assert "bytecode verification failed" in retained["rejectUnknownHierarchy"]
 assert "object allocation" in retained["rejectAllocation"]
+assert "exceeds 128 instructions" in retained["rejectLongAllocation"]
+assert "control-flow or exception boundary" in retained["rejectSplitAllocation"]
 assert "not proven to fit JNI descriptor B" in retained["rejectRawCall"]
 assert "dynamic call-site linkage" in retained["rejectMalformedLambdaLayout"]
 verified = run(tool + ["verify", "--staged", protected] + selection + flags)
@@ -133,7 +135,10 @@ split_result = run([executable("java"), "-Xverify:all", "-Xcheck:jni", "--enable
 original_result = run([executable("java"), "-Xverify:all", "-jar", original], timeout=90)
 for outcome in ("interned-literal:true", "class-literals:true", "literal-loop:8192", "literal-initializations:0/1",
                 "missing-literals:0/2/2", "method-type:(J[Ljava/lang/String;)I", "method-handle:true",
-                "lambda-marker:true", "lambda-bridge:bridge/null"):
+                "lambda-marker:true", "lambda-bridge:bridge/null", "constructor-skipped:true/0",
+                "constructor-argument-failure:true/12", "constructor-expression:38/true/33/12234",
+                "constructor-field-handler:-1/44/122344", "constructor-literal-skipped:true/0",
+                "constructor-literal-resolution:2/1", "constructor-reflection:method/argument"):
     assert "value:" + outcome + ":effects=" in original_result.stdout, outcome
 for outcome in ("concurrent-publication:512", "concurrent-monitors:1024/1024:throws-per-entry=256",
                 "concurrent-reference-iterations:32772"):

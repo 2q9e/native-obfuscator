@@ -71,6 +71,64 @@ public final class GenerateChecks {
         missing.visitEnd();
     }
 
+    private static void constructorFixtures(ClassWriter writer) {
+        String allocation = "Coverage$LiteralConstruction";
+        var missing = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "covMissingConstructorLiteral",
+            "(Z)Ljava/lang/Object;", null, null);
+        var allocate = new Label();
+        missing.visitCode();
+        missing.visitVarInsn(ILOAD, 0);
+        missing.visitJumpInsn(IFNE, allocate);
+        missing.visitInsn(ACONST_NULL);
+        missing.visitInsn(ARETURN);
+        missing.visitLabel(allocate);
+        missing.visitTypeInsn(NEW, allocation);
+        missing.visitInsn(DUP);
+        missing.visitLdcInsn(Type.getObjectType("MissingConstructorArgument"));
+        missing.visitMethodInsn(INVOKESPECIAL, allocation, "<init>", "(Ljava/lang/Class;)V", false);
+        missing.visitInsn(ARETURN);
+        missing.visitMaxs(0, 0);
+        missing.visitEnd();
+
+        allocation = "java/lang/StringBuilder";
+        var split = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "rejectSplitAllocation",
+            "(I)Ljava/lang/StringBuilder;", null, null);
+        var start = new Label();
+        var end = new Label();
+        var handler = new Label();
+        split.visitCode();
+        split.visitTryCatchBlock(start, end, handler, "java/lang/RuntimeException");
+        split.visitTypeInsn(NEW, allocation);
+        split.visitInsn(DUP);
+        split.visitLabel(start);
+        split.visitVarInsn(ILOAD, 0);
+        split.visitMethodInsn(INVOKESTATIC, "java/lang/Math", "abs", "(I)I", false);
+        split.visitLabel(end);
+        split.visitMethodInsn(INVOKESPECIAL, allocation, "<init>", "(I)V", false);
+        split.visitInsn(ARETURN);
+        split.visitLabel(handler);
+        split.visitInsn(POP);
+        split.visitInsn(ACONST_NULL);
+        split.visitInsn(ARETURN);
+        split.visitMaxs(0, 0);
+        split.visitEnd();
+
+        var oversized = writer.visitMethod(ACC_PUBLIC | ACC_STATIC, "rejectLongAllocation",
+            "()Ljava/lang/StringBuilder;", null, null);
+        oversized.visitCode();
+        oversized.visitTypeInsn(NEW, allocation);
+        oversized.visitInsn(DUP);
+        oversized.visitInsn(ICONST_0);
+        for (int i = 0; i < 64; i++) {
+            oversized.visitInsn(ICONST_1);
+            oversized.visitInsn(IADD);
+        }
+        oversized.visitMethodInsn(INVOKESPECIAL, allocation, "<init>", "(I)V", false);
+        oversized.visitInsn(ARETURN);
+        oversized.visitMaxs(0, 0);
+        oversized.visitEnd();
+    }
+
     private static void lambdaLayoutFixtures(ClassWriter writer) {
         String typed = "(Ljava/lang/String;)Ljava/lang/String;";
         String erased = "(Ljava/lang/Object;)Ljava/lang/Object;";
@@ -507,6 +565,7 @@ public final class GenerateChecks {
         boxedBoundary.visitMaxs(0, 0);
         boxedBoundary.visitEnd();
         literalFixtures(writer);
+        constructorFixtures(writer);
         lambdaLayoutFixtures(writer);
         exceptionFixtures(writer);
         writer.visitEnd();

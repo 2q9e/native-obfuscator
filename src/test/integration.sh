@@ -18,7 +18,7 @@ mkdir "$work/classes"
 "$java_home/bin/java" -Xverify:all -jar "$work/original.jar" > "$work/original.txt"
 
 "$tool" analyze --input "$work/original.jar" --include 'Arithmetic#calc*' --unsupported retain > "$work/analysis.jsonl"
-"$tool" protect --input "$work/original.jar" --output "$work/protected.jar" --include 'Arithmetic#calc*' \
+"$tool" protect --input "$work/original.jar" --output "$work/protected.jar" --include 'Arithmetic#calc*' --include 'Arithmetic#<init>*' \
     --unsupported retain "$@" > "$work/report.jsonl"
 "$java_home/bin/java" -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED \
     -jar "$work/protected.jar" > "$work/protected.txt"
@@ -29,10 +29,10 @@ grep -q 'static native long calcOverload(long, long)' "$work/methods.txt"
 grep -q 'static native double calcDouble(double, double, int)' "$work/methods.txt"
 grep -q 'static native int calcLambda(int)' "$work/methods.txt"
 grep -q 'static native int calcArray(int\[\], int)' "$work/methods.txt"
-grep -q 'static int calcThrow()' "$work/methods.txt"
+grep -q 'static native int calcThrow()' "$work/methods.txt"
 
 printf 'existing output' > "$work/rejected.jar"
-if "$tool" protect --input "$work/original.jar" --output "$work/rejected.jar" --include 'Arithmetic#calc*' \
+if "$tool" protect --input "$work/original.jar" --output "$work/rejected.jar" --include 'Arithmetic#calc*' --include 'Arithmetic#<init>*' \
     > "$work/rejected.jsonl" 2> "$work/rejected.err"; then
     echo "Unsupported method unexpectedly succeeded under the fail policy" >&2
     exit 1
@@ -45,9 +45,9 @@ import json, pathlib, struct, sys, warnings, zipfile
 
 work = pathlib.Path(sys.argv[1])
 decisions = [json.loads(line) for line in (work / "report.jsonl").read_text().splitlines()]
-assert len([decision for decision in decisions if decision["result"] == "selected"]) == 20, decisions
+assert len([decision for decision in decisions if decision["result"] == "selected"]) == 21, decisions
 assert {decision["method"].split("(")[0] for decision in decisions if decision["result"] == "retained"} == {
-    "Arithmetic#calcThrow"
+    "Arithmetic#<init>"
 }, decisions
 with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / "protected.jar") as protected:
     assert b"Arithmetic.java" in original.read("Arithmetic$Digest.class")
@@ -138,7 +138,7 @@ assert selected["instructions"] >= 8 and "branches" in selected, selected
 assert skipped["method"] == "Arithmetic#calcFloatToInt(F)I" and skipped["instructions"] < 8, skipped
 assert size["target"].endswith("-linux") and size["nativeBytes"] > 0, size
 native_names = re.findall(r"^static \w+ JNICALL (method_[0-9a-f]{293})\(", (work / "translated.c").read_text(), re.M)
-assert len(set(native_names)) == len(native_names) == 20, native_names
+assert len(set(native_names)) == len(native_names) == 21, native_names
 with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / "padded.jar") as padded:
     original_classes = {name for name in original.namelist() if name.endswith(".class")}
     added_classes = {name for name in padded.namelist() if name.endswith(".class")} - original_classes

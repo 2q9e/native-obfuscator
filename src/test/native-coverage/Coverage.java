@@ -246,7 +246,51 @@ public class Coverage {
         effects++;
         return built;
     }
-    public static Object rejectAllocation(int size) { return new StringBuilder(Math.abs(size)); }
+    private static int constructionTrace;
+    private static int constructorLiteralInitializations;
+    private static int constructionAdjustment = 17;
+
+    private record ExpressionAllocation(int value, String label, long offset) {
+        static { constructionTrace = constructionTrace * 10 + 1; }
+        private ExpressionAllocation { constructionTrace = constructionTrace * 10 + 4; }
+    }
+
+    static final class LiteralConstruction {
+        static { constructorLiteralInitializations++; }
+        LiteralConstruction(Class<?> type) {
+            throw new AssertionError("Missing constructor argument unexpectedly resolved: " + type);
+        }
+    }
+
+    private static int constructionArgument(int value, RuntimeException failure) {
+        constructionTrace = constructionTrace * 10 + 2;
+        if (failure != null) throw failure;
+        return value * 3;
+    }
+
+    private static long constructionOffset(long value) {
+        constructionTrace = constructionTrace * 10 + 3;
+        return value + 11;
+    }
+
+    @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)
+    private @interface ConstructorLabel {
+        String value();
+    }
+
+    @ConstructorLabel("method")
+    private static ExpressionAllocation covConstructExpression(boolean take, @ConstructorLabel("argument") int value,
+                                                               long offset, RuntimeException failure) {
+        if (!take) return null;
+        return new ExpressionAllocation(constructionArgument(value, failure) + constructionAdjustment, "jni-construction", constructionOffset(offset + offset));
+    }
+
+    private long covConstructField(int divisor) {
+        try { return 41L + new ExpressionAllocation(count / divisor, "field", wide + 11L).value(); }
+        catch (ArithmeticException failure) { return -1; }
+    }
+
+    public static Object rejectAllocation(int size) { return new StringBuilder(size < 0 ? -size : size); }
     public static String covConcat(String name, int count, long offset) { return name + "=" + count + "/" + offset; }
     public static String covConcatObject(Object token, int value) {
         String result = token + ":" + value;
@@ -623,7 +667,45 @@ public class Coverage {
         show(() -> covConstruct(Long.MIN_VALUE, sameString, true).amount);
         show(() -> covConstruct(Long.MAX_VALUE, sameString, true).label == sameString);
         show(() -> covConstruct(5, null, true).label == null);
+        show(() -> "constructor-skipped:" + (covConstructExpression(false, 7, 11, null) == null) + "/" + constructionTrace);
+        show(() -> {
+            var argumentFailure = new IllegalStateException();
+            try { covConstructExpression(true, 7, 11, argumentFailure); }
+            catch (IllegalStateException caught) {
+                return "constructor-argument-failure:" + (caught == argumentFailure) + "/" + constructionTrace;
+            }
+            throw new AssertionError("Expected constructor argument failure");
+        });
+        show(() -> {
+            var result = covConstructExpression(true, 7, 11, null);
+            return "constructor-expression:" + result.value() + "/" + (result.label() == "jni-construction")
+                + "/" + result.offset() + "/" + constructionTrace;
+        });
+        show(() -> {
+            var fields = new Coverage();
+            return "constructor-field-handler:" + fields.covConstructField(0) + "/" + fields.covConstructField(2)
+                + "/" + constructionTrace;
+        });
+        show(() -> "constructor-literal-skipped:" + (RawOps.covMissingConstructorLiteral(false) == null)
+            + "/" + constructorLiteralInitializations);
+        show(() -> {
+            var method = Coverage.class.getDeclaredMethod("covConstructExpression",
+                boolean.class, int.class, long.class, RuntimeException.class);
+            var argument = method.getParameters()[1];
+            return "constructor-reflection:" + method.getAnnotation(ConstructorLabel.class).value()
+                + "/" + argument.getAnnotation(ConstructorLabel.class).value();
+        });
+        show(() -> {
+            int failures = 0;
+            for (int call = 0; call < 2; call++) {
+                try { RawOps.covMissingConstructorLiteral(true); }
+                catch (NoClassDefFoundError unresolved) { failures++; }
+            }
+            return "constructor-literal-resolution:" + failures + "/" + constructorLiteralInitializations;
+        });
         show(() -> rejectAllocation(-7).getClass().getSimpleName());
+        show(() -> RawOps.rejectSplitAllocation(-7).capacity());
+        show(() -> RawOps.rejectLongAllocation().capacity());
         show(() -> covConcat("score", Integer.MIN_VALUE, Long.MAX_VALUE));
         show(() -> covConcat(null, Integer.MAX_VALUE, Long.MIN_VALUE));
         show(() -> covConcatObject(null, 7));
