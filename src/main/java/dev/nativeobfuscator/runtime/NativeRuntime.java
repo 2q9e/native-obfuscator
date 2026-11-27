@@ -22,7 +22,7 @@ public final class NativeRuntime {
     private NativeRuntime() {}
 
     public static void register(Class<?> declaringClass, int index) {
-        String path = resourceRoot() + "registration/" + index + ".bin";
+        String path = new StringBuilder(resourceRoot()).append("registration/").append(index).append(".bin").toString();
         try (InputStream input = resource(path)) {
             byte[] metadata = input.readNBytes(MAX_REGISTRATION_BYTES + 1);
             if (metadata.length == 0 || metadata.length > MAX_REGISTRATION_BYTES)
@@ -50,11 +50,14 @@ public final class NativeRuntime {
         if (platform.isEmpty() || machine.isEmpty())
             throw new UnsatisfiedLinkError("Unsupported native target " + os + "/" + arch);
 
-        String root = resourceRoot() + machine + "-" + platform + "/";
         String binary = platform.equals("windows") ? "protected.dll" : "libprotected.so";
+        // This code runs on the first native call. Avoid linking dynamic
+        // string concatenation call sites just to look up the two resources.
+        String libraryPath = new StringBuilder(resourceRoot()).append(machine).append('-')
+            .append(platform).append('/').append(binary).toString();
         try {
             byte[] expected;
-            try (InputStream sha = resource(root + binary + ".sha256")) {
+            try (InputStream sha = resource(libraryPath.concat(".sha256"))) {
                 byte[] hex = sha.readNBytes(65);
                 if (hex.length != 64) throw new IOException("Invalid native library checksum length");
                 expected = HexFormat.of().parseHex(new String(hex, java.nio.charset.StandardCharsets.US_ASCII));
@@ -67,10 +70,10 @@ public final class NativeRuntime {
                 directory = Files.createTempDirectory("native-obfuscator-");
             }
             directory.toFile().deleteOnExit();
-            Path file = directory.resolve(HexFormat.of().formatHex(expected) + "-" + binary);
+            Path file = directory.resolve(binary);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try {
-                try (InputStream input = resource(root + binary);
+                try (InputStream input = resource(libraryPath);
                      var output = Files.newOutputStream(file, java.nio.file.StandardOpenOption.CREATE_NEW,
                          java.nio.file.StandardOpenOption.WRITE)) {
                     byte[] buffer = new byte[16384];
@@ -96,14 +99,16 @@ public final class NativeRuntime {
                 throw failure;
             }
         } catch (IOException | NoSuchAlgorithmException | IllegalArgumentException failure) {
-            var error = new UnsatisfiedLinkError("Cannot load " + root + binary + ": " + failure.getMessage());
+            var error = new UnsatisfiedLinkError("Cannot load " + libraryPath + ": " + failure.getMessage());
             error.initCause(failure);
             throw error;
         }
     }
 
     private static String resourceRoot() {
-        return "/META-INF/native-obfuscator/" + NativeRuntime.class.getSimpleName() + "/";
+        String name = NativeRuntime.class.getName();
+        return new StringBuilder("/META-INF/native-obfuscator/")
+            .append(name, name.lastIndexOf('.') + 1, name.length()).append('/').toString();
     }
 
     private static InputStream resource(String path) throws IOException {
