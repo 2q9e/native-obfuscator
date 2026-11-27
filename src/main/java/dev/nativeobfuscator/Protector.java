@@ -39,7 +39,8 @@ final class Protector {
                   List<NativeTarget> targets, String zig, boolean skipUnsupported,
                   boolean analyze, boolean emitC, String clang, String llvmOpt, Path llvmPlugin, String llvmPasses, int maxGrowth, int markers, long markerSeed,
                   int paddingCount, long paddingSeed, int minInstructions, boolean reportNativeSizes,
-                  AnalysisConfig analysis, List<Path> hierarchyJars, Map<String, String> classPaths) {
+                  AnalysisConfig analysis, List<Path> hierarchyJars, Map<String, String> classPaths,
+                  NativeTarget.Limits nativeLimits, LlvmScope llvmScope) {
         Config {
             hierarchyJars = List.copyOf(hierarchyJars);
             classPaths = Map.copyOf(classPaths);
@@ -52,13 +53,15 @@ final class Protector {
                int minInstructions, boolean reportNativeSizes) {
             this(input, output, includes, excludes, targets, zig, skipUnsupported, analyze, emitC, clang,
                 llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount, paddingSeed,
-                minInstructions, reportNativeSizes, AnalysisConfig.OFF, List.of(), Map.of());
+                minInstructions, reportNativeSizes, AnalysisConfig.OFF, List.of(), Map.of(),
+                NativeTarget.Limits.DEFAULT, LlvmScope.ALL);
         }
 
         Config withOutput(Path replacement) {
             return new Config(input, replacement, includes, excludes, targets, zig, skipUnsupported, analyze,
                 emitC, clang, llvmOpt, llvmPlugin, llvmPasses, maxGrowth, markers, markerSeed, paddingCount,
-                paddingSeed, minInstructions, reportNativeSizes, analysis, hierarchyJars, classPaths);
+                paddingSeed, minInstructions, reportNativeSizes, analysis, hierarchyJars, classPaths,
+                nativeLimits, llvmScope);
         }
     }
     record Decision(String method, String result, String reason, Integer instructions,
@@ -254,6 +257,7 @@ final class Protector {
         Path workspace = Files.createTempDirectory("native-obfuscator-build-");
         try {
             Path c = Files.writeString(workspace.resolve("translated.c"), source);
+            config.llvmScope.writeSelection(workspace, selectedSymbols);
             files.putAll(outputs);
             files.putAll(registrationResources);
             files.put(loader + ".class", analysisPlan == null ? runtime(loader) : AnalysisRuntime.loader(loader));
@@ -355,6 +359,9 @@ final class Protector {
         });
         digest.update((config.includes + "\n" + config.excludes + "\n" + config.targets
             + "\n" + config.llvmPasses + "\nformat 2").getBytes(StandardCharsets.UTF_8));
+        if (config.llvmScope.enabled())
+            digest.update((config.llvmScope.includes() + "\n" + config.llvmScope.excludes())
+                .getBytes(StandardCharsets.UTF_8));
         if (!config.hierarchyJars.isEmpty()) hierarchy.updateDigest(digest);
         if (config.minInstructions != 0)
             digest.update(("minimum instructions " + config.minInstructions).getBytes(StandardCharsets.UTF_8));

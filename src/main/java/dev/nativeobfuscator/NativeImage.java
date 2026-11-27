@@ -10,14 +10,20 @@ import java.util.HexFormat;
 final class NativeImage {
     private NativeImage() {}
 
+    record Executable(long bytes, String sha256) {}
+
     static long executableBytes(byte[] binary, NativeTarget target) throws IOException {
         return executableBytes(binary, target, null);
     }
 
     static String executableSha256(byte[] binary, NativeTarget target) throws IOException {
+        return measureExecutable(binary, target).sha256();
+    }
+
+    static Executable measureExecutable(byte[] binary, NativeTarget target) throws IOException {
         var digest = Archive.sha256();
-        executableBytes(binary, target, digest);
-        return HexFormat.of().formatHex(digest.digest());
+        long size = executableBytes(binary, target, digest);
+        return new Executable(size, HexFormat.of().formatHex(digest.digest()));
     }
 
     private static long executableBytes(byte[] binary, NativeTarget target, MessageDigest digest) throws IOException {

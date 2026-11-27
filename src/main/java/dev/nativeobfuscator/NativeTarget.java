@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -21,6 +23,7 @@ enum NativeTarget {
         Pattern.compile("^native-obfuscator-function: pass=\\S+ function=(\\S+) ");
     private static final Pattern TRANSFORM_SUMMARY = Pattern.compile(
         "^native-obfuscator: (\\S+) candidates=(\\d{1,10}) eligible=(\\d{1,10}) transformed=(\\d{1,10})(?: |$)");
+    private static final Pattern PASS_REJECTION = Pattern.compile("\\b(skipped_[a-z_]+)=(\\d{1,10})(?: |$)");
     final String key;
     final String triple;
     final String file;
@@ -58,7 +61,14 @@ enum NativeTarget {
                             String baselineExecutableSha256, String executableSha256,
                             boolean executableChanged) {}
 
-    record LlvmPassReport(String pass, long candidates, long eligible, long transformed) {}
+    record Limits(int maxLibraryBytes, int timeoutSeconds) {
+        static final Limits DEFAULT = new Limits(0, 180);
+    }
+
+    record LlvmPassReport(String pass, long candidates, long eligible, long transformed,
+                          Map<String, Long> rejections) {}
+
+    private record LinkedBaseline(long executableBytes, int libraryBytes, String executableSha256) {}
 
     record Build(byte[] binary, long executableBytes, LinkedComparison llvmComparison, List<LlvmPassReport> llvmPasses) {
         Build {
@@ -99,7 +109,8 @@ enum NativeTarget {
         String machine = key.substring(0, key.indexOf('-'));
         boolean linux = key.endsWith("-linux");
         String clangTriple = machine + (linux ? "-unknown-linux-gnu" : "-w64-windows-gnu");
-        byte[] baseline = null;
+        LinkedBaseline baseline = null;
+        int timeout = config.nativeLimits().timeoutSeconds();
         var llvmPasses = new ArrayList<LlvmPassReport>();
         if (config.llvmPlugin() != null) {
             var frontend = new ArrayList<String>();
@@ -112,7 +123,7 @@ enum NativeTarget {
                 preprocessor.addAll(flags);
                 preprocessor.addAll(includeFlags);
                 preprocessor.addAll(List.of("-E", source.toString(), "-o", input.toString()));
-                execute(preprocessor, "Zig preprocessing for " + key);
+                execute(preprocessor, "Zig preprocessing for " + key, timeout);
                 frontend.addAll(List.of("-target", clangTriple));
             } else {
                 if (this != host() || !linux)
@@ -123,54 +134,80 @@ enum NativeTarget {
             Path transformed = output.resolveSibling("transformed.bc");
             if (linux) frontend.add("-fPIC");
             frontend.addAll(List.of("-emit-llvm", "-c", input.toString(), "-o", optimized.toString()));
-            execute(frontend, "LLVM frontend for " + key);
-            execute(List.of(config.llvmOpt(), "-load-pass-plugin=" + config.llvmPlugin(),
+            execute(frontend, "LLVM frontend for " + key, timeout);
+            Path optDirectory = config.llvmScope().enabled() ? workspace : null;
+            String opt = config.llvmOpt();
+            if (optDirectory != null && (opt.contains("/") || opt.contains("\\")))
+                opt = Path.of(opt).toAbsolutePath().toString();
+            execute(List.of(opt, "-load-pass-plugin=" + config.llvmPlugin(), "-verify-each",
                 "-passes=" + config.llvmPasses() + ",verify", optimized.toString(), "-o", transformed.toString()),
-                "LLVM protection for " + key, output.resolveSibling("llvm-protection.log"), line -> {
+                "LLVM protection for " + key, timeout, optDirectory, output.resolveSibling("llvm-protection.log"), line -> {
                     var match = TRANSFORM_FUNCTION.matcher(line);
                     String method = match.find() ? selectedSymbols.get(match.group(1)) : null;
                     var summary = TRANSFORM_SUMMARY.matcher(line);
                     if (summary.find()) {
+                        var rejections = new LinkedHashMap<String, Long>();
+                        var rejection = PASS_REJECTION.matcher(line).region(summary.end(), line.length());
+                        while (rejection.find())
+                            rejections.put(rejection.group(1), Long.parseLong(rejection.group(2)));
                         llvmPasses.add(new LlvmPassReport(summary.group(1), Long.parseLong(summary.group(2)),
-                            Long.parseLong(summary.group(3)), Long.parseLong(summary.group(4))));
+                            Long.parseLong(summary.group(3)), Long.parseLong(summary.group(4)),
+                            Collections.unmodifiableMap(rejections)));
                     }
                     System.err.println("target=" + key + " " + line + (method == null ? "" : " method=" + method));
                 });
             // The DLL basename affects link layout. Keep both link inputs and outputs identically named.
             lower(config, optimized, output, clangTriple, linux, null);
-            baseline = readLibrary(output);
+            byte[] unprotected = readLibrary(output, 0);
+            var unprotectedCode = NativeImage.measureExecutable(unprotected, this);
+            baseline = new LinkedBaseline(unprotectedCode.bytes(), unprotected.length, unprotectedCode.sha256());
             lower(config, transformed, output, clangTriple, linux, sizes);
         } else {
             var compileFlags = new ArrayList<>(flags);
             compileFlags.addAll(includeFlags);
             if (linux) compileFlags.add("-fPIC");
-            link(config, source, output, compileFlags, linux, sizes);
+            if (linux && sizes != null) {
+                // Reuse the compiled object for the diagnostic and release links.
+                Path object = output.resolveSibling("translated.o");
+                var compile = compiler(config);
+                compile.addAll(compileFlags);
+                compile.addAll(List.of("-c", source.toString(), "-o", object.toString()));
+                execute(compile, "Native object compilation for " + key, timeout);
+                link(config, object, output, List.of(), true, sizes);
+            } else {
+                link(config, source, output, compileFlags, linux, sizes);
+            }
         }
-        byte[] binary = readLibrary(output);
-        long protectedCode = NativeImage.executableBytes(binary, this);
+        byte[] binary = readLibrary(output, config.nativeLimits().maxLibraryBytes());
+        var protectedImage = baseline == null ? null : NativeImage.measureExecutable(binary, this);
+        long protectedCode = protectedImage == null ? NativeImage.executableBytes(binary, this) : protectedImage.bytes();
         LinkedComparison comparison = null;
         if (baseline != null) {
-            long baselineCode = NativeImage.executableBytes(baseline, this);
+            long baselineCode = baseline.executableBytes();
             System.err.printf(Locale.ROOT,
                 "%s executable bytes %d -> %d, library bytes %d -> %d%n",
-                key, baselineCode, protectedCode, baseline.length, binary.length);
+                key, baselineCode, protectedCode, baseline.libraryBytes(), binary.length);
             if (config.maxGrowth() >= 0 && protectedCode * 100 > baselineCode * (100L + config.maxGrowth()))
-                throw new IOException("Native code growth limit exceeded for " + key);
-            String before = NativeImage.executableSha256(baseline, this);
-            String after = NativeImage.executableSha256(binary, this);
-            comparison = new LinkedComparison(baselineCode, baseline.length, before, after, !before.equals(after));
+                throw new IOException("Native code growth limit exceeded for " + key + ": " + baselineCode
+                    + " -> " + protectedCode + " executable bytes (limit " + config.maxGrowth() + "%)");
+            String before = baseline.executableSha256();
+            String after = protectedImage.sha256();
+            comparison = new LinkedComparison(baselineCode, baseline.libraryBytes(), before, after, !before.equals(after));
             if (!comparison.executableChanged())
                 System.err.println(key + " LLVM pipeline left final executable sections unchanged");
         }
         return new Build(binary, protectedCode, comparison, llvmPasses);
     }
 
-    private byte[] readLibrary(Path path) throws IOException {
+    private byte[] readLibrary(Path path, int maxLibraryBytes) throws IOException {
         if (!Files.isRegularFile(path))
             throw new IOException("Compiler did not write the library for " + key);
         long size = Files.size(path);
         if (size == 0 || size > 128L * 1024 * 1024)
             throw new IOException("Invalid native library size for " + key + ": " + size);
+        if (maxLibraryBytes > 0 && size > maxLibraryBytes)
+            throw new IOException("Native library size limit exceeded for " + key + ": " + size
+                + " bytes (limit " + maxLibraryBytes + ")");
         return Files.readAllBytes(path);
     }
 
@@ -189,7 +226,7 @@ enum NativeTarget {
         if (config.zig() != null) backend.addAll(List.of("-target", clangTriple));
         if (linux) backend.add("-fPIC");
         backend.addAll(List.of("-c", bitcode.toString(), "-o", object.toString()));
-        execute(backend, "LLVM code generation for " + key);
+        execute(backend, "LLVM code generation for " + key, config.nativeLimits().timeoutSeconds());
 
         link(config, object, output, List.of(), linux, sizes);
     }
@@ -200,34 +237,41 @@ enum NativeTarget {
         command.addAll(flags);
         command.addAll(List.of("-shared", input.toString()));
         if (linux) command.add("-lm");
+        if (linux && config.analysis().enabled() && config.zig() == null) {
+            // Ensure the host linker separates binding data from executable code. Zig does so by default.
+            command.add("-Wl,-z,separate-code");
+        }
 
+        int timeout = config.nativeLimits().timeoutSeconds();
         if (linux && sizes != null) {
             // Measure an unstripped link of the same input. Only the release link is packaged.
             Path unstripped = output.resolveSibling("with-symbols-" + output.getFileName());
             var measuredLink = new ArrayList<>(command);
             measuredLink.addAll(List.of("-o", unstripped.toString()));
-            execute(measuredLink, "Native link for size reporting on " + key);
-            sizes.accept(ElfFunctionSizes.read(readLibrary(unstripped)));
+            execute(measuredLink, "Native link for size reporting on " + key, timeout);
+            sizes.accept(ElfFunctionSizes.read(readLibrary(unstripped, 0)));
         }
 
         // The compiler driver selects the target linker, including for cross-compilation.
         if (!linux) command.add("-Wl,/Brepro");
         command.addAll(List.of("-s", "-o", output.toString()));
-        execute(command, "Native release link for " + key);
+        execute(command, "Native release link for " + key, timeout);
     }
 
-    private static void execute(List<String> command, String stage) throws IOException, InterruptedException {
-        execute(command, stage, null, null);
+    private static void execute(List<String> command, String stage, int timeout) throws IOException, InterruptedException {
+        execute(command, stage, timeout, null, null, null);
     }
 
-    private static void execute(List<String> command, String stage, Path errorLog, Consumer<String> diagnostic)
+    private static void execute(List<String> command, String stage, int timeout, Path directory,
+                                Path errorLog, Consumer<String> diagnostic)
             throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(command).inheritIO();
+        if (directory != null) builder.directory(directory.toFile());
         if (errorLog != null) builder.redirectError(errorLog.toFile());
         Process compiler = builder.start();
         try {
-            if (!compiler.waitFor(180, TimeUnit.SECONDS))
-                throw new IOException(stage + " timed out");
+            if (!compiler.waitFor(timeout, TimeUnit.SECONDS))
+                throw new IOException(stage + " timed out after " + timeout + (timeout == 1 ? " second" : " seconds"));
             if (compiler.exitValue() != 0)
                 throw new IOException(stage + " failed (exit " + compiler.exitValue() + ")");
         } finally {

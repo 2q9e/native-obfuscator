@@ -60,6 +60,10 @@ public final class Main {
                 --profile PROFILE     compatibility, balanced, aggressive or maximum.
                 --seed UNSIGNED        Reproducible LLVM build seed (default 0).
                 --max-growth PERCENT  Cap executable code growth relative to the LLVM baseline.
+                --max-native-bytes N  Cap each packaged native library in bytes.
+                --native-timeout-seconds N  Cap each compiler process (default 180 seconds).
+                --llvm-include GLOB   Run preset LLVM passes on matching converted methods. Repeatable.
+                --llvm-exclude GLOB   Skip preset LLVM passes on matching converted methods. Repeatable.
                 --analysis-resistance MODE  off (default), balanced, or maximum.
                 --analysis-seed UINT64      Independent deterministic seed (default 0).
                 --analysis-resource-budget BYTES  Cap additional uncompressed analysis resources.
@@ -261,7 +265,7 @@ public final class Main {
         Set<String> retained = coverageOptions();
         Set<String> ignoredValues = Set.of("--output", "--staged", "--state-dir", "--zig",
             "--clang", "--llvm-opt", "--llvm-plugin", "--llvm-passes", "--profile", "--seed",
-            "--max-growth");
+            "--max-growth", "--max-native-bytes", "--native-timeout-seconds", "--llvm-include", "--llvm-exclude");
         Set<String> ignoredFlags = Set.of("--dry-run", "--confirm-overwrite", "--emit-c",
             "--report-native-sizes");
         for (int i = 1; i < source.length; i++) {
@@ -294,7 +298,8 @@ public final class Main {
         var options = new HashMap<String, String>();
         Set<String> coverageValues = coverageOptions();
         Set<String> ignoredValues = Set.of("--zig", "--llvm-opt", "--llvm-plugin",
-            "--llvm-passes", "--profile", "--seed", "--max-growth");
+            "--llvm-passes", "--profile", "--seed", "--max-growth", "--max-native-bytes",
+            "--native-timeout-seconds", "--llvm-include", "--llvm-exclude");
         for (int i = 1; i < arguments.length; i++) {
             String key = arguments[i];
             if (coverageValues.contains(key) || ignoredValues.contains(key)) {
@@ -372,6 +377,8 @@ public final class Main {
         };
         var includes = new ArrayList<Pattern>();
         var excludes = new ArrayList<Pattern>();
+        var llvmIncludes = new ArrayList<Pattern>();
+        var llvmExcludes = new ArrayList<Pattern>();
         var hierarchyJars = new ArrayList<Path>();
         var targets = new LinkedHashSet<NativeTarget>();
         Map<String, String> options = new HashMap<>();
@@ -395,13 +402,16 @@ public final class Main {
             switch (key) {
                 case "--include" -> includes.add(glob(value));
                 case "--exclude" -> excludes.add(glob(value));
+                case "--llvm-include" -> llvmIncludes.add(glob(value));
+                case "--llvm-exclude" -> llvmExcludes.add(glob(value));
                 case "--hierarchy-jar" -> hierarchyJars.add(Path.of(value));
                 case "--target" -> {
                     if (value.equals("all")) targets.addAll(List.of(NativeTarget.values()));
                     else targets.add(NativeTarget.parse(value));
                 }
                 case "--input", "--output", "--zig", "--unsupported", "--class-map", "--clang", "--llvm-opt", "--llvm-plugin",
-                     "--llvm-passes", "--min-instructions", "--profile", "--seed", "--max-growth", "--padding",
+                     "--llvm-passes", "--min-instructions", "--profile", "--seed", "--max-growth",
+                     "--max-native-bytes", "--native-timeout-seconds", "--padding",
                      "--padding-count", "--padding-seed", "--markers", "--marker-seed", "--analysis-resistance",
                      "--analysis-seed", "--analysis-resource-budget", "--analysis-entry-budget",
                      "--analysis-helper-methods", "--analysis-helpers-per-method", "--analysis-decoy-methods",
@@ -464,6 +474,9 @@ public final class Main {
                 + "native-mix<seed=" + seed + ";max=" + mixSites + ";prefix=method_>," + arithmetic;
         }
         boolean customPasses = options.containsKey("--llvm-passes");
+        var llvmScope = new LlvmScope(llvmIncludes, llvmExcludes);
+        if (llvmScope.enabled() && (!llvm || sites == 0 || customPasses))
+            throw new IllegalArgumentException("--llvm-include and --llvm-exclude require a preset LLVM pipeline");
         if (!analyze && options.containsKey("--analysis-llvm-sites") && analysis.llvmSites() > 0
             && (!llvm || sites == 0 || customPasses))
             throw new IllegalArgumentException("--analysis-llvm-sites needs the preset LLVM pipeline and its toolchain");
@@ -471,7 +484,7 @@ public final class Main {
             preset = extendedAnalysisPasses(preset, analysis);
         if (profile.equals("maximum") && !customPasses)
             preset += ",native-dispatch<seed=" + seed + ";max=16;prefix=method_>";
-        String passes = options.getOrDefault("--llvm-passes", preset);
+        String passes = options.getOrDefault("--llvm-passes", llvmScope.preset(preset));
         if (targets.isEmpty() && !analyze && !emitC) targets.add(NativeTarget.host());
         Path plugin = llvm && sites > 0 ? path(options, "--llvm-plugin") : null;
         int markers = Integer.parseInt(options.getOrDefault("--markers", "0"));
@@ -484,6 +497,7 @@ public final class Main {
         if (minInstructions < 0) throw new IllegalArgumentException("--min-instructions must be non-negative");
         if (reportNativeSizes && (analyze || emitC || targets.stream().noneMatch(t -> t.key.endsWith("-linux"))))
             throw new IllegalArgumentException("--report-native-sizes requires at least one Linux JAR target");
+        var limits = nativeLimits(options, analyze || emitC);
         int paddingCount = parsePadding(options, !emitC, !analyze && !dryRun);
         long paddingSeed;
         try { paddingSeed = Long.parseLong(options.getOrDefault("--padding-seed", "0")); }
@@ -493,7 +507,28 @@ public final class Main {
             options.get("--zig"), skip, analyze || dryRun, emitC, options.get("--clang"), options.get("--llvm-opt"),
             plugin, plugin == null ? null : passes, growth, markers, markerSeed, paddingCount, paddingSeed,
             minInstructions, reportNativeSizes, analysis, hierarchyJars,
-            options.containsKey("--class-map") ? ClassPaths.read(path(options, "--class-map")) : Map.of());
+            options.containsKey("--class-map") ? ClassPaths.read(path(options, "--class-map")) : Map.of(),
+            limits, llvmScope);
+    }
+
+    private static NativeTarget.Limits nativeLimits(Map<String, String> options, boolean noNativeBuild) {
+        String size = options.get("--max-native-bytes");
+        String timeout = options.get("--native-timeout-seconds");
+        if (noNativeBuild && (size != null || timeout != null))
+            throw new IllegalArgumentException("Native build limits require JAR output");
+        return new NativeTarget.Limits(size == null ? 0 : positiveInteger(size, "--max-native-bytes"),
+            timeout == null ? NativeTarget.Limits.DEFAULT.timeoutSeconds()
+                : positiveInteger(timeout, "--native-timeout-seconds"));
+    }
+
+    private static int positiveInteger(String value, String option) {
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed > 0) return parsed;
+        } catch (NumberFormatException invalid) {
+            // Report the option with invalid input.
+        }
+        throw new IllegalArgumentException(option + " must be a positive integer");
     }
 
     static String extendedAnalysisPasses(String legacy, AnalysisConfig analysis) {
@@ -582,7 +617,7 @@ public final class Main {
                     case "analysisLlvmSites" -> "analysis-llvm-sites";
                     default -> key;
                 };
-                if (Set.of("include", "exclude", "target", "hierarchyJar").contains(key)) {
+                if (Set.of("include", "exclude", "target", "hierarchyJar", "llvm-include", "llvm-exclude").contains(key)) {
                     for (JsonElement item : value.getAsJsonArray()) {
                         args.add(flag);
                         args.add(stringValue(item));
