@@ -26,19 +26,21 @@ final class DebugMetadata {
             String name = file.getKey();
             if (name.equals(GRADLE_CACHE)) continue;
             byte[] bytes = file.getValue();
-            if (name.endsWith(".class")) {
-                try {
-                    bytes = stripClass(bytes, fabric);
-                } catch (RuntimeException failure) {
-                    throw new IOException("Invalid class metadata in " + name, failure);
-                }
-            }
+            if (name.endsWith(".class")) bytes = stripClass(name, bytes, fabric);
             result.put(name, bytes);
         }
         return result;
     }
 
-    static byte[] stripClass(byte[] bytes, Map<String, String> fabric) throws IOException {
+    static byte[] stripClass(String name, byte[] bytes, Map<String, String> fabric) throws IOException {
+        try {
+            return stripClass(bytes, fabric);
+        } catch (IOException | RuntimeException failure) {
+            throw new IOException("Invalid class metadata in " + name, failure);
+        }
+    }
+
+    private static byte[] stripClass(byte[] bytes, Map<String, String> fabric) throws IOException {
         var reader = new ClassReader(bytes);
         var node = new ClassNode();
         reader.accept(node, 0);

@@ -196,8 +196,14 @@ final class Workflow {
                 errors.add("Missing original JAR entry " + entry.getKey());
             } else if (!expectedByClass.containsKey(entry.getKey())) {
                 byte[] trusted = entry.getValue();
-                if (entry.getKey().endsWith(".class"))
-                    trusted = DebugMetadata.stripClass(trusted, fabric);
+                if (entry.getKey().endsWith(".class")) {
+                    try {
+                        trusted = DebugMetadata.stripClass(entry.getKey(), trusted, fabric);
+                    } catch (IOException invalid) {
+                        errors.add("Original JAR: " + invalid.getMessage());
+                        continue;
+                    }
+                }
                 if (!Arrays.equals(trusted, updated))
                     errors.add("Unexpected modification to original JAR entry " + entry.getKey());
             }
@@ -309,7 +315,7 @@ final class Workflow {
             } else {
                 verifyRuntimeClass(runtimeBytes, runtimeId, analysis.enabled(), errors);
                 byte[] trustedRuntime = analysis.enabled() ? AnalysisRuntime.loader(loader) : Protector.runtime(loader);
-                if (!sameClass(DebugMetadata.stripClass(trustedRuntime, fabric), runtimeBytes))
+                if (!sameClass(DebugMetadata.stripClass(runtimePath, trustedRuntime, fabric), runtimeBytes))
                     errors.add("Generated runtime class does not match trusted implementation");
                 verifyRegistrations(stagedEntries, runtimeId, addedNative,
                     registrationResources, errors);
@@ -320,7 +326,8 @@ final class Workflow {
             if (analysis.enabled()) {
                 byte[] actualManifestClass = stagedEntries.get(manifestClass);
                 if (originalEntries.containsKey(manifestClass) || actualManifestClass == null
-                    || !sameClass(DebugMetadata.stripClass(AnalysisRuntime.manifest(loader), fabric), actualManifestClass))
+                    || !sameClass(DebugMetadata.stripClass(manifestClass, AnalysisRuntime.manifest(loader), fabric),
+                        actualManifestClass))
                     errors.add("Generated analysis manifest class does not match trusted implementation");
                 var verified = AnalysisVerification.verify(analysis, loader, resourceRoot, stagedEntries, librariesByTarget,
                     registrationResources.getOrDefault(runtimeId, Map.of()), utilities, errors);
@@ -348,7 +355,7 @@ final class Workflow {
                 try {
                     byte[] rewritten = Protector.rewriteExpected(trusted,
                         "dev/nativeobfuscator/runtime/" + runtimeId, expectedIndices.get(classEntry), ownerPlan.getValue(), hierarchy);
-                    if (!sameClass(DebugMetadata.stripClass(rewritten, fabric), actual))
+                    if (!sameClass(DebugMetadata.stripClass(classEntry, rewritten, fabric), actual))
                         errors.add("Selected class does not match trusted build inputs: " + classEntry);
                 } catch (IOException | RuntimeException invalid) {
                     errors.add("Selected class does not match trusted build inputs: " + classEntry);

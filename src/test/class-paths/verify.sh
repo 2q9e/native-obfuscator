@@ -84,6 +84,31 @@ if "$tool" strip-metadata --input "$work/input.jar" --output "$work/input.jar" >
 fi
 grep -q 'Input and output must be different files' "$work/rejected.log"
 
+# A malformed versioned class is outside method selection but its packaging
+# metadata still has to be checked when verifying a staged artifact.
+selection='sensitive/engine/HiddenLogic#calculate*'
+"$tool" protect --input "$work/input.jar" --output "$work/plain.jar" --include "$selection" --padding off "$@" \
+    > "$work/plain.jsonl"
+python3 - "$work" <<'PYTHON'
+import sys
+from pathlib import Path
+from zipfile import ZipFile
+
+work = Path(sys.argv[1])
+for name in ('input', 'plain'):
+    with ZipFile(work / f'{name}.jar') as original, ZipFile(work / f'{name}-bad.jar', 'w') as bad:
+        for entry in original.infolist():
+            bad.writestr(entry, original.read(entry))
+        bad.writestr('META-INF/versions/25/Corrupt.class', b'invalid class data')
+PYTHON
+if "$tool" verify --input "$work/input-bad.jar" --staged "$work/plain-bad.jar" --include "$selection" \
+    --padding off "$@" > "$work/malformed.jsonl" 2> "$work/malformed.err"; then
+    echo 'Malformed versioned class unexpectedly passed verification' >&2
+    exit 1
+fi
+grep -q 'Invalid class metadata in META-INF/versions/25/Corrupt.class' "$work/malformed.jsonl"
+! grep -q 'Exception in thread' "$work/malformed.err"
+
 printf 'sensitive/engine/HiddenLogic=sensitive/engine/A8\n' > "$work/incomplete.map"
 if "$tool" analyze --input "$work/input.jar" --class-map "$work/incomplete.map" --include '*' > "$work/rejected.log" 2>&1; then
     echo 'A partial nest rename unexpectedly succeeded' >&2
