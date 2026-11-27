@@ -13,7 +13,9 @@ import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 
 final class DebugMetadata {
+    static final String GRADLE_CACHE = "previous-compilation-data.bin";
     private static final String MIXIN = "Lorg/spongepowered/asm/mixin/Mixin;";
+    private static final String KOTLIN_SOURCE_MAP = "Lkotlin/jvm/internal/SourceDebugExtension;";
 
     private DebugMetadata() {}
 
@@ -22,7 +24,7 @@ final class DebugMetadata {
         var result = new LinkedHashMap<String, byte[]>();
         for (var file : files.entrySet()) {
             String name = file.getKey();
-            if (name.equals("previous-compilation-data.bin")) continue;
+            if (name.equals(GRADLE_CACHE)) continue;
             byte[] bytes = file.getValue();
             if (name.endsWith(".class")) {
                 try {
@@ -36,7 +38,7 @@ final class DebugMetadata {
         return result;
     }
 
-    private static byte[] stripClass(byte[] bytes, Map<String, String> fabric) throws IOException {
+    static byte[] stripClass(byte[] bytes, Map<String, String> fabric) throws IOException {
         var reader = new ClassReader(bytes);
         var node = new ClassNode();
         reader.accept(node, 0);
@@ -53,6 +55,8 @@ final class DebugMetadata {
 
         node.sourceFile = null;
         node.sourceDebug = null;
+        if (node.invisibleAnnotations != null)
+            node.invisibleAnnotations.removeIf(annotation -> annotation.desc.equals(KOTLIN_SOURCE_MAP));
         for (var method : node.methods) {
             if (!mixin) method.localVariables = null;
             for (var instruction : method.instructions.toArray()) {

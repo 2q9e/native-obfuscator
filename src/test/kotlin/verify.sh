@@ -84,6 +84,10 @@ assert re.search(
 ), bytecode
 with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / "protected.jar") as protected:
     assert original.read(metadata) == protected.read(metadata)
+    owner = "fixture/kotlin/KotlinFixtureKt.class"
+    assert b"kotlin/jvm/internal/SourceDebugExtension" in original.read(owner)
+    for label in (b"KotlinFixture.kt", b"SourceDebugExtension", b"LineNumberTable"):
+        assert label not in protected.read(owner), label
 PY
 
 if [[ -n ${KOTLIN_FIXTURE_DIR:-} ]]; then

@@ -8,6 +8,7 @@ work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 mkdir "$work/classes"
 "$jdk/javac" --release 21 -g -parameters -d "$work/classes" "$here/Launcher.java" "$here/HiddenLogic.java"
+printf 'Gradle compiler cache fixture' > "$work/classes/previous-compilation-data.bin"
 "$jdk/jar" --create --file "$work/input.jar" --main-class fixture.Launcher -C "$work/classes" .
 "$jdk/java" -Xverify:all -jar "$work/input.jar" > "$work/expected"
 
@@ -38,6 +39,7 @@ assert detail['structurallyValid'], detail
 assert {f'{package}/A8#calculate(II)I', f'{package}/A8#nativeLookup(I)I'} <= set(detail['verifiedMethods']), detail
 with zipfile.ZipFile(work / 'staged.jar') as jar:
     paths = jar.namelist()
+    assert 'previous-compilation-data.bin' not in paths
     assert all(f'{package}/A8{suffix}.class' in paths for suffix in ('', '$1', '$1D4', '$C6')), paths
     assert package != 'q7' or not any(path.startswith('sensitive/') for path in paths), paths
     for path in paths:
@@ -45,10 +47,10 @@ with zipfile.ZipFile(work / 'staged.jar') as jar:
             data = jar.read(path)
             assert b'sensitive/engine/HiddenLogic' not in data, path
             assert b'HiddenLogic.java' not in data, path
+            assert b'Launcher.java' not in data, path
 PY
 done
 
-printf 'Gradle compiler cache fixture' > "$work/classes/previous-compilation-data.bin"
 printf 'runtime resource' > "$work/classes/resource.txt"
 "$jdk/jar" --update --file "$work/input.jar" -C "$work/classes" previous-compilation-data.bin -C "$work/classes" resource.txt
 cat > "$work/cleanup.map" <<'MAP'

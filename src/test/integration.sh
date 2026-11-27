@@ -50,7 +50,12 @@ assert {decision["method"].split("(")[0] for decision in decisions if decision["
     "Arithmetic#calcThrow"
 }, decisions
 with zipfile.ZipFile(work / "original.jar") as original, zipfile.ZipFile(work / "protected.jar") as protected:
-    assert original.read("Arithmetic$Digest.class") == protected.read("Arithmetic$Digest.class")
+    assert b"Arithmetic.java" in original.read("Arithmetic$Digest.class")
+    for name in protected.namelist():
+        if name.endswith(".class"):
+            data = protected.read(name)
+            for label in (b"SourceFile", b"LineNumberTable", b"Arithmetic.java", b"NativeRuntime.java"):
+                assert label not in data, (name, label)
     resources = [name for name in protected.namelist() if name.endswith((".so", ".dll"))]
     assert resources
     for name in resources:

@@ -261,6 +261,7 @@ final class Protector {
                 files.put(manifestClass, AnalysisRuntime.manifest(loader));
                 analysisResources.forEach((path, data) -> files.put(RESOURCE + id + "/" + path, data));
             }
+            var packaged = DebugMetadata.strip(files);
             var nativeSizes = new ArrayList<Decision>();
             var targetAnalysis = new ArrayList<TargetAnalysis>();
             String objdump = nativePlan == null ? null : AnalysisNative.objdump(config.clang);
@@ -294,14 +295,14 @@ final class Protector {
                         build.llvmComparison(), build.llvmPasses()));
                 }
                 String base = RESOURCE + id + "/" + target.key + "/" + target.file;
-                files.put(base, binary);
-                files.put(base + ".sha256", HexFormat.of().formatHex(Archive.sha256().digest(binary))
+                packaged.put(base, binary);
+                packaged.put(base + ".sha256", HexFormat.of().formatHex(Archive.sha256().digest(binary))
                     .getBytes(StandardCharsets.US_ASCII));
             }
             if (config.markers > 0) {
-                files.put(RESOURCE + id + "/markers.txt", markers(id, config.markers, config.markerSeed));
+                packaged.put(RESOURCE + id + "/markers.txt", markers(id, config.markers, config.markerSeed));
             }
-            var artifact = Archive.write(files, config.output, analysisPlan != null);
+            var artifact = Archive.write(packaged, config.output, analysisPlan != null);
             nativeSizes.forEach(report);
             if (analysisPlan != null)
                 analysisReport.accept(analysisReport(config, analysisPlan, applicationMethods,

@@ -23,7 +23,7 @@ fun calcStatic(left: Long, right: Long, shift: Int): Long = (left xor right) shl
 
 fun main(args: Array<String>) {
     val protectedJar = args.single() == "protected"
-    val instance = KotlinFixture(12)
+    val instance = 12.let { KotlinFixture(it) }
     val clazz = KotlinFixture::class
     val primitive = clazz.java.getDeclaredMethod("calcPrimitive", Int::class.java, Int::class.java)
     val lambda = clazz.java.getDeclaredMethod("calcLambda", Int::class.java)

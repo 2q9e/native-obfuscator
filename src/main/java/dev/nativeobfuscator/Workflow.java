@@ -127,9 +127,11 @@ final class Workflow {
         var errors = new ArrayList<String>();
         Map<String, byte[]> originalEntries;
         Map<String, byte[]> stagedEntries;
+        Map<String, String> fabric;
         ReferenceHierarchy hierarchy;
         try {
             originalEntries = ClassPaths.remap(Archive.read(original), classPaths);
+            fabric = FabricExclusions.from(originalEntries);
             hierarchy = Protector.referenceHierarchy(originalEntries, hierarchyJars);
         } catch (IOException failure) {
             return verification(originalHash, stagedHash, expectedNativeMethods,
@@ -188,11 +190,15 @@ final class Workflow {
         }
         for (var entry : originalEntries.entrySet()) {
             byte[] updated = stagedEntries.get(entry.getKey());
-            if (updated == null) {
+            if (entry.getKey().equals(DebugMetadata.GRADLE_CACHE)) {
+                if (updated != null) errors.add("Unexpected Gradle compiler cache in staged JAR");
+            } else if (updated == null) {
                 errors.add("Missing original JAR entry " + entry.getKey());
-            } else if (!entry.getKey().endsWith(".class")
-                || !expectedByClass.containsKey(entry.getKey())) {
-                if (!Arrays.equals(entry.getValue(), updated))
+            } else if (!expectedByClass.containsKey(entry.getKey())) {
+                byte[] trusted = entry.getValue();
+                if (entry.getKey().endsWith(".class"))
+                    trusted = DebugMetadata.stripClass(trusted, fabric);
+                if (!Arrays.equals(trusted, updated))
                     errors.add("Unexpected modification to original JAR entry " + entry.getKey());
             }
         }
@@ -303,7 +309,7 @@ final class Workflow {
             } else {
                 verifyRuntimeClass(runtimeBytes, runtimeId, analysis.enabled(), errors);
                 byte[] trustedRuntime = analysis.enabled() ? AnalysisRuntime.loader(loader) : Protector.runtime(loader);
-                if (!sameClass(trustedRuntime, runtimeBytes))
+                if (!sameClass(DebugMetadata.stripClass(trustedRuntime, fabric), runtimeBytes))
                     errors.add("Generated runtime class does not match trusted implementation");
                 verifyRegistrations(stagedEntries, runtimeId, addedNative,
                     registrationResources, errors);
@@ -314,7 +320,7 @@ final class Workflow {
             if (analysis.enabled()) {
                 byte[] actualManifestClass = stagedEntries.get(manifestClass);
                 if (originalEntries.containsKey(manifestClass) || actualManifestClass == null
-                    || !sameClass(AnalysisRuntime.manifest(loader), actualManifestClass))
+                    || !sameClass(DebugMetadata.stripClass(AnalysisRuntime.manifest(loader), fabric), actualManifestClass))
                     errors.add("Generated analysis manifest class does not match trusted implementation");
                 var verified = AnalysisVerification.verify(analysis, loader, resourceRoot, stagedEntries, librariesByTarget,
                     registrationResources.getOrDefault(runtimeId, Map.of()), utilities, errors);
@@ -342,7 +348,7 @@ final class Workflow {
                 try {
                     byte[] rewritten = Protector.rewriteExpected(trusted,
                         "dev/nativeobfuscator/runtime/" + runtimeId, expectedIndices.get(classEntry), ownerPlan.getValue(), hierarchy);
-                    if (!sameClass(rewritten, actual))
+                    if (!sameClass(DebugMetadata.stripClass(rewritten, fabric), actual))
                         errors.add("Selected class does not match trusted build inputs: " + classEntry);
                 } catch (IOException | RuntimeException invalid) {
                     errors.add("Selected class does not match trusted build inputs: " + classEntry);
