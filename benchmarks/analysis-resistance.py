@@ -20,8 +20,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).with_name("analysis-workload.java")
-NATIVE_METHODS = ["step(I)I", "mix(II)I", "batch(III)I", "conditional(I)I", "accumulate(I)I", "arrayUpdate([III)I"]
-RETAINED = "retainedWithMonitor([II)I"
+NATIVE_METHODS = ["step(I)I", "mix(II)I", "batch(III)I", "conditional(I)I", "accumulate(I)I", "arrayUpdate([III)I",
+                  "retainedWithMonitor([II)I"]
 EXCLUDED = "excluded(I)I"
 OWNER = "AnalysisWorkload$Kernel"
 TARGETS = {
@@ -356,9 +356,7 @@ def checked_build(stdout, stderr, stats, profile, seed):
             "Packaged native declarations differ from the fixture selection")
     counts = Counter(record["result"] for record in application)
     require(counts["excluded"] == 1, "Explicit exclusion was not reported")
-    retained = [record for record in application if record["result"] == "retained"]
-    require(len(retained) == 1 and retained[0]["method"] == f"{OWNER}#{RETAINED}"
-            and "opcode 194" in retained[0]["reason"], "Unexpected unsupported monitor diagnostic")
+    require(counts["retained"] == 0, "Unexpected retained fixture method")
     reports = [item for item in records if "analysisResistance" in item]
     if profile == "off":
         require(not reports and not utilities and stats["analysisResourceEntries"] == 0, "Analysis output appeared in off")
@@ -589,7 +587,7 @@ def main():
     require(cases["original"]["javaKernel"]["integerLiteralRecall"]["distinctFixtureLiteralsSeen"] == len(truth),
             "Original bytecode scan did not find all fixture literals")
     selections = ["--unsupported", "retain", "--exclude", f"{OWNER}#{EXCLUDED}"]
-    for method in (*NATIVE_METHODS, RETAINED, EXCLUDED):
+    for method in (*NATIVE_METHODS, EXCLUDED):
         selections.extend(["--include", f"{OWNER}#{method}"])
     common = ["--input", jar, "--padding", "off", *selections, *compiler]
     for target in targets:

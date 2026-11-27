@@ -89,7 +89,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="benchmark-regression-") as tmp:
         root = Path(tmp)
         result, report = run(args, root, "control", [clone, c_clone],
-                             "--native-limit", "minNativeCoveragePercent=85")
+                             "--native-limit", "minNativeCoveragePercent=100")
         assert result.returncode == 0 and report["status"] == "passed", report
         assert report["commonLaneChecksums"], report
         cases = report["cases"]
@@ -112,7 +112,7 @@ def main():
         fail = {**clone, "name": "empty-build", "build": [sys.executable, "-c", "pass", "{input}", "{output}"]}
         coverage_limit = {**clone, "limits": {"minNativeCoveragePercent": 1}}
         result, report = run(args, root, "failures", [mutant, fail, coverage_limit],
-                             "--native-limit", "minNativeCoveragePercent=100")
+                             "--native-limit", "maxArtifactGrowthPercent=0")
         assert result.returncode == 1 and report["status"] == "failed", report
         assert report["cases"]["c-mutant"]["semanticMatch"] is False, report
         assert "steady" not in report["cases"]["c-mutant"], report

@@ -67,7 +67,9 @@ assert synchronized_declarations == {"covStaticMonitor", "covInstanceMonitor", "
 (work / "declarations.txt").write_text(declarations)
 retained = {d["method"].split("#")[1].split("(")[0]: d["reason"] for d in decisions if d.get("result") == "retained"}
 assert set(retained) == {"rejectAllocation", "rejectRawCall", "rejectDirectHierarchy", "rejectUnknownHierarchy",
-                         "rejectLongAllocation", "rejectMalformedLambdaLayout", "rejectSplitAllocation"}, retained
+                         "rejectLongAllocation", "rejectMalformedLambdaLayout", "rejectSplitAllocation",
+                         "rejectNestedMonitor"}, retained
+assert "explicit monitor ownership is not proven" in retained["rejectNestedMonitor"]
 assert "bytecode verification failed" in retained["rejectDirectHierarchy"]
 assert "bytecode verification failed" in retained["rejectUnknownHierarchy"]
 assert "object allocation" in retained["rejectAllocation"]
@@ -139,10 +141,10 @@ for outcome in ("interned-literal:true", "class-literals:true", "literal-loop:81
                 "constructor-argument-failure:true/12", "constructor-expression:38/true/33/12234",
                 "constructor-field-handler:-1/44/122344", "constructor-literal-skipped:true/0",
                 "constructor-literal-resolution:2/1", "constructor-reflection:method/argument",
-                "constructor-array:array"):
+                "constructor-array:array", "nested-monitor-retained:true"):
     assert "value:" + outcome + ":effects=" in original_result.stdout, outcome
 for outcome in ("concurrent-publication:512", "concurrent-monitors:1024/1024:throws-per-entry=256",
-                "concurrent-reference-iterations:32772"):
+                "concurrent-reference-iterations:32772", "concurrent-block-monitor:1025"):
     assert outcome in original_result.stdout.splitlines(), outcome
 assert original_result.stdout == split_result.stdout, split_result.stdout
 assert "WARNING in native method" not in split_result.stderr, split_result.stderr

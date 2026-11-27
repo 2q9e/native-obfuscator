@@ -112,6 +112,7 @@ public final class MethodCompiler {
             throw new Unsupported("bytecode verification failed: " + e.getMessage());
         }
 
+        boolean hasMonitor = MonitorPlan.verify(method, frames, handlers);
         var callbacks = bridges == null ? Map.<AbstractInsnNode, JvmBridges.BoxedCallback>of() : bridges.boxedCallbacks();
         // A boxed value and the callback result stay on the JVM stack in a combined bridge.
         int baseCapacity = referenceCapacity(method) - 2 * callbacks.size();
@@ -135,7 +136,12 @@ public final class MethodCompiler {
         line(code, "(void)declaring;");
         int capacityOffset = code.length();
         String returnOnFailure = zeroReturn(type.getReturnType());
-        Supplier<String> uncaught = () -> returnOnFailure;
+        if (hasMonitor) {
+            line(code, "jobject held_monitor = NULL;");
+            returnOnFailure = "if (held_monitor != NULL) release_failed_monitor(env, held_monitor); " + returnOnFailure;
+        }
+        String failureReturn = returnOnFailure;
+        Supplier<String> uncaught = () -> failureReturn;
         int local = 0;
         if (!isStatic) {
             line(code, "l[0].r = self;");
@@ -466,7 +472,15 @@ public final class MethodCompiler {
                     lookups.slot(instructionIndex));
                 line(code, zeroReturn(result));
             }
-            case MONITORENTER, MONITOREXIT -> throw new Unsupported("explicit monitor ownership and exception cleanup are not verified");
+            case MONITORENTER -> {
+                nullCheck(code, a + ".r", failure);
+                line(code, "if ((*env)->MonitorEnter(env, " + a + ".r) != JNI_OK) { " + failure.get() + " }");
+                line(code, "held_monitor = " + a + ".r;");
+            }
+            case MONITOREXIT -> {
+                line(code, "held_monitor = NULL;");
+                line(code, "if ((*env)->MonitorExit(env, " + a + ".r) != JNI_OK) { " + failure.get() + " }");
+            }
             case INVOKEDYNAMIC -> {
                 var dynamic = (InvokeDynamicInsnNode) insn;
                 if (bridges == null || !JvmBridges.supportsDynamic(dynamic))
@@ -1130,6 +1144,14 @@ public final class MethodCompiler {
                 if ((*env)->ExceptionCheck(env)) return -1;
                 jvalue argument = {.l = caught};
                 return (*env)->CallStaticIntMethodA(env, declaring, match, &argument);
+            }
+
+            static inline void release_failed_monitor(JNIEnv *env, jobject lock) {
+                jthrowable failure = (*env)->ExceptionOccurred(env);
+                if (failure != NULL) (*env)->ExceptionClear(env);
+                if ((*env)->MonitorExit(env, lock) == JNI_OK && failure != NULL)
+                    (*env)->Throw(env, failure);
+                if (failure != NULL) (*env)->DeleteLocalRef(env, failure);
             }
 
             static inline void null_error(JNIEnv *env) {

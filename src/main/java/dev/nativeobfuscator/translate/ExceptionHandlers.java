@@ -124,6 +124,9 @@ final class ExceptionHandlers {
     }
 
     List<Route> routes() { return routes; }
+    List<TryCatchBlockNode> covering(int index) {
+        return sites.length == 0 || sites[index] == null ? List.of() : sites[index].handlers;
+    }
     boolean discards(LabelNode handler) { return discarded.contains(handler); }
     boolean retainsThrowable() { return retainsThrowable; }
     int localReferences() { return retainsThrowable ? localReferences : Math.min(localReferences, 1); }

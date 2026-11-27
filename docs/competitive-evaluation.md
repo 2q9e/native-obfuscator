@@ -24,6 +24,10 @@ The built-in JNI run followed the existing unsupported policy for that method.
 The JVM lane measures each tool's complete JAR build with the same Java input.
 Its precise settings and outputs describe this fixture and host.
 
+A later run of the unchanged fixture converted **7/7** methods with Native
+Obfuscator after structured synchronized-block support was added. The table
+above records the original comparison.
+
 | Matched C case | Build ms | Startup ms | Peak RSS KiB | Executable bytes | Per-call ns/update | Batch-32 ns/update | Linked kernel encodings changed |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Clang 22 baseline | 293.55 | 0.86 | 1,040 | 72,136 | 2.95 | 2.97 | Baseline |

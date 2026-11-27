@@ -301,6 +301,14 @@ public class Coverage {
     }
 
     public static Object rejectAllocation(int size) { return new StringBuilder(size < 0 ? -size : size); }
+
+    private static boolean rejectNestedMonitor(Object first, Object second) {
+        synchronized (first) {
+            synchronized (second) {
+                return Thread.holdsLock(first) && Thread.holdsLock(second);
+            }
+        }
+    }
     public static String covConcat(String name, int count, long offset) { return name + "=" + count + "/" + offset; }
     public static String covConcatObject(Object token, int value) {
         String result = token + ":" + value;
@@ -699,6 +707,7 @@ public class Coverage {
         show(() -> "constructor-literal-skipped:" + (RawOps.covMissingConstructorLiteral(false) == null)
             + "/" + constructorLiteralInitializations);
         show(() -> "constructor-array:" + covConstructFromArray(new double[]{3.5}, 0, "array"));
+        show(() -> "nested-monitor-retained:" + rejectNestedMonitor(new Object(), new Object()));
         show(() -> covConstructFromArray(new double[0], 1, "unused"));
         show(() -> covConstructFromArray(new double[]{3.5}, 0, null));
         show(() -> {

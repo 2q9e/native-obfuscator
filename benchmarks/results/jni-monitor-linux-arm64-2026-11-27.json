@@ -1,0 +1,564 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "host": {
+    "platform": "Linux-7.2.12-402.asahi.fc45.aarch64+16k-aarch64-with-glibc2.44",
+    "architecture": "aarch64",
+    "pythonVersion": "3.15.0",
+    "javaVersion": "openjdk version \"25.0.5\" 2026-10-20 LTS\nOpenJDK Runtime Environment Temurin-25.0.5+8 (build 25.0.5+8-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.5+8 (build 25.0.5+8-LTS, mixed mode, sharing)",
+    "nativeCompiler": "cc (GCC) 16.2.1 20261029 (Red Hat 16.2.1-3)\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "sourcesSha256": {
+    "analysis-workload.java": "62fb8ebfa797f946ad772092aa2c1b2815e4de45a16ce5a9ba4d547f523514dd",
+    "comparison-workload.c": "f7aed130c8d012bfe9d2e8deb47699d5d3139835632a698861a52e82e20fe67a",
+    "compare.py": "30633899eb65521fdd7421964cea709387936b4da80dddd4be3f3e43b2f6b2af"
+  },
+  "distributionJarSha256": "727e28000f7b2758ec4c2fd1aacf983e6a8aa8a1fb7f58ea3b996a74529cca94",
+  "settings": {
+    "seeds": [
+      637,
+      2309737967
+    ],
+    "buildRuns": 3,
+    "startupRuns": 5,
+    "steadyForks": 3,
+    "warmups": 5,
+    "trials": 9,
+    "updatesPerTrial": 524288,
+    "gnuTime": "/usr/bin/time",
+    "llvmObjdump": null
+  },
+  "errors": [],
+  "budgetViolations": [],
+  "commonLaneChecksums": {},
+  "cases": {
+    "java-original": {
+      "name": "java-original",
+      "lane": "java",
+      "fixtureBuildMs": 453.536986,
+      "artifact": {
+        "bytes": 3592,
+        "sha256": "6c76cd5cfad4f5407142a6a9a94094ca44a18101a517f0f171576e38b784f0db",
+        "nativePayload": [],
+        "nativePayloadBytes": 0,
+        "coverage": {
+          "status": "measured",
+          "requestedMethods": 7,
+          "nativeMethods": [],
+          "percent": 0.0
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "02f14e22"
+        },
+        "probe-2309737967-1": {
+          "probe": "93acf487"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 37.368463,
+        "medianFirstCallMs": 0.145041,
+        "samples": [
+          {
+            "processMs": 34.40235,
+            "peakRssKiB": 39664,
+            "samplesNs": {
+              "startup": [
+                143874
+              ]
+            }
+          },
+          {
+            "processMs": 24.966433,
+            "peakRssKiB": 39696,
+            "samplesNs": {
+              "startup": [
+                145041
+              ]
+            }
+          },
+          {
+            "processMs": 48.550206,
+            "peakRssKiB": 39696,
+            "samplesNs": {
+              "startup": [
+                322749
+              ]
+            }
+          },
+          {
+            "processMs": 41.174696,
+            "peakRssKiB": 39648,
+            "samplesNs": {
+              "startup": [
+                154874
+              ]
+            }
+          },
+          {
+            "processMs": 37.368463,
+            "peakRssKiB": 40720,
+            "samplesNs": {
+              "startup": [
+                142000
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 0.9291934967041016,
+          "per_call": 1.34332275390625,
+          "batched_32": 1.3468208312988281
+        },
+        "medianPeakRssKiB": 40656,
+        "forks": [
+          {
+            "processMs": 71.351689,
+            "peakRssKiB": 40704,
+            "samplesNs": {
+              "step": [
+                487165,
+                483790,
+                504998,
+                482998,
+                501373,
+                485664,
+                502706,
+                486748,
+                501206
+              ],
+              "per_call": [
+                738538,
+                723330,
+                702122,
+                704331,
+                753788,
+                725164,
+                719997,
+                704455,
+                721456
+              ],
+              "batched_32": [
+                707080,
+                709789,
+                721705,
+                712830,
+                705164,
+                704080,
+                704746,
+                702122,
+                704289
+              ]
+            }
+          },
+          {
+            "processMs": 74.304969,
+            "peakRssKiB": 40656,
+            "samplesNs": {
+              "step": [
+                556706,
+                485706,
+                522247,
+                482956,
+                509289,
+                524081,
+                499956,
+                505665,
+                511289
+              ],
+              "per_call": [
+                703789,
+                704288,
+                702205,
+                704705,
+                704539,
+                704997,
+                702122,
+                702039,
+                705289
+              ],
+              "batched_32": [
+                706371,
+                710330,
+                703372,
+                719122,
+                716038,
+                715330,
+                703038,
+                702456,
+                705164
+              ]
+            }
+          },
+          {
+            "processMs": 72.451435,
+            "peakRssKiB": 40176,
+            "samplesNs": {
+              "step": [
+                485748,
+                483581,
+                487664,
+                482915,
+                486456,
+                482790,
+                485414,
+                482873,
+                486082
+              ],
+              "per_call": [
+                704455,
+                702121,
+                704205,
+                704705,
+                704289,
+                702080,
+                704122,
+                704789,
+                704247
+              ],
+              "batched_32": [
+                707122,
+                707164,
+                718247,
+                715414,
+                704996,
+                706122,
+                702122,
+                704539,
+                704664
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "native-obfuscator": {
+      "name": "native-obfuscator",
+      "lane": "java",
+      "limits": {
+        "minNativeCoveragePercent": 100.0
+      },
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 320.967063,
+            "peakRssKiB": 65792,
+            "success": true,
+            "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 315.213963,
+            "peakRssKiB": 65296,
+            "success": true,
+            "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 297.925121,
+            "peakRssKiB": 64240,
+            "success": true,
+            "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 315.213963,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 12698,
+        "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf",
+        "nativePayload": [
+          {
+            "entry": "META-INF/native-obfuscator/Runtimeee3b522f8ce7458623cacd90388a400a/aarch64-linux/libprotected.so",
+            "bytes": 67952,
+            "compressedBytes": 4708
+          }
+        ],
+        "nativePayloadBytes": 67952,
+        "coverage": {
+          "status": "measured",
+          "requestedMethods": 7,
+          "nativeMethods": [
+            "step(I)I",
+            "mix(II)I",
+            "batch(III)I",
+            "conditional(I)I",
+            "accumulate(I)I",
+            "arrayUpdate([III)I",
+            "retainedWithMonitor([II)I"
+          ],
+          "percent": 100.0
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "02f14e22"
+        },
+        "probe-2309737967-1": {
+          "probe": "93acf487"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 68.797909,
+        "medianFirstCallMs": 30.845157,
+        "samples": [
+          {
+            "processMs": 85.160505,
+            "peakRssKiB": 49328,
+            "samplesNs": {
+              "startup": [
+                45404386
+              ]
+            }
+          },
+          {
+            "processMs": 68.797909,
+            "peakRssKiB": 44304,
+            "samplesNs": {
+              "startup": [
+                31012574
+              ]
+            }
+          },
+          {
+            "processMs": 58.419746,
+            "peakRssKiB": 44864,
+            "samplesNs": {
+              "startup": [
+                25038683
+              ]
+            }
+          },
+          {
+            "processMs": 61.513357,
+            "peakRssKiB": 50944,
+            "samplesNs": {
+              "startup": [
+                25683597
+              ]
+            }
+          },
+          {
+            "processMs": 69.797363,
+            "peakRssKiB": 45440,
+            "samplesNs": {
+              "startup": [
+                30845157
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 3.0217838287353516,
+          "per_call": 3.3136863708496094,
+          "batched_32": 1.3879070281982422
+        },
+        "medianPeakRssKiB": 49504,
+        "forks": [
+          {
+            "processMs": 153.163167,
+            "peakRssKiB": 50000,
+            "samplesNs": {
+              "step": [
+                1584451,
+                1582326,
+                1585743,
+                1582077,
+                1582910,
+                1583993,
+                1581868,
+                1583827,
+                1583868
+              ],
+              "per_call": [
+                1734784,
+                1745242,
+                1736367,
+                1737493,
+                1739742,
+                1735325,
+                1738409,
+                1736826,
+                1737326
+              ],
+              "batched_32": [
+                721496,
+                722414,
+                722163,
+                740913,
+                735955,
+                734788,
+                727122,
+                726914,
+                727289
+              ]
+            }
+          },
+          {
+            "processMs": 145.155702,
+            "peakRssKiB": 49504,
+            "samplesNs": {
+              "step": [
+                1583160,
+                1584535,
+                1583410,
+                1585118,
+                1582659,
+                1584285,
+                1584535,
+                1585910,
+                1584118
+              ],
+              "per_call": [
+                1737201,
+                1736159,
+                1737367,
+                1738784,
+                1741409,
+                1736576,
+                1735284,
+                1736409,
+                1736784
+              ],
+              "batched_32": [
+                722163,
+                725289,
+                719581,
+                742038,
+                737705,
+                735163,
+                729455,
+                724580,
+                727955
+              ]
+            }
+          },
+          {
+            "processMs": 139.951558,
+            "peakRssKiB": 45360,
+            "samplesNs": {
+              "step": [
+                2341198,
+                1694410,
+                1585993,
+                1584826,
+                1581535,
+                1585493,
+                1581576,
+                1581535,
+                1583951
+              ],
+              "per_call": [
+                1735701,
+                1737409,
+                1738618,
+                1737534,
+                1735701,
+                1737951,
+                1737909,
+                1738701,
+                1736243
+              ],
+              "batched_32": [
+                721289,
+                752496,
+                736289,
+                729288,
+                727663,
+                724538,
+                728955,
+                726413,
+                726455
+              ]
+            }
+          }
+        ]
+      },
+      "relativeTo": "java-original",
+      "comparison": {
+        "artifactGrowthPercent": 253.5077951002227,
+        "startupIncreaseMs": 31.429446000000006,
+        "runtimeOverheadPercent": {
+          "step": 225.20501267537693,
+          "per_call": 146.67834749420692,
+          "batched_32": 3.0506059859344514
+        },
+        "runtimeIncreaseNsPerUpdate": {
+          "step": 2.09259033203125,
+          "per_call": 1.9703636169433594,
+          "batched_32": 0.04108619689941406
+        },
+        "peakRssOverheadPercent": 21.763085399449047
+      }
+    }
+  }
+}

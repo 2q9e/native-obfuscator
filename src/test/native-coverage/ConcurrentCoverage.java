@@ -17,6 +17,7 @@ final class ConcurrentCoverage {
     private volatile int acknowledged;
     private static int staticCount;
     private int instanceCount;
+    private int blockCount;
 
     private static void covPublishStatic(int stamp, int payload) {
         staticPayload = payload;
@@ -59,6 +60,25 @@ final class ConcurrentCoverage {
         int count = ++instanceCount;
         if (failure != null) throw failure;
         return count;
+    }
+
+    private int covBlockMonitor(Object lock, Throwable failure) throws Throwable {
+        synchronized (lock) {
+            if (!Thread.holdsLock(lock)) return -1;
+            int count = ++blockCount;
+            if (failure != null) throw failure;
+            return count;
+        }
+    }
+
+    private static int covNullMonitor(Object lock) {
+        try {
+            synchronized (lock) {
+                return 1;
+            }
+        } catch (NullPointerException failure) {
+            return -1;
+        }
     }
 
     private static Object valueOrThrow(Object[] values, int index, Throwable failure) throws Throwable {
@@ -124,6 +144,7 @@ final class ConcurrentCoverage {
                     Throwable expected = (round & 3) == 0 ? failure : null;
                     checkMonitor(ConcurrentCoverage.class, expected, ConcurrentCoverage::covStaticMonitor);
                     checkMonitor(this, expected, this::covInstanceMonitor);
+                    checkMonitor(this, expected, thrown -> covBlockMonitor(this, thrown));
                 }
                 Object[] values = {null, new Object(), new Object(), new Object()};
                 referencesReady.countDown();
@@ -138,6 +159,17 @@ final class ConcurrentCoverage {
         int expected = WORKERS * MONITOR_ROUNDS;
         if (staticCount != expected || instanceCount != expected)
             throw new AssertionError("Lost or repeated synchronized updates");
+        if (blockCount != expected || covNullMonitor(null) != -1 || covNullMonitor(this) != 1)
+            throw new AssertionError("Explicit monitor count or null behavior changed");
+        synchronized (this) {
+            try {
+                if (covBlockMonitor(this, null) != expected + 1 || !Thread.holdsLock(this))
+                    throw new AssertionError("Reentrant explicit monitor released the caller's lock");
+            } catch (Throwable failure) {
+                throw new AssertionError("Reentrant explicit monitor failed", failure);
+            }
+        }
+        System.out.println("concurrent-block-monitor:" + blockCount);
         System.out.println("concurrent-monitors:" + staticCount + "/" + instanceCount
             + ":throws-per-entry=" + (expected / 4));
         System.out.println("concurrent-reference-iterations:" + WORKERS * (2 * REFERENCE_STEPS + 1));
