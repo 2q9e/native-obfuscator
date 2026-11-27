@@ -14,3 +14,8 @@ The Native Obfuscator source, launchers, and tests are distributed under the
 project's MIT license. The installed CLI ships the ASM, Gson and Error Prone
 Annotations libraries in separate JARs with their [license texts](../licenses).
 Gradle, the JDK, and the native toolchains are installed separately.
+
+The root Gradle build verifies resolved Maven dependencies and POMs against
+the SHA-256 digests in [verification-metadata.xml](../gradle/verification-metadata.xml).
+When updating dependencies, review the changed digests against the published
+artifacts before committing regenerated metadata.
