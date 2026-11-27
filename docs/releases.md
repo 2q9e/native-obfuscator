@@ -13,7 +13,7 @@ extract the ZIP archive and run
 `native-obfuscator\bin\native-obfuscator.bat --version`. Both archives contain
 the same Java application and dependencies. Use JDK 21 or 25 with its JNI
 headers, and use Zig for Windows builds or cross-compilation. See the
-[native target options](../README.md#native-targets).
+[native target options](usage.md#native-targets).
 
 The release workflow packages the tested Fedora Linux x64 and ARM64 LLVM 22 and 23
 plugins. Match the compiler and LLVM versions recorded in `toolchain.txt`.

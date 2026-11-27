@@ -70,7 +70,7 @@ options=(--include 'app/Kernel#mix*' --analysis-resistance balanced --analysis-s
 "$tool" restore --output release.jar --state-dir release-state
 ```
 
-`harden` replaces the staging path only after the new JAR passes verification. `apply` verifies it again before promotion. `--confirm-overwrite` allows replacement of an existing release. `restore` uses the same state directory to undo that promotion. Run your application tests against both the original and staged JARs before deploying. [Staged release workflow](../README.md#staged-release-workflow)
+`harden` replaces the staging path only after the new JAR passes verification. `apply` verifies it again before promotion. `--confirm-overwrite` allows replacement of an existing release. `restore` uses the same state directory to undo that promotion. Run your application tests against both the original and staged JARs before deploying. [Staged release workflow](usage.md#staged-release-workflow)
 
 ## Integrity and compatibility
 
@@ -78,7 +78,7 @@ The manifest and corpus live under `META-INF/native-obfuscator/<id>/analysis/`. 
 
 At runtime, Java checks the manifest and verifies the listed resources against their recorded lengths and SHA-256 digests. JNI registration then requires the manifest digest to match the value embedded in the loaded native library. A missing or modified listed resource or a digest mismatch prevents the affected native registration. Each runtime class validates the corpus once before loading the native library, and the native library compares the Java-supplied digest during registration. The loader checks the library checksum and the registration code compares the class's metadata digest against its indexed entry in the mapped native table. Verification expects the artifact format and configuration used by the current builder. Use the matching earlier tool version for previously staged analysis-enabled JARs.
 
-Analysis-enabled JARs use Java 21 or later and the existing Windows and Linux x64 and ARM64 native targets. On Java 25, enable native access as you would for any protected JAR. `protect --emit-c` is a source inspection workflow. Runtime binding requires the packaged JAR. [Native targets](../README.md#native-targets)
+Analysis-enabled JARs use Java 21 or later and the existing Windows and Linux x64 and ARM64 native targets. On Java 25, enable native access as you would for any protected JAR. `protect --emit-c` is a source inspection workflow. Runtime binding requires the packaged JAR. [Native targets](usage.md#native-targets)
 
 ## Measurements
 

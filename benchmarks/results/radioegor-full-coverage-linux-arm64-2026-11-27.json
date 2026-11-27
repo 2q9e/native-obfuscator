@@ -1,0 +1,1375 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "host": {
+    "platform": "Linux-7.2.12-402.asahi.fc45.aarch64+16k-aarch64-with-glibc2.44",
+    "architecture": "aarch64",
+    "pythonVersion": "3.15.0",
+    "javaVersion": "openjdk version \"25.0.5\" 2026-10-20 LTS\nOpenJDK Runtime Environment Temurin-25.0.5+8 (build 25.0.5+8-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.5+8 (build 25.0.5+8-LTS, mixed mode, sharing)",
+    "nativeCompiler": "cc (GCC) 16.2.1 20261029 (Red Hat 16.2.1-3)\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "sourcesSha256": {
+    "analysis-workload.java": "62fb8ebfa797f946ad772092aa2c1b2815e4de45a16ce5a9ba4d547f523514dd",
+    "comparison-workload.c": "f7aed130c8d012bfe9d2e8deb47699d5d3139835632a698861a52e82e20fe67a",
+    "compare.py": "30633899eb65521fdd7421964cea709387936b4da80dddd4be3f3e43b2f6b2af"
+  },
+  "distributionJarSha256": "727e28000f7b2758ec4c2fd1aacf983e6a8aa8a1fb7f58ea3b996a74529cca94",
+  "settings": {
+    "seeds": [
+      637,
+      2309737967
+    ],
+    "buildRuns": 5,
+    "startupRuns": 11,
+    "steadyForks": 5,
+    "warmups": 5,
+    "trials": 9,
+    "updatesPerTrial": 524288,
+    "gnuTime": "/usr/bin/time",
+    "llvmObjdump": null
+  },
+  "errors": [],
+  "budgetViolations": [],
+  "commonLaneChecksums": {},
+  "cases": {
+    "java-original": {
+      "name": "java-original",
+      "lane": "java",
+      "fixtureBuildMs": 410.299341,
+      "artifact": {
+        "bytes": 3592,
+        "sha256": "6c76cd5cfad4f5407142a6a9a94094ca44a18101a517f0f171576e38b784f0db",
+        "nativePayload": [],
+        "nativePayloadBytes": 0,
+        "coverage": {
+          "status": "measured",
+          "requestedMethods": 7,
+          "nativeMethods": [],
+          "percent": 0.0
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "02f14e22"
+        },
+        "probe-2309737967-1": {
+          "probe": "93acf487"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "startup-637-6": {
+          "startup": "13271b2e"
+        },
+        "startup-637-7": {
+          "startup": "13271b2e"
+        },
+        "startup-637-8": {
+          "startup": "13271b2e"
+        },
+        "startup-637-9": {
+          "startup": "13271b2e"
+        },
+        "startup-637-10": {
+          "startup": "13271b2e"
+        },
+        "startup-637-11": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-4": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-5": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 37.921044,
+        "medianFirstCallMs": 0.143833,
+        "samples": [
+          {
+            "processMs": 25.230974,
+            "peakRssKiB": 40688,
+            "samplesNs": {
+              "startup": [
+                140666
+              ]
+            }
+          },
+          {
+            "processMs": 34.942015,
+            "peakRssKiB": 40176,
+            "samplesNs": {
+              "startup": [
+                174624
+              ]
+            }
+          },
+          {
+            "processMs": 44.165974,
+            "peakRssKiB": 39808,
+            "samplesNs": {
+              "startup": [
+                293623
+              ]
+            }
+          },
+          {
+            "processMs": 37.921044,
+            "peakRssKiB": 39824,
+            "samplesNs": {
+              "startup": [
+                141875
+              ]
+            }
+          },
+          {
+            "processMs": 40.065451,
+            "peakRssKiB": 39840,
+            "samplesNs": {
+              "startup": [
+                140958
+              ]
+            }
+          },
+          {
+            "processMs": 29.568455,
+            "peakRssKiB": 40272,
+            "samplesNs": {
+              "startup": [
+                140458
+              ]
+            }
+          },
+          {
+            "processMs": 25.596056,
+            "peakRssKiB": 40288,
+            "samplesNs": {
+              "startup": [
+                143833
+              ]
+            }
+          },
+          {
+            "processMs": 52.023398,
+            "peakRssKiB": 39792,
+            "samplesNs": {
+              "startup": [
+                289165
+              ]
+            }
+          },
+          {
+            "processMs": 37.010173,
+            "peakRssKiB": 40336,
+            "samplesNs": {
+              "startup": [
+                154166
+              ]
+            }
+          },
+          {
+            "processMs": 41.428111,
+            "peakRssKiB": 39344,
+            "samplesNs": {
+              "startup": [
+                141749
+              ]
+            }
+          },
+          {
+            "processMs": 50.981737,
+            "peakRssKiB": 38832,
+            "samplesNs": {
+              "startup": [
+                289916
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 0.9815654754638672,
+          "per_call": 1.3439598083496094,
+          "batched_32": 1.3488082885742188
+        },
+        "medianPeakRssKiB": 40816,
+        "forks": [
+          {
+            "processMs": 99.7234,
+            "peakRssKiB": 40800,
+            "samplesNs": {
+              "step": [
+                552122,
+                499123,
+                482873,
+                604205,
+                546081,
+                483165,
+                539122,
+                559498,
+                489998
+              ],
+              "per_call": [
+                722997,
+                727080,
+                746330,
+                741247,
+                725205,
+                726414,
+                735122,
+                704330,
+                704372
+              ],
+              "batched_32": [
+                706330,
+                709580,
+                706122,
+                721789,
+                715372,
+                712080,
+                705788,
+                705289,
+                705206
+              ]
+            }
+          },
+          {
+            "processMs": 68.030163,
+            "peakRssKiB": 40832,
+            "samplesNs": {
+              "step": [
+                482956,
+                521290,
+                507956,
+                514623,
+                524123,
+                513081,
+                520664,
+                512248,
+                520498
+              ],
+              "per_call": [
+                703955,
+                702205,
+                702038,
+                704747,
+                705289,
+                702038,
+                702080,
+                704706,
+                704664
+              ],
+              "batched_32": [
+                707289,
+                710955,
+                705622,
+                716205,
+                715955,
+                714706,
+                705747,
+                702247,
+                702246
+              ]
+            }
+          },
+          {
+            "processMs": 71.106232,
+            "peakRssKiB": 41216,
+            "samplesNs": {
+              "step": [
+                482998,
+                483831,
+                487039,
+                482956,
+                485706,
+                482914,
+                486206,
+                482915,
+                484957
+              ],
+              "per_call": [
+                703914,
+                703997,
+                702122,
+                703664,
+                717622,
+                706163,
+                704997,
+                702039,
+                704789
+              ],
+              "batched_32": [
+                707164,
+                714788,
+                703539,
+                731580,
+                718330,
+                717789,
+                702788,
+                705122,
+                704789
+              ]
+            }
+          },
+          {
+            "processMs": 66.578377,
+            "peakRssKiB": 40816,
+            "samplesNs": {
+              "step": [
+                508957,
+                491081,
+                487831,
+                482873,
+                489081,
+                482998,
+                486748,
+                482873,
+                486623
+              ],
+              "per_call": [
+                704164,
+                709289,
+                704580,
+                702205,
+                705621,
+                704622,
+                704663,
+                703747,
+                704872
+              ],
+              "batched_32": [
+                705788,
+                708330,
+                705414,
+                703372,
+                727206,
+                716455,
+                715080,
+                704455,
+                702289
+              ]
+            }
+          },
+          {
+            "processMs": 89.901859,
+            "peakRssKiB": 39392,
+            "samplesNs": {
+              "step": [
+                483706,
+                483206,
+                674122,
+                605664,
+                660705,
+                632914,
+                624831,
+                630122,
+                660581
+              ],
+              "per_call": [
+                757413,
+                744080,
+                771080,
+                785080,
+                771955,
+                754705,
+                758747,
+                760205,
+                786455
+              ],
+              "batched_32": [
+                745830,
+                750997,
+                758080,
+                768746,
+                737413,
+                739413,
+                762580,
+                702664,
+                706914
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "native-obfuscator": {
+      "name": "native-obfuscator",
+      "lane": "java",
+      "limits": {
+        "minNativeCoveragePercent": 100.0,
+        "minBuildSuccessPercent": 100.0
+      },
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 304.154469,
+            "peakRssKiB": 65760,
+            "success": true,
+            "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 280.263865,
+            "peakRssKiB": 65360,
+            "success": true,
+            "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 273.567019,
+            "peakRssKiB": 65760,
+            "success": true,
+            "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 317.875618,
+            "peakRssKiB": 65296,
+            "success": true,
+            "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 268.298709,
+            "peakRssKiB": 66784,
+            "success": true,
+            "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 280.263865,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 12698,
+        "sha256": "798bcb692ce8d1f5d4bedef0dac5ec667eefe4aa021827dfa3af0a0755b42bdf",
+        "nativePayload": [
+          {
+            "entry": "META-INF/native-obfuscator/Runtimeee3b522f8ce7458623cacd90388a400a/aarch64-linux/libprotected.so",
+            "bytes": 67952,
+            "compressedBytes": 4708
+          }
+        ],
+        "nativePayloadBytes": 67952,
+        "coverage": {
+          "status": "measured",
+          "requestedMethods": 7,
+          "nativeMethods": [
+            "step(I)I",
+            "mix(II)I",
+            "batch(III)I",
+            "conditional(I)I",
+            "accumulate(I)I",
+            "arrayUpdate([III)I",
+            "retainedWithMonitor([II)I"
+          ],
+          "percent": 100.0
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "02f14e22"
+        },
+        "probe-2309737967-1": {
+          "probe": "93acf487"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "startup-637-6": {
+          "startup": "13271b2e"
+        },
+        "startup-637-7": {
+          "startup": "13271b2e"
+        },
+        "startup-637-8": {
+          "startup": "13271b2e"
+        },
+        "startup-637-9": {
+          "startup": "13271b2e"
+        },
+        "startup-637-10": {
+          "startup": "13271b2e"
+        },
+        "startup-637-11": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-4": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-5": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 64.711969,
+        "medianFirstCallMs": 29.262914,
+        "samples": [
+          {
+            "processMs": 48.050666,
+            "peakRssKiB": 46336,
+            "samplesNs": {
+              "startup": [
+                26013429
+              ]
+            }
+          },
+          {
+            "processMs": 64.711969,
+            "peakRssKiB": 45840,
+            "samplesNs": {
+              "startup": [
+                30530784
+              ]
+            }
+          },
+          {
+            "processMs": 86.857706,
+            "peakRssKiB": 48896,
+            "samplesNs": {
+              "startup": [
+                45412594
+              ]
+            }
+          },
+          {
+            "processMs": 72.05652,
+            "peakRssKiB": 44304,
+            "samplesNs": {
+              "startup": [
+                34580099
+              ]
+            }
+          },
+          {
+            "processMs": 59.006244,
+            "peakRssKiB": 45840,
+            "samplesNs": {
+              "startup": [
+                26539051
+              ]
+            }
+          },
+          {
+            "processMs": 63.157767,
+            "peakRssKiB": 50576,
+            "samplesNs": {
+              "startup": [
+                26607885
+              ]
+            }
+          },
+          {
+            "processMs": 60.079739,
+            "peakRssKiB": 49952,
+            "samplesNs": {
+              "startup": [
+                25781305
+              ]
+            }
+          },
+          {
+            "processMs": 84.422175,
+            "peakRssKiB": 49904,
+            "samplesNs": {
+              "startup": [
+                41869026
+              ]
+            }
+          },
+          {
+            "processMs": 67.412249,
+            "peakRssKiB": 49504,
+            "samplesNs": {
+              "startup": [
+                29262914
+              ]
+            }
+          },
+          {
+            "processMs": 50.691821,
+            "peakRssKiB": 45840,
+            "samplesNs": {
+              "startup": [
+                26192720
+              ]
+            }
+          },
+          {
+            "processMs": 76.215461,
+            "peakRssKiB": 44960,
+            "samplesNs": {
+              "startup": [
+                37331213
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 3.021942138671875,
+          "per_call": 3.3133678436279297,
+          "batched_32": 1.386159896850586
+        },
+        "medianPeakRssKiB": 45312,
+        "forks": [
+          {
+            "processMs": 117.076074,
+            "peakRssKiB": 45296,
+            "samplesNs": {
+              "step": [
+                2301740,
+                1584035,
+                1585159,
+                1585284,
+                1582035,
+                1584368,
+                1584035,
+                1581910,
+                1584659
+              ],
+              "per_call": [
+                1735909,
+                1738326,
+                1739076,
+                1736576,
+                1737076,
+                1735117,
+                1738826,
+                1737201,
+                1737201
+              ],
+              "batched_32": [
+                725830,
+                725164,
+                720164,
+                748205,
+                736247,
+                736205,
+                739122,
+                726788,
+                726955
+              ]
+            }
+          },
+          {
+            "processMs": 142.473797,
+            "peakRssKiB": 45312,
+            "samplesNs": {
+              "step": [
+                1687618,
+                1586243,
+                1583451,
+                1586159,
+                1586035,
+                1581993,
+                1583327,
+                1583118,
+                1581743
+              ],
+              "per_call": [
+                1735701,
+                1737618,
+                1734867,
+                1734367,
+                1736701,
+                1737117,
+                1738992,
+                1735159,
+                1737284
+              ],
+              "batched_32": [
+                721121,
+                724289,
+                722664,
+                742122,
+                735455,
+                734622,
+                729663,
+                726622,
+                724455
+              ]
+            }
+          },
+          {
+            "processMs": 124.798666,
+            "peakRssKiB": 44992,
+            "samplesNs": {
+              "step": [
+                1584243,
+                1585660,
+                1635451,
+                1585952,
+                1581993,
+                1584701,
+                1582285,
+                1583993,
+                1587368
+              ],
+              "per_call": [
+                1739909,
+                1742201,
+                1737492,
+                1737993,
+                1744784,
+                1766867,
+                1739784,
+                1735409,
+                1737160
+              ],
+              "batched_32": [
+                720788,
+                726705,
+                748539,
+                729456,
+                724621,
+                727330,
+                726747,
+                729163,
+                724705
+              ]
+            }
+          },
+          {
+            "processMs": 112.863551,
+            "peakRssKiB": 45344,
+            "samplesNs": {
+              "step": [
+                1581451,
+                1584659,
+                1583451,
+                1581660,
+                1585077,
+                1582785,
+                1583118,
+                1584910,
+                1582327
+              ],
+              "per_call": [
+                1735868,
+                1736701,
+                1735243,
+                1738034,
+                1737242,
+                1737367,
+                1735200,
+                1735034,
+                1737826
+              ],
+              "batched_32": [
+                721038,
+                737621,
+                733955,
+                726413,
+                727788,
+                727163,
+                727663,
+                724497,
+                727205
+              ]
+            }
+          },
+          {
+            "processMs": 114.234462,
+            "peakRssKiB": 51024,
+            "samplesNs": {
+              "step": [
+                1585452,
+                1587869,
+                1584910,
+                1585993,
+                1586118,
+                1584494,
+                1590660,
+                1590535,
+                1585327
+              ],
+              "per_call": [
+                1737034,
+                1737450,
+                1738826,
+                1735826,
+                1737409,
+                1737159,
+                1738118,
+                1737076,
+                1736242
+              ],
+              "batched_32": [
+                719372,
+                725539,
+                724164,
+                748372,
+                733039,
+                726663,
+                727497,
+                726955,
+                726747
+              ]
+            }
+          }
+        ]
+      },
+      "relativeTo": "java-original",
+      "comparison": {
+        "artifactGrowthPercent": 253.5077951002227,
+        "startupIncreaseMs": 26.790924999999994,
+        "runtimeOverheadPercent": {
+          "step": 207.8696443804494,
+          "per_call": 146.53771809565978,
+          "batched_32": 2.7692303341233515
+        },
+        "runtimeIncreaseNsPerUpdate": {
+          "step": 2.040376663208008,
+          "per_call": 1.9694080352783203,
+          "batched_32": 0.03735160827636719
+        },
+        "peakRssOverheadPercent": 11.01528812230499
+      },
+      "toolVersionSummary": []
+    },
+    "radioegor-3_5_4r": {
+      "name": "radioegor-3_5_4r",
+      "lane": "java",
+      "relativeTo": "native-obfuscator",
+      "limits": {
+        "minNativeCoveragePercent": 100,
+        "minBuildSuccessPercent": 100
+      },
+      "buildMetrics": {
+        "attempts": [
+          {
+            "returnCode": 0,
+            "elapsedMs": 1457.349496,
+            "peakRssKiB": 123200,
+            "success": true,
+            "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 1387.893299,
+            "peakRssKiB": 121696,
+            "success": true,
+            "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 1346.448396,
+            "peakRssKiB": 122128,
+            "success": true,
+            "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 1338.868761,
+            "peakRssKiB": 121712,
+            "success": true,
+            "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310"
+          },
+          {
+            "returnCode": 0,
+            "elapsedMs": 1348.528845,
+            "peakRssKiB": 125856,
+            "success": true,
+            "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310"
+          }
+        ],
+        "successPercent": 100.0,
+        "medianMs": 1348.528845,
+        "reproducibleBytes": true
+      },
+      "artifact": {
+        "bytes": 20455,
+        "sha256": "1393f3c0872650a6f338368eb650886af9496b6efea06d2204a1828b43560310",
+        "nativePayload": [
+          {
+            "entry": "comparison-native/arm64-linux.so",
+            "bytes": 68848,
+            "compressedBytes": 14913
+          }
+        ],
+        "nativePayloadBytes": 68848,
+        "coverage": {
+          "status": "measured",
+          "requestedMethods": 7,
+          "nativeMethods": [
+            "step(I)I",
+            "mix(II)I",
+            "batch(III)I",
+            "conditional(I)I",
+            "accumulate(I)I",
+            "arrayUpdate([III)I",
+            "retainedWithMonitor([II)I"
+          ],
+          "percent": 100.0
+        }
+      },
+      "semanticMatch": true,
+      "checksums": {
+        "probe-637-1": {
+          "probe": "02f14e22"
+        },
+        "probe-2309737967-1": {
+          "probe": "93acf487"
+        },
+        "startup-637-1": {
+          "startup": "13271b2e"
+        },
+        "startup-637-2": {
+          "startup": "13271b2e"
+        },
+        "startup-637-3": {
+          "startup": "13271b2e"
+        },
+        "startup-637-4": {
+          "startup": "13271b2e"
+        },
+        "startup-637-5": {
+          "startup": "13271b2e"
+        },
+        "startup-637-6": {
+          "startup": "13271b2e"
+        },
+        "startup-637-7": {
+          "startup": "13271b2e"
+        },
+        "startup-637-8": {
+          "startup": "13271b2e"
+        },
+        "startup-637-9": {
+          "startup": "13271b2e"
+        },
+        "startup-637-10": {
+          "startup": "13271b2e"
+        },
+        "startup-637-11": {
+          "startup": "13271b2e"
+        },
+        "steady-637-1": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-2": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-3": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-4": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        },
+        "steady-637-5": {
+          "step": "156c027d",
+          "per_call": "c15c027d",
+          "batched_32": "c15c027d"
+        }
+      },
+      "startup": {
+        "medianProcessMs": 58.519871,
+        "medianFirstCallMs": 21.379282,
+        "samples": [
+          {
+            "processMs": 61.018318,
+            "peakRssKiB": 43040,
+            "samplesNs": {
+              "startup": [
+                23239566
+              ]
+            }
+          },
+          {
+            "processMs": 43.22227,
+            "peakRssKiB": 44448,
+            "samplesNs": {
+              "startup": [
+                15867681
+              ]
+            }
+          },
+          {
+            "processMs": 52.845395,
+            "peakRssKiB": 44848,
+            "samplesNs": {
+              "startup": [
+                16781511
+              ]
+            }
+          },
+          {
+            "processMs": 61.831398,
+            "peakRssKiB": 43440,
+            "samplesNs": {
+              "startup": [
+                25968095
+              ]
+            }
+          },
+          {
+            "processMs": 58.519871,
+            "peakRssKiB": 43968,
+            "samplesNs": {
+              "startup": [
+                21379282
+              ]
+            }
+          },
+          {
+            "processMs": 57.566249,
+            "peakRssKiB": 44512,
+            "samplesNs": {
+              "startup": [
+                16585219
+              ]
+            }
+          },
+          {
+            "processMs": 53.118561,
+            "peakRssKiB": 44000,
+            "samplesNs": {
+              "startup": [
+                17003593
+              ]
+            }
+          },
+          {
+            "processMs": 64.638052,
+            "peakRssKiB": 44432,
+            "samplesNs": {
+              "startup": [
+                26811633
+              ]
+            }
+          },
+          {
+            "processMs": 61.956647,
+            "peakRssKiB": 44400,
+            "samplesNs": {
+              "startup": [
+                21458199
+              ]
+            }
+          },
+          {
+            "processMs": 57.21321,
+            "peakRssKiB": 43920,
+            "samplesNs": {
+              "startup": [
+                20730160
+              ]
+            }
+          },
+          {
+            "processMs": 62.874851,
+            "peakRssKiB": 43456,
+            "samplesNs": {
+              "startup": [
+                22028279
+              ]
+            }
+          }
+        ]
+      },
+      "steady": {
+        "medianNsPerUpdate": {
+          "step": 82.44923782348633,
+          "per_call": 82.93926429748535,
+          "batched_32": 36.04277038574219
+        },
+        "medianPeakRssKiB": 44448,
+        "forks": [
+          {
+            "processMs": 1521.713258,
+            "peakRssKiB": 43504,
+            "samplesNs": {
+              "step": [
+                44268183,
+                43183854,
+                43204062,
+                43191854,
+                43189229,
+                43185729,
+                43193562,
+                43196479,
+                43189229
+              ],
+              "per_call": [
+                43450145,
+                43437228,
+                43437936,
+                43444228,
+                43442436,
+                43437228,
+                43438187,
+                43447645,
+                43432145
+              ],
+              "batched_32": [
+                13520107,
+                14874311,
+                18849876,
+                18850668,
+                18844752,
+                18859501,
+                18848543,
+                18844252,
+                18849251
+              ]
+            }
+          },
+          {
+            "processMs": 1522.581254,
+            "peakRssKiB": 44816,
+            "samplesNs": {
+              "step": [
+                43242687,
+                43238646,
+                43221937,
+                43225187,
+                43236812,
+                43226395,
+                43217896,
+                43235687,
+                43216687
+              ],
+              "per_call": [
+                43491978,
+                43475936,
+                43471519,
+                43493311,
+                43477977,
+                43485394,
+                43486269,
+                43473603,
+                43484061
+              ],
+              "batched_32": [
+                13591732,
+                14908810,
+                18915793,
+                18909293,
+                18907210,
+                18902751,
+                18918293,
+                18913627,
+                18905168
+              ]
+            }
+          },
+          {
+            "processMs": 1506.922614,
+            "peakRssKiB": 43488,
+            "samplesNs": {
+              "step": [
+                43222395,
+                43253853,
+                43227146,
+                43236020,
+                43223187,
+                43231187,
+                43226229,
+                43231395,
+                43222604
+              ],
+              "per_call": [
+                43452686,
+                43456895,
+                43466644,
+                43470561,
+                43471269,
+                43508228,
+                43558394,
+                43489061,
+                43482228
+              ],
+              "batched_32": [
+                13587274,
+                14908893,
+                18874084,
+                18855251,
+                18863793,
+                18924043,
+                18889584,
+                18865085,
+                18858418
+              ]
+            }
+          },
+          {
+            "processMs": 1509.847226,
+            "peakRssKiB": 44448,
+            "samplesNs": {
+              "step": [
+                43264937,
+                43280895,
+                43265312,
+                43281187,
+                43272312,
+                43273979,
+                43278396,
+                43402436,
+                43357311
+              ],
+              "per_call": [
+                43643060,
+                43565894,
+                43831934,
+                43549769,
+                43535436,
+                43574768,
+                43529435,
+                43524603,
+                43518102
+              ],
+              "batched_32": [
+                13636233,
+                14994852,
+                18894626,
+                18903584,
+                18906626,
+                18896792,
+                18898542,
+                18890877,
+                18907793
+              ]
+            }
+          },
+          {
+            "processMs": 1521.202344,
+            "peakRssKiB": 45088,
+            "samplesNs": {
+              "step": [
+                45027887,
+                43284145,
+                43292228,
+                43290687,
+                43279145,
+                43309687,
+                43282562,
+                43299020,
+                43277770
+              ],
+              "per_call": [
+                43567977,
+                43560019,
+                43555894,
+                43528269,
+                43539561,
+                43530269,
+                43530769,
+                43539394,
+                43533519
+              ],
+              "batched_32": [
+                13626774,
+                14954768,
+                18911001,
+                18907626,
+                18919209,
+                18908459,
+                18904085,
+                18900542,
+                18921584
+              ]
+            }
+          }
+        ]
+      },
+      "comparison": {
+        "artifactGrowthPercent": 61.08836037171208,
+        "startupIncreaseMs": -6.192097999999994,
+        "runtimeOverheadPercent": {
+          "step": 2628.3526301970246,
+          "per_call": 2403.1710396112276,
+          "batched_32": 2500.1885112700843
+        },
+        "runtimeIncreaseNsPerUpdate": {
+          "step": 79.42729568481445,
+          "per_call": 79.62589645385742,
+          "batched_32": 34.6566104888916
+        },
+        "peakRssOverheadPercent": -1.906779661016944
+      },
+      "toolVersionSummary": [
+        "Radioegor146 source revision b3b3a40ac27c78e343631b078fa62f932edd09ff",
+        "native-obfuscator 3.5.4r",
+        "cmake version 4.3.0",
+        "c++ (GCC) 16.2.1 20261029 (Red Hat 16.2.1-3)"
+      ]
+    }
+  }
+}
