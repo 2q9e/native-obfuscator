@@ -33,6 +33,12 @@ tasks.withType(AbstractArchiveTask).configureEach {
     reproducibleFileOrder = true
 }
 
+tasks.named('jar') {
+    manifest {
+        attributes('Implementation-Version': providers.gradleProperty('releaseVersion').orElse('0.0.0-dev').get())
+    }
+}
+
 tasks.named('startScripts') {
     def unixLauncher = layout.projectDirectory.file('src/launchers/native-obfuscator').asFile
     def windowsLauncher = layout.projectDirectory.file('src/launchers/native-obfuscator.bat').asFile

@@ -34,9 +34,15 @@ public final class Main {
     }
 
     private static int run(String[] arguments) {
+        if (arguments.length == 1 && arguments[0].equals("--version")) {
+            String version = Main.class.getPackage().getImplementationVersion();
+            System.out.println("native-obfuscator " + (version == null ? "0.0.0-dev" : version));
+            return 0;
+        }
         if (arguments.length == 0 || (arguments.length == 1 && arguments[0].equals("--help"))) {
             System.out.print("""
                 Usage:
+                  native-obfuscator --version
                   native-obfuscator analyze --input IN.jar --include 'pkg/Class#method*'
                   native-obfuscator protect --input IN.jar --output OUT.jar --include 'pkg/Class#method*'
                   native-obfuscator harden --input IN.jar --output STAGED.jar --include 'pkg/Class#method*'
