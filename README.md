@@ -96,17 +96,20 @@ The tool rewrites JAR entries, bytecode references, descriptors, generic signatu
 
 ## Strip build metadata
 
-Use `strip-metadata` on an unsigned loader or runtime before signing or adding a release integrity seal.
+`protect` and `harden` strip build metadata when packaging a JAR. Use `strip-metadata`
+to apply the same cleanup to an unsigned loader or runtime as a standalone step.
 
 ```sh
 native-obfuscator strip-metadata --input build.jar --output clean.jar
 ```
 
-The command strips source filenames, source maps, and line tables from Java classes and removes
+The cleanup strips source filenames, source maps, and line tables from class files and removes
 the Gradle compiler cache at the archive root. It preserves method parameter names for reflection
 and local variable tables on declared Mixin classes for name-based injection. Classes with opaque
 attributes keep their original constant pool and instruction offsets, so unused strings can remain
 in those classes. Nested JARs and ordinary resources retain their original bytes and paths.
+Class entry names and references follow JVM binary names. Use a class map to rename supported
+internal classes and their paths.
 
 Add `--class-map path/to/classes.map` when you have verified aliases for internal classes and packages.
 The same remapping checks apply as in `protect`. Apply the map before native translation if it changes
@@ -130,7 +133,7 @@ Packaged Linux libraries omit the local symbol table. Windows builds suppress PD
 
 ## LLVM obfuscation
 
-Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `clang` and `opt`. The `compatibility` profile builds JNI code with standard optimization. `balanced` adds arithmetic substitutions and `aggressive` adds equivalent conditional paths. `maximum` also flattens eligible functions into a shared dispatcher with seeded state labels. This adds dispatch overhead to affected branches, so measure runtime cost on your selected methods.
+Build the [LLVM 23 pass plugin](llvm/README.md) with the same LLVM version as `clang` and `opt`. The `compatibility` profile builds JNI code with standard optimization. `balanced` adds arithmetic substitutions. `aggressive` adds mixed Boolean-arithmetic substitutions and equivalent conditional paths. `maximum` increases the mixing budget and also flattens eligible functions into a shared dispatcher with seeded state labels. Each LLVM build compares the final executable sections with a matching baseline and warns when they are identical.
 
 ```sh
 "$tool" protect --input input.jar --output protected.jar \
