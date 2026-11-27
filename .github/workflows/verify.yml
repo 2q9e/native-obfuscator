@@ -2,6 +2,7 @@ name: Verify native translation
 
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -12,7 +13,7 @@ permissions:
 jobs:
   llvm:
     needs: cross-build
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     container: quay.io/fedora/fedora:${{ matrix.fedora }}
     timeout-minutes: 20
     strategy:
@@ -21,8 +22,20 @@ jobs:
         include:
           - fedora: '44'
             llvm: '22'
+            runner: ubuntu-24.04
+            arch: x86_64
           - fedora: '45'
             llvm: '23'
+            runner: ubuntu-24.04
+            arch: x86_64
+          - fedora: '44'
+            llvm: '22'
+            runner: ubuntu-24.04-arm
+            arch: aarch64
+          - fedora: '45'
+            llvm: '23'
+            runner: ubuntu-24.04-arm
+            arch: aarch64
     steps:
       - name: Install the matching LLVM and C++ toolchain
         env:
@@ -41,11 +54,18 @@ jobs:
         env:
           EXPECTED_LLVM: ${{ matrix.llvm }}
         run: |
+          mkdir -p build/llvm-results
           version=$(llvm-config --version)
           test "${version%%.*}" = "$EXPECTED_LLVM"
-          cmake -S llvm -B build/llvm-ci -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config --cmakedir)"
-          cmake --build build/llvm-ci --parallel 2
-          ctest --test-dir build/llvm-ci --output-on-failure --no-tests=error
+          printf 'LLVM %s\n' "$version" > build/llvm-results/toolchain.txt
+          clang --version >> build/llvm-results/toolchain.txt
+          cmake -S llvm -B build/llvm-ci -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$(llvm-config --cmakedir)" \
+            2>&1 | tee build/llvm-results/configure.log
+          cmake --build build/llvm-ci --parallel 2 2>&1 | tee build/llvm-results/build.log
+          test "$(ctest --test-dir build/llvm-ci --show-only=json-v1 |
+            python3 -c 'import json,sys; print(len(json.load(sys.stdin)["tests"]))')" -ge 7
+          ctest --test-dir build/llvm-ci --output-on-failure --no-tests=error \
+            --output-junit "$PWD/build/llvm-results/ctest.xml" 2>&1 | tee build/llvm-results/ctest.log
       - name: Verify scoped LLVM builds through the CLI
         shell: bash
         run: |
@@ -54,51 +74,65 @@ jobs:
           tar -xzf native-obfuscator-cli.tar.gz -C build/install
           python3 src/test/native-build/verify.py build/install/native-obfuscator/bin/native-obfuscator \
             --clang "$(command -v clang)" --llvm-opt "$(command -v opt)" \
-            --llvm-plugin build/llvm-ci/NativeEncode.so
+            --llvm-plugin build/llvm-ci/NativeEncode.so 2>&1 | tee build/llvm-results/scoped-cli.log
       - name: Package the tested LLVM plugin
         shell: bash
         env:
           FEDORA_VERSION: ${{ matrix.fedora }}
+          PLUGIN_ARCH: ${{ matrix.arch }}
         run: |
+          test "$(uname -m)" = "$PLUGIN_ARCH"
           mkdir -p build/plugin-package build/plugin-assets
           cp build/llvm-ci/NativeEncode.so llvm/README.md LICENSE build/plugin-package/
           llvm_version=$(llvm-config --version)
           rpm -q llvm llvm-libs clang > build/plugin-package/toolchain.txt
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C build/plugin-package -cf - . |
-            gzip -n > "build/plugin-assets/native-encode-linux-x86_64-llvm-$llvm_version-fedora$FEDORA_VERSION.tar.gz"
+            gzip -n > "build/plugin-assets/native-encode-linux-$PLUGIN_ARCH-llvm-$llvm_version-fedora$FEDORA_VERSION.tar.gz"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: llvm-plugin-linux-x86_64-${{ matrix.llvm }}
+          name: llvm-plugin-linux-${{ matrix.arch }}-${{ matrix.llvm }}
           path: build/plugin-assets/*.tar.gz
           if-no-files-found: error
           retention-days: 3
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: matrix.llvm == '23'
+        if: matrix.arch == 'x86_64'
         with:
           name: zig-linux-x86_64
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: matrix.llvm == '23'
+        if: matrix.arch == 'x86_64'
         with:
           name: cross-built-fixture
           path: fixture
       - name: Build the LLVM differential JAR for all four targets
-        if: matrix.llvm == '23'
+        if: matrix.arch == 'x86_64'
         shell: bash
+        env:
+          LLVM_MAJOR: ${{ matrix.llvm }}
         run: |
           export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
           tar -xJf zig-x86_64-linux-0.15.2.tar.xz
           build/install/native-obfuscator/bin/native-obfuscator protect \
-            --input fixture/original.jar --output fixture/llvm-maximum.jar --include 'Arithmetic#calc*' \
+            --input fixture/original.jar --output "fixture/llvm-$LLVM_MAJOR-maximum.jar" --include 'Arithmetic#calc*' \
             --unsupported retain --target all --zig "$PWD/zig-x86_64-linux-0.15.2/zig" \
             --clang "$(command -v clang)" --llvm-opt "$(command -v opt)" \
-            --llvm-plugin build/llvm-ci/NativeEncode.so --profile maximum --seed 42
+            --llvm-plugin build/llvm-ci/NativeEncode.so --profile maximum --seed 42 \
+            2>&1 | tee build/llvm-results/cross-build.log
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: matrix.llvm == '23'
+        if: matrix.arch == 'x86_64'
         with:
-          name: llvm-differential-fixture
-          path: fixture/llvm-maximum.jar
+          name: llvm-differential-fixture-${{ matrix.llvm }}
+          path: fixture/llvm-${{ matrix.llvm }}-maximum.jar
           if-no-files-found: error
           retention-days: 3
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: llvm-results-${{ matrix.arch }}-${{ matrix.llvm }}
+          path: |
+            build/llvm-results
+            build/llvm-ci/Testing/Temporary/LastTest*.log
+          if-no-files-found: error
+          retention-days: 14
 
   differential:
     needs: cross-build
@@ -140,6 +174,31 @@ jobs:
       - name: Check benchmark equivalence and budget enforcement
         if: matrix.java == '25'
         run: python3 -B benchmarks/test-comparison.py
+      - name: Check Java-to-native performance budgets
+        if: matrix.java == '25'
+        shell: bash
+        run: |
+          python3 -B benchmarks/compare.py --output build/performance-results \
+            --build-runs 3 --startup-runs 5 --forks 3 --warmups 6 --trials 7 --iterations 2097152 \
+            --native-limit minNativeCoveragePercent=85 --native-limit maxBuildMs=6000 \
+            --native-limit maxStartupIncreaseMs=750 --native-limit maxRuntimeOverheadPercent=800 \
+            --native-limit maxArtifactGrowthPercent=400
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && matrix.java == '25'
+        with:
+          name: performance-results
+          path: |
+            build/performance-results/**/*.json
+            build/performance-results/**/*.stdout
+            build/performance-results/**/*.stderr
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify tagged distributions and their SPDX inventory
+        if: matrix.java == '25'
+        shell: bash
+        run: |
+          gradle --no-daemon --console=plain -PreleaseVersion=1.2.3-rc.1 distZip distTar
+          python3 src/test/release/verify.py
       - name: Verify deterministic utility generation and archive heuristics
         shell: bash
         run: |
@@ -319,15 +378,23 @@ jobs:
           path: fixture
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: llvm-differential-fixture
+          pattern: llvm-differential-fixture-*
+          merge-multiple: true
           path: fixture
       - name: Run protected code on the target
         shell: bash
         run: |
           java -Xverify:all -jar fixture/original.jar > original.txt
-          for artifact in protected balanced maximum llvm-maximum; do
-            java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED -jar "fixture/$artifact.jar" > "$artifact.txt"
+          for artifact in protected balanced maximum llvm-22-maximum llvm-23-maximum; do
+            java -Xverify:all -Xcheck:jni --enable-native-access=ALL-UNNAMED \
+              -jar "fixture/$artifact.jar" > "$artifact.txt" 2> "$artifact.log" || {
+                cat "$artifact.log" >&2
+                exit 1
+              }
             cmp original.txt "$artifact.txt"
+            if grep -F 'WARNING in native method' "$artifact.log"; then
+              exit 1
+            fi
           done
       - name: Run JNI coverage on the target
         shell: bash
@@ -377,3 +444,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\native-obfuscator\bin\native-obfuscator.bat --help
           exit $LASTEXITCODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: runtime-results-${{ matrix.runner }}
+          path: |
+            *.txt
+            *.log
+            fixture/native-coverage/*.txt
+            fixture/native-coverage/*.log
+            fixture/kotlin/*.txt
+            fixture/kotlin/*.log
+          if-no-files-found: error
+          retention-days: 14
+
+  required-checks:
+    name: Require all verification jobs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    if: always()
+    needs: [cross-build, differential, llvm, runtime]
+    steps:
+      - name: Fail when any verification job failed, was cancelled, or was skipped
+        env:
+          JOBS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          jobs = json.loads(os.environ["JOBS"])
+          failures = [f"{name}: {job['result']}" for name, job in jobs.items() if job["result"] != "success"]
+          if failures:
+              sys.exit("Verification did not pass\n" + "\n".join(failures))
+          PY

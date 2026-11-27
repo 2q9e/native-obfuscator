@@ -154,4 +154,4 @@ GitHub Actions runs Java 21 and 25 differential tests, Kotlin tests, and JNI run
 
 The project is [MIT-licensed](LICENSE). See the [dependency inventory](docs/dependencies.md) for the licenses packaged with the CLI.
 
-The [release workflow](.github/workflows/release.yml) can be dispatched against an existing version tag. It runs verification, builds versioned CLI archives, and prepares a draft with SHA-256 checksums and signed build provenance. See [release verification](docs/releases.md) for the commands.
+The [release workflow](.github/workflows/release.yml) runs when a Semantic Versioning tag is pushed. It verifies the supported targets and publishes versioned CLI archives with SHA-256 checksums, an SPDX dependency inventory, and signed build provenance. A manual dispatch can prepare a draft. See [installation and release verification](docs/releases.md).
